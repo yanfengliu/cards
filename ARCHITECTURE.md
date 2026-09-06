@@ -197,32 +197,35 @@ Two traps worth naming in advance, both from fleet canon and both cheap to fall 
 How agents are organised to build this. The module graph above is the *input* to this one — `engine`'s independence is what makes any parallelism possible at all — but the agent graph has its own constraints, and they are not the same constraints.
 
 ```
-                      ┌─────────────────────────────┐
-                      │  0. CONTRACT      (serial)  │
-                      │  types · fixtures · stubs   │
-                      └──────────────┬──────────────┘
-                                     │  fan-out gate: merged to main
-               ┌─────────────────────┼─────────────────────┐
-               ▼                     ▼                     ▼
-       ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
-       │ 1a. ENGINE    │     │ 1b. SIM       │     │ 1c. RENDER    │
-       │ resolver·rng  │     │ bots·metrics  │     │ board·anim·ui │
-       └───────┬───────┘     └───────┬───────┘     └───────┬───────┘
-               │                     │                     │
-               ▼                     │                     │
-       ┌───────────────┐             │                     │
-       │ 1a′. REVIEW   │ required    │                     │
-       │ independent   │ (high-risk) │                     │
-       └───────┬───────┘             │                     │
-               └──────────┬──────────┴─────────────────────┘
-                          ▼
-                ┌──────────────────────┐
-                │  2. INTEGRATION      │  real work, not a rubber stamp
-                └──────────┬───────────┘
-                           ▼
-             ┌──────────────────────────────────┐
-             │  3. CONTENT ⇄ BALANCE   (cycle)  │  one owner, not two
-             └──────────────────────────────────┘
+                  ┌─────────────────────────────┐
+                  │  0. CONTRACT      (serial)  │   no worktree — nothing concurrent
+                  │  types · fixtures · stubs   │
+                  └──────────────┬──────────────┘
+                                 ▼
+                  ┌─────────────────────────────┐
+                  │  0′. REVIEW    MANDATORY    │   zero possible gates, 3 lanes downstream
+                  └──────────────┬──────────────┘
+                                 │  fan-out gate: merged to main
+           ┌─────────────────────┼─────────────────────┐
+           ▼                     ▼                     ▼
+   ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+   │ 1a. ENGINE    │     │ 1b. SIM       │     │ 1c. RENDER    │
+   │  worktree A   │     │  worktree B   │     │  worktree C   │
+   └───────┬───────┘     └───────┬───────┘     └───────┬───────┘
+           ▼                     ▼                     ▼
+   ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+   │ 1a′. REVIEW   │     │  gates only   │     │ visual insp.  │
+   │  MANDATORY    │     │  risk-scaled  │     │   = review    │
+   └───────┬───────┘     └───────┬───────┘     └───────┬───────┘
+           └──────────┬──────────┴─────────────────────┘
+                      ▼
+            ┌──────────────────────┐
+            │  2. INTEGRATION      │  mandatory; the combined result
+            └──────────┬───────────┘
+                       ▼
+         ┌──────────────────────────────────┐
+         │  3. CONTENT ⇄ BALANCE   (cycle)  │  simulate, do not read
+         └──────────────────────────────────┘
 ```
 
 ### Nine properties this graph has on purpose
@@ -243,7 +246,35 @@ How agents are organised to build this. The module graph above is the *input* to
 
 **8. The effect vocabulary is frozen, and needing a new verb escalates.** This is what makes content fan-out safe. Given freedom, four card authors invent four different verbs for "deal damage to a neighbour", and the resolver grows four code paths. `AGENTS.md` already says a card needing a new `if` means the vocabulary is missing a verb; the orchestration consequence is that adding a verb is a coordinator decision, never a worker's.
 
-**9. Review is a node with an edge, not a phase at the end.** The resolver, the RNG and the replay format are the repo's declared high-risk surfaces, so 1a cannot merge without independent review (`../fleet/docs/skills/multi-cli-review.md`). Review sits *between* the worker and integration, because a review that happens after merge is a report, not a gate.
+**9. Review is a node with an edge, allocated by blast radius times gate weakness.** Review sits *between* worker and integration, because a review after merge is a report rather than a gate. But it is not uniform, and uniform review would not be more rigorous — it would be *unweighted*, spending the same attention on flavour text as on resolver ordering, and a review that always passes proves as little as a gate that always passes.
+
+| Node | Blast radius | Gate strength | Verdict |
+|---|---|---|---|
+| 0. Contract | all three lanes | **none possible — it is types** | **mandatory, independent** |
+| 1a. Engine | everything | strong, but subtle ordering bugs pass tests | mandatory, independent |
+| 1b. Sim | metrics only | medium; control runs self-check | risk-scaled |
+| 1c. Render | visual only | weak automated, strong human | looking at it *is* the review |
+| 2. Integration | everything | the combined gates | mandatory — that is its definition |
+| 3. Content | pool-wide | balance simulation is strong | simulate, do not read |
+
+**Node 0 carries the highest-value review in the graph**, ahead of the engine's. It maxes both axes: a type contract cannot be tested at all, and getting it wrong invalidates three downstream lanes before anyone notices. The inverse is content — human review of "is this card balanced" is unreliable, and a mis-costed card passes every test that exists, so simulation is the right instrument and reading is not.
+
+Keep the two claims distinct in reports, per fleet canon: **verified** (gates green) and **reviewed** (someone independent read it) are different, and a node can honestly be one without the other.
+
+### Worktrees
+
+File disjointness and worktrees solve different problems, and one does not substitute for the other. **Disjoint files buy clean merges. Worktrees buy safe concurrent operation.**
+
+Three agents sharing one working tree collide on things unrelated to which source files they touch: the index, `HEAD`, `node_modules`, build output, dev-server ports, and test caches. The index is the dangerous one — an agent running `git add -A` sweeps in another's half-finished edits and ships a commit whose message lies about its contents.
+
+So the rule is about concurrency, not about files:
+
+- **Node 0 is serial and needs no worktree.** Nothing else is running.
+- **Each phase-1 lane gets its own worktree**, and its own `npm install`, since `node_modules` is not shared between them.
+- **Content fan-out needs one per concurrent author**, for the same reason.
+- **Sequential agents need none** — commit between them and the next one's base revision is simply main.
+
+Worktrees do share the repository's common Git directory. That is a feature rather than a hazard: it is exactly how fleet's work-document allocator takes its lock, so two worktrees cannot reserve the same unit ID.
 
 ### What the coordinator actually does here
 
