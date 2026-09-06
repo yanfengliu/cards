@@ -41,9 +41,9 @@ The architecture is one rule: **`engine` depends on nothing, and everything depe
 ```
 src/
   engine/     state.ts  actions.ts  resolver.ts  effects.ts  rng.ts  replay.ts
-  content/    cards.json  sigils.json  enemies.json  encounters.json
+  content/    cards.json  sigils.json  enemies.json  encounters.json   (blazons live on the cards)
   sim/        agents/  run.ts  metrics.ts
-  render/     board.ts  card.ts  anim.ts
+  render/     board.ts  card.ts  anim.ts  heraldry.ts  charges/
   ui/         input.ts
 ```
 
@@ -117,6 +117,54 @@ So motion has a functional specification, not just an aesthetic one:
 - **Readability outranks flourish.** A player scans the board every turn. Power and Health must be legible at a glance at the smallest size the board compresses to, which is the real constraint on card art.
 - **Verify by looking**, per fleet canon: screenshots at the viewport sizes and board widths that matter — 1 unit, 5, 10, 15 — inspected individually at native resolution. A contact sheet answers "is there one of each" and never "is each one right".
 - States are part of the visual surface: hover, drag, targetable, dying, buffed, Guarded.
+
+## The art system
+
+Heraldic flat vector, rendered as SVG. The choice is driven by the compression constraint rather than by taste: at fifteen units on the board a card is roughly seventy pixels wide, and no illustration survives that. Heraldry is, literally, a system built to make identity legible at distance — which is the problem this board has.
+
+### Art is data, not assets
+
+Real heraldry has a formal description language. *Azure, a lion rampant or, a bordure engrailed argent* fully specifies a device; two heralds reading it draw the same arms. That gives the cleanest possible answer to "how do 250 unique cards get art":
+
+> **A card's art is a blazon string in its data file, rendered to SVG by code. There are no image assets.**
+
+What this buys, and each of these is a problem it removes rather than an advantage it adds:
+
+- **Unique per card is affordable.** Uniqueness comes from combinatorics over a charge library, not from 250 bespoke drawings. Thirty to fifty charges across tinctures, ordinaries and attitudes yields far more distinct, *recognisable* devices than the card pool needs. The production cost is the charge library; the cards are then a line of text each.
+- **No blob problem.** Fleet canon caps what enters ordinary Git — 256 KiB needs a reason, 512 KiB binary never. Two hundred and fifty PNGs would strain that; 250 blazons are a few kilobytes total.
+- **It diffs.** A balance pass, an art revision and a rename are all reviewable text changes. An artwork change shows up in review as the line that changed.
+- **It scales losslessly**, which is exactly what a board that compresses to arbitrary widths requires.
+- **Coherence is structural.** Everything is drawn by one renderer from one library, so the pool cannot drift the way independently produced pieces do.
+
+### Four channels, because heraldry has four
+
+The premise that seventy pixels gives you two readable channels is true of arbitrary illustration. Heraldry beats it, because separating identity into independent layers is the whole design of the idiom — and that lets Guard take the strong channel, as chosen, without losing tribe.
+
+| Channel | Carries | Why it survives compression |
+|---|---|---|
+| **Numbers** | Power and Health | Corner-set, high contrast, never occluded by the device |
+| **Card outline and bordure** | **Guard** | Shape reads faster than colour at small size, and it is unmissable in peripheral vision — a Guard is a shield-shaped card with a heavy bordure, everything else is a plain rectangle |
+| **Field tincture** | Tribe | A flat background colour is still scannable in a row at seventy pixels, which is what adjacency traits like Kindle need |
+| **Charge** | The individual card | The one channel that legitimately needs the expanded tier, and the only one that does |
+
+Guard on the silhouette is the strong version of the owner's choice. Colour would have competed with tribe for the same perceptual channel; shape does not compete with anything.
+
+### The two-tier read
+
+Forced by the board, not chosen:
+
+- **Compressed** — outline, bordure, field tincture, numbers. Everything needed to make a placement decision and to read the incoming turn.
+- **Expanded**, on hover or inspect — the full charge, the card text, sigils, and the trait rules. Everything needed to plan.
+
+The design rule that follows: **no information required for a turn decision may live only in the expanded tier.** If a player must hover to play correctly, the compressed tier has failed.
+
+### Reviewing 250 devices
+
+Fleet canon carries badge's lesson directly, and it applies here harder than anywhere: a 63-source contact sheet read as cohesive while ten sources were wrong, and the lesson recurred four days later against 48px proof sheets.
+
+So: **every device is reviewed individually at native resolution, in both tiers, and the review binds to the digest of the bytes inspected.** A grid of 250 crests will look magnificent and will tell you nothing about whether any individual one is right. Regenerating the sheet strands its review rather than inheriting it.
+
+The specific failure to watch for is tincture collision — two tribes whose field colours are distinguishable side by side in a palette and indistinguishable at seventy pixels under an animation overlay. That is a per-pair check at the real size, not a palette check.
 
 ## Fair but challenging
 

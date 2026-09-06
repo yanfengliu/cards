@@ -4,7 +4,7 @@
 
 A single-player roguelike deckbuilder: tactical card combat on a board, fought across a branching run, with a class layer that changes what a deck can become. `docs/design/` is the design of record; `docs/work/` holds the rounds that produced it.
 
-Non-goals: multiplayer, live-service economy, real-money purchases, a collection metagame, and card art pipelines. One player, one run.
+Non-goals: multiplayer, live-service economy, real-money purchases, and a collection metagame. One player, one run. There is no raster art pipeline either, but that is a consequence rather than a goal — card art is a heraldic blazon in the card's own data, rendered to SVG by code, so there are no image assets to pipeline. See `ARCHITECTURE.md`.
 
 Stack: TypeScript on Node 24 (`.nvmrc`), browser front end. The repo is at design stage — no engine, no build, no tests yet. Gates below say what exists today; each grows its real command in the same commit that introduces the tool, and a Gate is never written ahead of the command that satisfies it.
 

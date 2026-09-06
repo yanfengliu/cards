@@ -189,7 +189,9 @@ Three acts, each a branching map, each ending in a boss. Nodes: fight, elite, ev
 
 ## Non-goals
 
-Multiplayer, a live-service economy, real-money purchases, a collection metagame, and card art pipelines. One player, one run.
+Multiplayer, a live-service economy, real-money purchases, and a collection metagame. One player, one run.
+
+There is no raster art pipeline, but that is a consequence and not a goal: card art is heraldic, written as a blazon in the card's own data and rendered to SVG by code, so there are no image assets. `ARCHITECTURE.md` carries the art system.
 
 **PvP is a deliberate non-goal despite Grail having it.** The temptation is real — resolution is deterministic and headless, so fighting a snapshot of another player's board would be nearly free to build. It stays out of scope until the single-player game has proven its core turn is fun, because PvP would put balance pressure on every card before that question is answered.
 
