@@ -4,6 +4,14 @@
     {
       "id": 0,
       "theme": "game-design"
+    },
+    {
+      "id": 1,
+      "theme": "turn-prototype"
+    },
+    {
+      "id": 2,
+      "theme": "heraldry-legibility"
     }
   ]
 }
