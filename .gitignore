@@ -144,3 +144,6 @@ vite.config.ts.timestamp-*
 
 # Probe and task-run evidence
 .probe/
+
+# Agent worktrees — checkouts, never repository content
+.claude/worktrees/
