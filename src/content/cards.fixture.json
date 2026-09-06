@@ -1,0 +1,161 @@
+{
+  "note": "Hand-written probe fixture. Not the card pool of record. Sixteen cards: all four tribes, all eight charges, six Guards, and one two-digit Health so the numeral channel is tested at its widest. Blazons are written against palette A in tribes.fixture.json.",
+  "cards": [
+    {
+      "id": "dwarf-shieldbearer",
+      "name": "Shieldbearer",
+      "tribe": "dwarf",
+      "power": 1,
+      "health": 3,
+      "guard": true,
+      "trait": "Guard",
+      "blazon": "gules, a hammer or, a bordure or"
+    },
+    {
+      "id": "human-squire",
+      "name": "Squire",
+      "tribe": "human",
+      "power": 1,
+      "health": 2,
+      "guard": false,
+      "trait": "Relay",
+      "blazon": "azure, a sword argent"
+    },
+    {
+      "id": "elf-scout",
+      "name": "Scout",
+      "tribe": "elf",
+      "power": 2,
+      "health": 1,
+      "guard": false,
+      "blazon": "vert, a leaf or"
+    },
+    {
+      "id": "dragon-whelp",
+      "name": "Whelp",
+      "tribe": "dragon",
+      "power": 3,
+      "health": 2,
+      "guard": false,
+      "blazon": "sable, a wyvern or"
+    },
+    {
+      "id": "dwarf-runesmith",
+      "name": "Runesmith",
+      "tribe": "dwarf",
+      "power": 2,
+      "health": 3,
+      "guard": false,
+      "trait": "Kindle",
+      "blazon": "gules, a mullet or"
+    },
+    {
+      "id": "human-watchman",
+      "name": "Watchman",
+      "tribe": "human",
+      "power": 2,
+      "health": 4,
+      "guard": true,
+      "trait": "Guard",
+      "blazon": "azure, a tower argent, a bordure or"
+    },
+    {
+      "id": "elf-warden",
+      "name": "Warden",
+      "tribe": "elf",
+      "power": 1,
+      "health": 5,
+      "guard": true,
+      "trait": "Guard",
+      "blazon": "vert, a leaf argent, a bordure or"
+    },
+    {
+      "id": "dragon-broodmother",
+      "name": "Broodmother",
+      "tribe": "dragon",
+      "power": 4,
+      "health": 6,
+      "guard": true,
+      "trait": "Guard",
+      "blazon": "sable, an eagle or, a bordure or"
+    },
+    {
+      "id": "human-herald",
+      "name": "Herald",
+      "tribe": "human",
+      "power": 1,
+      "health": 1,
+      "guard": false,
+      "trait": "Relay",
+      "blazon": "azure, a crescent or"
+    },
+    {
+      "id": "elf-moonsinger",
+      "name": "Moonsinger",
+      "tribe": "elf",
+      "power": 2,
+      "health": 2,
+      "guard": false,
+      "trait": "Ward",
+      "blazon": "vert, a crescent argent"
+    },
+    {
+      "id": "dwarf-hammerer",
+      "name": "Hammerer",
+      "tribe": "dwarf",
+      "power": 4,
+      "health": 2,
+      "guard": false,
+      "trait": "Kindle",
+      "blazon": "gules, a hammer argent"
+    },
+    {
+      "id": "dragon-drake",
+      "name": "Drake",
+      "tribe": "dragon",
+      "power": 5,
+      "health": 4,
+      "guard": false,
+      "blazon": "sable, a wyvern argent"
+    },
+    {
+      "id": "human-captain",
+      "name": "Knight-Captain",
+      "tribe": "human",
+      "power": 3,
+      "health": 5,
+      "guard": true,
+      "trait": "Guard",
+      "blazon": "azure, a sword or, a bordure argent"
+    },
+    {
+      "id": "elf-bowman",
+      "name": "Bowman",
+      "tribe": "elf",
+      "power": 3,
+      "health": 1,
+      "guard": false,
+      "blazon": "vert, a mullet or"
+    },
+    {
+      "id": "dwarf-anvilguard",
+      "name": "Anvilguard",
+      "tribe": "dwarf",
+      "power": 2,
+      "health": 7,
+      "guard": true,
+      "trait": "Guard",
+      "blazon": "gules, a tower or, a bordure argent"
+    },
+    {
+      "id": "dragon-ashwing",
+      "name": "Ashwing",
+      "tribe": "dragon",
+      "power": 2,
+      "health": 10,
+      "guard": false,
+      "trait": "Echo",
+      "blazon": "sable, an eagle or"
+    }
+  ]
+}
