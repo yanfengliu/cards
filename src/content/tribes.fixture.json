@@ -1,0 +1,19 @@
+{
+  "note": "Probe fixture, not content of record. Tribe -> field tincture is a content convention, not a renderer rule: the field tincture is written on every card's own blazon, and this table is what the cards were authored against. Palette B is the alternate tested after palette A collided.",
+  "palettes": {
+    "A": {
+      "label": "classic tinctures",
+      "dwarf": "gules",
+      "elf": "vert",
+      "human": "azure",
+      "dragon": "sable"
+    },
+    "B": {
+      "label": "sable retired, dragon moved to purpure, human lightened",
+      "dwarf": "tenne",
+      "elf": "vert",
+      "human": "azure",
+      "dragon": "purpure"
+    }
+  }
+}
