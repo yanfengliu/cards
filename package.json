@@ -1,0 +1,21 @@
+{
+  "name": "cards-turn-prototype",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Headless single-fight probe: is placement a decision?",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit",
+    "measure": "node src/sim/measure.ts",
+    "verify": "node src/sim/measure.ts --verify --seeds 400 --sweep-seeds 400 --search-check 200",
+    "gates": "npm run typecheck && npm test && npm run verify"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.3"
+  }
+}
