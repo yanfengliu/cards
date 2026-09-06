@@ -44,6 +44,7 @@ Consequential tradeoffs, each an owner call:
 - [x] Establish the three influences' distinct jobs.
 - [x] Settle combat, card types, classes, races, and progression by interview.
 - [x] Write the design of record.
+- [x] Write the engineering plan: [`ARCHITECTURE.md`](../../../ARCHITECTURE.md). Writing the resolver contract found a defect in the design — `Echo` did not terminate under adjacency — now fixed in the rule rather than by an engine guard.
 - [ ] Prototype the core turn headlessly: resolution order, random targeting, Guard, armour. Answers open question 1.
 - [ ] Decide the token-generation budget before the first summon card exists (open question 2).
 

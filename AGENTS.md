@@ -126,3 +126,4 @@ Do not declare the result fully verified while material findings or required che
 - Design docs state a mechanic's *purpose* — the decision it puts in front of the player — alongside its rules. A mechanic with no decision attached is a candidate for deletion.
 - Devlog per canon: `docs/devlog/summary.md`, newest first, with detail in `docs/devlog/detailed/`.
 - `README.md` stays user-facing: what the game is and how to run it.
+- `ARCHITECTURE.md` holds module boundaries, the resolution-queue contract, the balance metrics, and the delegation plan. `docs/design/` holds the game; `ARCHITECTURE.md` holds what builds it. A change to module boundaries or the resolver's ordering belongs there, not in a work-unit plan.

@@ -78,7 +78,7 @@ Hero health **persists across the whole run** — it is the run's life bar, heal
 Traits that reference resolution order are the core vocabulary.
 
 - **Relay** — after acting, the unit to my right gains +2 Power this turn.
-- **Echo** — repeat the action of the unit that resolved immediately before me.
+- **Echo** — repeat the **base** action of the unit that resolved immediately before me, never a copied one.
 - **Wake** — when the unit to my left dies this turn, gain +2 Power.
 - **Ward** — the unit to my right cannot be struck this turn.
 - **Guard** — while I live, attacks against my side must target a Guard.
@@ -93,6 +93,8 @@ A trait that counts — "+1 Power for each friendly unit that acted before me" �
 Note that **Relay grants a flat +2 and therefore does not compound**: in a line of five Relays, each unit gives its right neighbour +2 and every unit receives exactly +2. A version worded "gains Power equal to mine" *would* double down the line, which on an unlimited board is unbounded. Do not write that card.
 
 The practical rule: **a new trait may read its neighbours, its own tribe among its neighbours, and the unit that resolved immediately before it — and nothing else.** A trait that wants a board-wide total is a trait that wants a fixed board width, and this game does not have one.
+
+**Echo carries a second constraint, for a different reason.** Worded as "repeat the action of the unit before me", two adjacent Echoes walk backwards forever — and an Echo Sigil would let a player build that deliberately. Restricting Echo to the previous unit's *base* action makes it terminate by construction rather than by an engine guard, and it is one line a player can read. The general rule: **a trait that reads another trait's output needs an explicit termination argument before it is written.** `ARCHITECTURE.md` carries the engineering side of this.
 
 ## Worked example
 
