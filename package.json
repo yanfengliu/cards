@@ -7,11 +7,15 @@
     "node": ">=24"
   },
   "scripts": {
+    "test": "node --test",
     "typecheck": "tsc --noEmit",
-    "probe:heraldry": "node tools/heraldry-probe/shoot.ts"
+    "measure": "node src/sim/measure.ts",
+    "verify": "node src/sim/measure.ts --verify --seeds 400 --sweep-seeds 400 --search-check 200",
+    "probe:heraldry": "node tools/heraldry-probe/shoot.ts",
+    "gates": "npm run typecheck && npm test && npm run verify"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^24.13.3",
     "playwright-core": "1.56.1",
     "typescript": "^5.9.3"
   }

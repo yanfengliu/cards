@@ -14,9 +14,23 @@ Three influences, three distinct jobs:
 
 ## Status
 
-Design stage. There is no code yet — no engine, no build, no tests.
+Design stage, plus one throwaway prototype. There is no game to play yet — no renderer, no run structure, no cards beyond the fifteen the prototype needed.
 
 - [Design of record](docs/design/game.md) — the full rules, a worked example with exact numbers, and the ranked open questions.
 - [Work unit 0](docs/work/0_game-design/plan.md) — how the design was settled and what remains.
+- [Work unit 1](docs/work/1_turn-prototype/plan.md) — the headless single-fight probe, and what it measured.
 
-Every number in the design is a reasoned starting guess, not a balanced value. The first thing to build is a headless prototype of a single turn.
+Every number in the design is a reasoned starting guess, not a balanced value.
+
+## Running the prototype
+
+Node 24 (see `.nvmrc`). TypeScript runs directly, so there is no build step and no runtime dependency.
+
+```
+npm install     # dev-only: typescript and @types/node, for the typecheck
+npm test        # the rules, the design's worked example, and determinism
+npm run measure # the A/B: does optimal placement beat random placement?
+npm run gates   # typecheck, tests, and the measurement's own instrument checks
+```
+
+`npm run measure` takes `--seeds`, `--encounter` and a few other flags; it prints its methodology and its instrument checks alongside the numbers.
