@@ -51,7 +51,7 @@ src/
 
 ## The resolution graph
 
-This is the hardest engineering problem in the game, and the answer to "what is the graph engineering here" in its more interesting reading.
+This is the hardest engineering problem in the game.
 
 A turn is not a loop over units. It is a cascade: a unit acts, which emits events, which fire triggers, which can kill units, which emit death events, which fire more triggers — some on units that have not acted yet. This is where card games get their worst bugs, and the fix is well known from Magic and Hearthstone: **an explicit event queue with one documented order, never recursion.**
 
@@ -92,8 +92,6 @@ This terminates by construction — there is no recursion to bound — and it is
 The general principle for the effect vocabulary: **a trait may read state, but a trait that reads *another trait's output* needs an explicit termination argument before it is written.**
 
 ## Rendering
-
-Reading "graph engineering" the other way: the visual stack.
 
 **DOM and CSS, not Canvas or WebGL.** Cards are rectangles with text, and that is what the DOM is best at — text rendering, layout, accessibility, and inspectability all come free, and CSS transforms and transitions handle the animation this game actually needs. Canvas wins for thousands of particles, which is not this game. Keep a Canvas overlay in reserve for effects if it is ever earned; do not start there.
 
@@ -194,22 +192,78 @@ Two traps worth naming in advance, both from fleet canon and both cheap to fall 
 - **Hold the tree still across an A/B.** Comparing two balance batches while also editing content means the arms differ by more than the variable under test, and the result still reads like a finding.
 - **Verify the instrument before trusting the measurement.** Confirm the seed set is the population you meant, that the flag took effect, and that the control reproduces. A balance conclusion drawn from a bot that was silently failing to draft is worse than no conclusion.
 
-## Workflow and orchestration
+## The agent graph
 
-The module graph is also the delegation plan, because `engine`'s independence is what makes parallel work possible at all.
+How agents are organised to build this. The module graph above is the *input* to this one — `engine`'s independence is what makes any parallelism possible at all — but the agent graph has its own constraints, and they are not the same constraints.
 
-**Phase 0 — serial, one owner, no parallelism.** Agree the contracts: the state shape, the action union, and the effect vocabulary. Everything downstream imports these, so a change here invalidates work everywhere. Per fleet canon, shared contracts are agreed before parallel implementation, not during it.
+```
+                      ┌─────────────────────────────┐
+                      │  0. CONTRACT      (serial)  │
+                      │  types · fixtures · stubs   │
+                      └──────────────┬──────────────┘
+                                     │  fan-out gate: merged to main
+               ┌─────────────────────┼─────────────────────┐
+               ▼                     ▼                     ▼
+       ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+       │ 1a. ENGINE    │     │ 1b. SIM       │     │ 1c. RENDER    │
+       │ resolver·rng  │     │ bots·metrics  │     │ board·anim·ui │
+       └───────┬───────┘     └───────┬───────┘     └───────┬───────┘
+               │                     │                     │
+               ▼                     │                     │
+       ┌───────────────┐             │                     │
+       │ 1a′. REVIEW   │ required    │                     │
+       │ independent   │ (high-risk) │                     │
+       └───────┬───────┘             │                     │
+               └──────────┬──────────┴─────────────────────┘
+                          ▼
+                ┌──────────────────────┐
+                │  2. INTEGRATION      │  real work, not a rubber stamp
+                └──────────┬───────────┘
+                           ▼
+             ┌──────────────────────────────────┐
+             │  3. CONTENT ⇄ BALANCE   (cycle)  │  one owner, not two
+             └──────────────────────────────────┘
+```
 
-**Phase 1 — parallel, isolated worktrees.** Three independent tracks against the frozen contract:
+### Nine properties this graph has on purpose
 
-| Track | Owns | Verifies with |
-|---|---|---|
-| Engine core | `engine/` — resolver, effects, rng | Property tests, determinism |
-| Sim harness | `sim/` — agents, batch runner, metrics | Runs against engine; produces the metrics table |
-| Render skeleton | `render/`, `ui/` | Screenshots at several board widths |
+**1. The fan-out gate is the contract, not a working engine.** Node 0 ships *types, fixtures and throwing stubs* — not an implementation. Once the state shape, action union and effect vocabulary are frozen on main, all three lanes can start, and the engine's implementation is just one of them. Waiting for a working engine before starting render would serialise the whole project behind its hardest node.
 
-These touch disjoint directories, so they merge without collision. Each lands on `main` when its own gates pass — fleet canon counts nothing as done on a branch.
+**2. Fixtures are what decouple the lanes.** Node 0's other deliverable is a set of hand-authored `GameState` values covering the interesting shapes: empty board, wide board, all-Guards, hero exposed, mid-cascade. Render draws them and Sim measures them without a resolver existing. Without fixtures, lanes 1b and 1c can write code but cannot verify any of it, which is not parallel work — it is deferred work.
 
-**Phase 2 — a loop, not a phase.** Content authoring and balance simulation are coupled and iterate together, driven by the metrics above. This is where most of the calendar time goes and it has no natural end, only a good-enough.
+**3. Edges are commits on main, not messages.** Agents cannot see each other's chats, memory, or working trees, and fleet canon says never to assume otherwise. So an edge in this graph means exactly one thing: *the upstream node's artifact is merged and verified, and it is in the downstream node's base revision.* Anything an agent needs to know must be in a file. A design that requires two agents to talk is a design with a node missing.
 
-**The first thing to build**, before any of that, is a headless prototype of one turn: resolution order, random targeting, Guard, armour. It is small, it is the acceptance step already recorded in [work unit 0](docs/work/0_game-design/plan.md), and it answers the design's top open question by observation rather than argument.
+**4. Fan-out width is set by directory disjointness, not by ambition.** Three lanes because there are three non-overlapping directory sets. A fourth agent would have to share files with one of them and the graph would be buying merge conflicts with no throughput gain. Widen the graph by *making* things disjoint, never by adding agents to contested files.
+
+**5. The event log is the render contract, which removes the worst cross-lane collision.** The predictable failure is the render agent needing `isCurrentlyActing` on a unit and adding it to `GameState` — engine-state pollution that collides at integration and corrupts the determinism hash. The rule that prevents it: **render consumes the resolver's event stream and derives its own view state; it never adds a field to `GameState`.** The resolver already emits events, so this costs nothing and makes animation correct-by-construction against the logic.
+
+**6. Cycles collapse into one agent.** Content and balance are a feedback loop — a card is only balanced relative to every other card, and balance findings rewrite content. That is not a DAG edge and cannot be two parallel agents; it is one owner iterating, or a strict alternation with the coordinator holding the baton. Splitting a cycle across agents produces two workers each invalidating the other's last result.
+
+**7. Content authoring fans out; balance never does.** Cards are embarrassingly parallel to *write* — N agents can own disjoint card sets. They are global to *balance*, because the metrics are whole-pool properties. So node 3 may fan out for authoring under one balance owner, and the balance judgement stays with a single agent holding the global view.
+
+**8. The effect vocabulary is frozen, and needing a new verb escalates.** This is what makes content fan-out safe. Given freedom, four card authors invent four different verbs for "deal damage to a neighbour", and the resolver grows four code paths. `AGENTS.md` already says a card needing a new `if` means the vocabulary is missing a verb; the orchestration consequence is that adding a verb is a coordinator decision, never a worker's.
+
+**9. Review is a node with an edge, not a phase at the end.** The resolver, the RNG and the replay format are the repo's declared high-risk surfaces, so 1a cannot merge without independent review (`../fleet/docs/skills/multi-cli-review.md`). Review sits *between* the worker and integration, because a review that happens after merge is a report, not a gate.
+
+### What the coordinator actually does here
+
+It does not implement — fleet canon is explicit that every change is delegated, however small, because the coordinator's session is where the next request arrives. Its hands stay on four things:
+
+- **Owning node 0 personally is the exception worth naming.** It is the one node that cannot be parallel and that everything else depends on, so it is written as an assignment and delegated like the rest — but the coordinator inspects and accepts it before opening the gate, because a wrong contract invalidates all three lanes.
+- **Holding the fan-out gate.** No lane starts before the contract is on main. This is the single highest-value thing the coordinator does, and the most tempting to skip.
+- **Integration as real work.** Worker success does not establish integration success. Node 2 means reading the actual combined diff and exercising engine-plus-render together, because the state-contract bugs live exactly where two green lanes meet.
+- **Assignments that stand alone.** Owner, outcome, context, contracts, base revision, workspace, allowed and excluded paths, verification, and expected handoff — because the worker cannot ask a follow-up question mid-task.
+
+### Improving the graph itself
+
+The graph is a hypothesis about where the seams are, and each wave tests it. After every wave the coordinator records what actually happened, in the repo rather than in a chat:
+
+- **What collided.** Two lanes touching the same file means the seam was in the wrong place. The fix is to promote that file into node 0's contract, not to ask agents to coordinate.
+- **What blocked.** A lane idle waiting on another means a missing fixture, not a missing message.
+- **What was redone.** Work thrown away after integration means the contract was underspecified — that is a node 0 defect, and it is the expensive kind.
+
+Per fleet canon this lands as a lesson anchored to a gate, and the lesson is deleted in the commit that lands the gate. A graph observation that can name no gate is folklore and gets dropped.
+
+### Where to start
+
+Before any of this, one agent builds a headless prototype of a single turn — resolution order, random targeting, Guard, armour. It is deliberately outside the graph: it is small, it is throwaway, and its purpose is to answer the design's top open question by observation. Building the full contract before knowing whether placement is a decision would be committing the whole graph to an unverified premise.
