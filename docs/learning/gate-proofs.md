@@ -6,6 +6,49 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-07 — a card explains all of itself, and cannot explain a rule the game no longer has (`test/explain.test.ts`)
+
+Taken at the tip of `worktree-agent-a2f9237928772992a` with this round's changes applied; the suite is **137 tests** here, 117 before it.
+
+The defect this round fixes is not a crash. Every noun in this game is invented — Ward, Wake, Relay, gules, a mullet — and the only place any of them was written down was `docs/design/game.md`, which a player never opens. The owner asking what "Ward", "Wake" and "hue" meant, about mechanics in their own game, is that defect reported.
+
+The failure mode *after* the fix is the quieter one, and it is what this gate is for: an explanation that outlives the rule behind it. A tooltip describing a deleted trait, or quoting a Power number the resolver has since re-tuned, is worse than no tooltip — the player has no way to tell it is wrong, and neither does a reviewer reading the tooltip.
+
+Four mutations were applied one at a time, `node --test test/explain.test.ts` run, and the tree restored after each.
+
+| mutation | site | failed | which test |
+|---|---|---|---|
+| every tincture's `hatch` set to `'none'` | `heraldry/tinctures.ts:TINCTURES` | 2 of 20 | "two tribe fields on one line are never told apart by hue alone", "hatching is off by default" |
+| `Ward` removed from `u_warden`, the only card that carries it | `content/cards.ts:PLAYER_CARDS` | 1 of 20 | "no explanation survives the trait it explains" |
+| Relay's sentence retyped as the literal `+2 Power` | `render/glossary.ts:TRAIT_TERMS` | 1 of 20 | "trait rules carry the resolver's own numbers, not retyped ones" |
+| `triggersFor`'s Relay branch made to read `e.tribe` | `engine/resolver.ts:triggersFor` | 1 of 20 | "the 'race carries no rule' claim is still true of the resolver" |
+
+### The two that took a second attempt, and why the first attempt was worthless
+
+**Retyping the number.** The first version of the number check asserted only that `TRAIT_TERMS.relay.line` matches `/\+2 Power/`, built from the imported `RELAY_POWER`. Both obvious mutations passed it: retyping the number as a literal passed because the literal happened to equal today's constant, and re-tuning `RELAY_POWER` to 3 passed because the sentence is interpolated and followed it. The check could not tell "derived" from "coincidentally equal" — canon's *a check built from the same symbol as the thing it checks proves only that the code agrees with itself*. The gate now also reads `glossary.ts`'s **source** and requires `${RELAY_POWER}` to appear and `/\+\d+ Power/` not to; that is the half the retype mutation goes red on.
+
+**Scanning source for a literal.** That source scan then failed on a clean tree, on `glossary.ts`'s own header comment, which explains the rule by quoting `"+2 Power"`. This repo has been here before: `gate:banned-apis` reads the TypeScript AST rather than grepping because `src/engine/rng.ts` names all three banned APIs in a comment in order to say it never calls them, and a grep gate reported sixteen violations on a clean tree. The fix here is a `codeOf()` helper that strips comments before scanning, and the same helper now feeds the resolver check.
+
+### The colour-blindness claim, measured rather than asserted
+
+Tribe is carried by field tincture and by nothing else. The distances, in sRGB bytes over 0..441, between the field colours of tribe pairs — the first of which stand **next to each other on the player's own line**:
+
+| pair | sRGB | deuteranopia | protanopia |
+|---|---|---|---|
+| dwarf (gules) vs elf (vert) | 139.3 | **33.5** | **38.2** |
+| elf (vert) vs orc (tenne) | 116.8 | 47.3 | **20.8** |
+| dwarf (gules) vs orc (tenne) | 57.0 | **25.6** | 41.0 |
+
+A dwarf and an elf are, to roughly one man in twelve, the same card. The gate's rule is that every pair must be separable by *something*: either the simulated colours stay at least 60 apart, or the two Petra Sancta hatchings differ. Every collapsed pair above differs in hatching, which is why the round added it.
+
+The simulation is an LMS projection and can only ever **fail** a design, never pass one, so the evidence is a picture: `.probe-ui/hover-even-7-light/13-deuteranopia-player-row.png` (hatching off — the dwarf and elf cards are the same olive) against `.probe-ui/hover-even-7-light-hatch/13-deuteranopia-player-row.png` (hatching on — vertical, diagonal and horizontal rules, three distinguishable tribes at the same two colours). Those files are ignored task-run evidence and `npm run probe:ui hover 7 even light [hatch]` regenerates them, which strands this review rather than letting it be inherited.
+
+`cvdMatrix` in `heraldry/tinctures.ts` exists so that the picture and the number cannot disagree: the probe feeds those nine coefficients to `feColorMatrix` in linearRGB, which is the arithmetic `simulate` does. The first version of the probe used a different, cruder approximation, and its two arms differed by more than the variable under test — dwarf and elf came out visibly different in the filtered screenshot while the number said 33.
+
+### Bound
+
+`test/explain.test.ts`'s header carries it. In short: it reads `PLAYER_CARDS` and `ENEMY_CARDS`, and the engine's `Trait` and `Tribe` unions through the glossary's typed tables. It says nothing about a card outside those two arrays, nothing about a trait in the union but on no card, and **nothing about pixels** — it asserts on HTML and SVG strings, never on what a browser draws from them. The compression-floor assertion is arithmetic on `pipIconSize`, not a measurement; the measurement is `npm run probe:ui narrow 7 even light`, which reported a **19px trait strip in a 44px card, one distinct card top at every viewport from 1440px down to 380px**.
+
 ## 2026-09-07 — spells and equipment, and the AoE that makes simultaneous-death order visible (`test/spells.test.ts`, `test/equipment.test.ts`, `test/casting.test.ts`)
 
 Taken at `06c87c7` with this round's changes applied; the suite is **86 tests** here, 55 before it.

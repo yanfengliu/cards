@@ -12,54 +12,30 @@
  * in the line, the commit button, the speed control. The only thing read out of
  * the page is what the page is showing.
  *
- * Two modes:
+ * Four modes:
  *   sweep  play rounds to the end, skipping animation, and photograph the board
  *          at every distinct line width reached. This is the 1/5/10/15 sweep.
+ *   narrow play to the widest line the fight gives, then squeeze the viewport.
  *   film   play one round at 1x and photograph the resolution every 220ms, so
  *          the acting highlight and the travelling buff can be reviewed as
  *          frames rather than as a claim.
+ *   hover  hover every kind of card and photograph the explanation panel, with
+ *          the area it covers of each row measured rather than eyeballed.
  *
  * Shots are written to `.probe-ui/` (git-ignored) with a sha256 manifest, so a
  * review binds to the bytes inspected and a regenerated set does not inherit it.
  */
 
-import { chromium, type Browser, type Page } from 'playwright-core';
+import { type Page } from 'playwright-core';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { launch } from './chrome.ts';
+import { cvdMatrix } from '../../src/render/heraldry/tinctures.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const OUT = path.join(ROOT, '.probe-ui');
 const BASE = process.env['CARDS_URL'] ?? 'http://127.0.0.1:5175/src/ui/index.html';
-
-const CHROME_CANDIDATES = [
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-];
-
-async function launch(): Promise<Browser> {
-  const errors: string[] = [];
-  for (const exe of CHROME_CANDIDATES) {
-    try {
-      await stat(exe);
-    } catch {
-      errors.push(`${exe}: not present`);
-      continue;
-    }
-    try {
-      return await chromium.launch({ executablePath: exe });
-    } catch (e) {
-      errors.push(`${exe}: ${(e as Error).message.split('\n')[0]}`);
-    }
-  }
-  try {
-    return await chromium.launch({ channel: 'chrome' });
-  } catch (e) {
-    errors.push(`channel chrome: ${(e as Error).message.split('\n')[0]}`);
-  }
-  throw new Error(`No usable Chromium. Tried:\n  ${errors.join('\n  ')}`);
-}
 
 type Snapshot = {
   round: number;
@@ -202,9 +178,17 @@ async function sweep(
  * when the two are in tension. A fourteen-unit line at 1440px is comfortable; a
  * fourteen-unit line at 700px is the case that either compresses or wraps.
  */
-async function narrow(page: Page, seed: number, encounter: string, theme: string): Promise<void> {
-  const dir = path.join(OUT, `narrow-${encounter}-${seed}-${theme}`);
-  await page.goto(`${BASE}?seed=${seed}&encounter=${encounter}&theme=${theme}`);
+async function narrow(
+  page: Page,
+  seed: number,
+  encounter: string,
+  theme: string,
+  hatch: boolean,
+): Promise<void> {
+  const dir = path.join(OUT, `narrow-${encounter}-${seed}-${theme}${hatch ? '-hatch' : ''}`);
+  await page.goto(
+    `${BASE}?seed=${seed}&encounter=${encounter}&theme=${theme}${hatch ? '&hatch=1' : ''}`,
+  );
   await page.evaluate(() => document.fonts.ready);
   await settle(page);
 
@@ -221,7 +205,7 @@ async function narrow(page: Page, seed: number, encounter: string, theme: string
     await settle(page);
   }
 
-  for (const width of [1440, 1180, 980, 820, 700, 560]) {
+  for (const width of [1440, 1180, 980, 820, 700, 560, 440, 380]) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(120);
     const state = await look(page);
@@ -233,15 +217,36 @@ async function narrow(page: Page, seed: number, encounter: string, theme: string
         tops.add(Math.round(c.getBoundingClientRect().top));
       }
       const first = row.querySelector('.card') as HTMLElement | null;
+      // The trait strip is the thing most likely to break compression: it is
+      // the one part of a card whose contents are not scaled by the card's own
+      // width, so an icon that is too big for the floor pushes the row into a
+      // scrollbar. Measured as "widest strip against its own card".
+      let worst = 0;
+      let worstCard = 0;
+      for (const card of Array.from(row.querySelectorAll('.card'))) {
+        const pips = card.querySelector('.card__pips') as HTMLElement | null;
+        if (pips === null || pips.children.length === 0) continue;
+        let used = 0;
+        for (const pip of Array.from(pips.children)) {
+          used += (pip as HTMLElement).getBoundingClientRect().width + 3;
+        }
+        if (used - 3 > worst) {
+          worst = used - 3;
+          worstCard = card.getBoundingClientRect().width;
+        }
+      }
       return {
         rows: tops.size,
         scroll: row.scrollWidth - row.clientWidth,
         cardW: first === null ? 0 : Math.round(first.getBoundingClientRect().width),
+        pipStrip: Math.round(worst),
+        pipCard: Math.round(worstCard),
       };
     });
     console.log(
       `viewport ${width}: ${state.playerUnits} units, card ${wrapped.cardW}px, ` +
-        `distinct card tops ${wrapped.rows} (1 means no wrap), overflow ${wrapped.scroll}px`,
+        `distinct card tops ${wrapped.rows} (1 means no wrap), overflow ${wrapped.scroll}px, ` +
+        `widest trait strip ${wrapped.pipStrip}px in a ${wrapped.pipCard}px card`,
     );
     await shootRow(page, dir, `row-${state.playerUnits}units-vw${width}`, '#player-row');
     await shoot(page, dir, `page-${state.playerUnits}units-vw${width}`);
@@ -273,6 +278,168 @@ async function film(page: Page, seed: number, encounter: string, theme: string):
   }
   await settle(page).catch(() => undefined);
   await shoot(page, dir, 'frame-99-after');
+}
+
+/**
+ * What the inspect panel covers up.
+ *
+ * The panel is the answer to "what does this card mean", and the board is the
+ * thing the player is reading when they ask. A panel that hides the other line
+ * to explain this one has traded the question for the answer. So the overlap is
+ * *measured* rather than eyeballed: the panel's rectangle against each row's
+ * rectangle, in CSS pixels, read off the live page.
+ */
+type Overlap = {
+  readonly shown: boolean;
+  readonly panel: { x: number; y: number; w: number; h: number };
+  readonly enemyRow: number;
+  readonly playerRow: number;
+  readonly offscreen: number;
+  /** The bands the two rows leave free, so a bad placement can be explained. */
+  readonly bands: string;
+};
+
+async function overlapOf(page: Page): Promise<Overlap> {
+  return page.evaluate(() => {
+    const panel = document.getElementById('inspect');
+    const rect = (el: Element | null): DOMRect | null =>
+      el === null ? null : el.getBoundingClientRect();
+    const p = panel === null || panel.hidden ? null : rect(panel);
+    const area = (a: DOMRect | null, b: DOMRect | null): number => {
+      if (a === null || b === null) return 0;
+      const w = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+      const h = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+      return Math.round(w * h);
+    };
+    const view = new DOMRect(0, 0, globalThis.innerWidth, globalThis.innerHeight);
+    const er = rect(document.getElementById('enemy-row'));
+    const pr = rect(document.getElementById('player-row'));
+    const band = (a: number, b: number): string => `${Math.round(a)}..${Math.round(b)} (${Math.round(b - a)}px)`;
+    return {
+      shown: p !== null,
+      bands:
+        er === null || pr === null
+          ? 'no rows'
+          : `top ${band(0, er.top)}, middle ${band(er.bottom, pr.top)}, bottom ${band(pr.bottom, globalThis.innerHeight)}`,
+      panel:
+        p === null
+          ? { x: 0, y: 0, w: 0, h: 0 }
+          : { x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.width), h: Math.round(p.height) },
+      enemyRow: area(p, rect(document.getElementById('enemy-row'))),
+      playerRow: area(p, rect(document.getElementById('player-row'))),
+      offscreen: p === null ? 0 : Math.round(p.width * p.height) - area(p, view),
+    };
+  });
+}
+
+/**
+ * Hover every kind of thing a card can be, and photograph the explanation.
+ *
+ * The states that matter are not "a card" but the positions the panel has to
+ * solve for: an enemy unit at the top of the window (where the panel used to
+ * cover the row above it), a player unit at the bottom, a hand card, the hero,
+ * and a card at the 44px compression floor where the icons have to give up.
+ */
+async function hover(
+  page: Page,
+  seed: number,
+  encounter: string,
+  theme: string,
+  hatch: boolean,
+): Promise<void> {
+  const dir = path.join(OUT, `hover-${encounter}-${seed}-${theme}${hatch ? '-hatch' : ''}`);
+  await page.goto(
+    `${BASE}?seed=${seed}&encounter=${encounter}&theme=${theme}${hatch ? '&hatch=1' : ''}`,
+  );
+  await page.evaluate(() => document.fonts.ready);
+  await settle(page);
+
+  const shotOf = async (name: string, locator: string, nth = 0): Promise<void> => {
+    const el = page.locator(locator).nth(nth);
+    if ((await el.count()) === 0) {
+      console.log(`[hover] ${name}: no element for ${locator}`);
+      return;
+    }
+    await el.hover();
+    await page.waitForTimeout(140);
+    const o = await overlapOf(page);
+    console.log(
+      `[hover] ${name}: shown=${o.shown} panel=${o.panel.w}x${o.panel.h}@(${o.panel.x},${o.panel.y}) ` +
+        `covers enemy-row ${o.enemyRow}px2, player-row ${o.playerRow}px2, offscreen ${o.offscreen}px2` +
+        ` | bands ${o.bands}`,
+    );
+    await shoot(page, dir, name);
+  };
+
+  await shotOf('01-hand-card', '.handcard');
+  await shotOf('02-hand-card-last', '.handcard', 4);
+  await shotOf('03-enemy-unit', '#enemy-row .card');
+  await shotOf('04-enemy-hero', '#enemy-row .hero');
+
+  // A player line worth hovering, and a ghost still in it.
+  await playHand(page, 'mix', 1);
+  await shotOf('05-ghost', '#player-row [data-ghost]');
+  await page.locator('#commit').click();
+  await page.locator('#skip').click().catch(() => undefined);
+  await settle(page);
+  await shotOf('06-player-unit', '#player-row .card');
+  await shotOf('07-player-hero', '#player-row .hero');
+
+  // Then a wide line, so the same hover is checked at the compression floor.
+  for (let round = 2; round <= 12; round++) {
+    const before = await look(page);
+    if (before.mode === 'over') break;
+    await playHand(page, 'mix', round);
+    if ((await look(page)).playerUnits >= 12) break;
+    await page.locator('#commit').click();
+    await page.locator('#skip').click().catch(() => undefined);
+    await settle(page);
+  }
+  const wide = await look(page);
+  console.log(`[hover] wide line: ${wide.playerUnits} player units`);
+  await shotOf('08-wide-player-unit', '#player-row .card', 3);
+  await shootRow(page, dir, '09-wide-player-row', '#player-row');
+
+  /*
+   * The same line as a red-green colour-blind player sees it.
+   *
+   * Tribe is carried by field tincture and nothing else, and gules (dwarf) and
+   * vert (elf) stand next to each other on the player's own line. Their sRGB
+   * distance is 139; simulated for deuteranopia it is 34, which is to say the
+   * two are the same card to roughly one man in twelve. Run this probe with and
+   * without `hatch` and compare the two rows: that difference is the whole
+   * argument for the hatching switch, and it is a thing to look at rather than a
+   * number to take on trust.
+   */
+  const k = cvdMatrix('deuteranopia');
+  const values =
+    `${k[0]} ${k[1]} ${k[2]} 0 0  ${k[3]} ${k[4]} ${k[5]} 0 0  ` +
+    `${k[6]} ${k[7]} ${k[8]} 0 0  0 0 0 1 0`;
+  await page.evaluate((matrix: string) => {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('width', '0');
+    svg.setAttribute('height', '0');
+    svg.style.position = 'absolute';
+    svg.innerHTML =
+      '<filter id="cvd-deut" color-interpolation-filters="linearRGB">' +
+      `<feColorMatrix type="matrix" values="${matrix}"/></filter>`;
+    document.body.append(svg);
+    document.body.style.filter = 'url(#cvd-deut)';
+  }, values);
+  await page.waitForTimeout(160);
+  await shootRow(page, dir, '13-deuteranopia-player-row', '#player-row');
+  await shootRow(page, dir, '14-deuteranopia-enemy-row', '#enemy-row');
+  await page.evaluate(() => {
+    document.body.style.filter = '';
+  });
+
+  await page.setViewportSize({ width: 700, height: 760 });
+  await page.waitForTimeout(160);
+  await shotOf('10-floor-narrow', '#player-row .card', 2);
+  await shotOf('11-floor-enemy', '#enemy-row .card');
+  await shootRow(page, dir, '12-floor-player-row', '#player-row');
+  await page.setViewportSize({ width: 1440, height: 900 });
 }
 
 async function manifest(): Promise<number> {
@@ -324,8 +491,10 @@ async function main(): Promise<void> {
     if (mode === 'film') {
       await film(page, seed, encounter, theme);
       console.log(`[film] ${encounter} seed ${seed} ${theme}`);
+    } else if (mode === 'hover') {
+      await hover(page, seed, encounter, theme, args[4] === 'hatch');
     } else if (mode === 'narrow') {
-      await narrow(page, seed, encounter, theme);
+      await narrow(page, seed, encounter, theme, args[4] === 'hatch');
     } else {
       const log = await sweep(page, seed, encounter, theme, open);
       for (const s of log) {

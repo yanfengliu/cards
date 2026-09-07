@@ -48,6 +48,31 @@
           <button type="button" data-act="theme" data-theme-value="light">Light</button>
           <button type="button" data-act="theme" data-theme-value="dark">Dark</button>
         </div>
+
+        <!--
+          Tribe is drawn as a field colour and nothing else, and gules sits next
+          to vert on your own line. Hatching adds the heraldic pattern for each
+          tincture, so the race can be read without telling red from green.
+        -->
+        <div class="hud__group">
+          <span class="hud__label" title="Rule each card's field with its heraldic hatching, so race is readable without colour">Hatching</span>
+          <button
+            type="button"
+            data-act="hatch"
+            data-hatch-value="off"
+            title="Fields are flat colour. Race is carried by hue alone."
+          >
+            Off
+          </button>
+          <button
+            type="button"
+            data-act="hatch"
+            data-hatch-value="on"
+            title="Rule each field with its heraldic hatching: gules vertical, azure horizontal, vert diagonal, sable crossed, tenné crossed diagonal, or dotted"
+          >
+            On
+          </button>
+        </div>
       </header>
 
       <div class="stage" id="stage">
@@ -87,7 +112,12 @@
       </footer>
     </div>
 
-    <div class="inspect" id="inspect" hidden></div>
+    <!--
+      What a card means. Announced politely rather than assertively: it follows
+      the pointer and the focus ring, so an assertive region would interrupt a
+      reader on every card they passed over.
+    -->
+    <div class="inspect" id="inspect" role="region" aria-label="Card explanation" aria-live="polite" hidden></div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

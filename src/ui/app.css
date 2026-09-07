@@ -298,18 +298,32 @@ button.is-on {
   letter-spacing: 0.04em;
 }
 
+/*
+ * A trait pip is an icon in a box, and the box is sized off the icon rather than
+ * off a font. `pipIconSize` in `render/board.ts` derives the icon from the card
+ * width so that two pips and their gap still fit inside a 44px card - the floor
+ * ARCHITECTURE.md's compression rule bottoms out at - instead of pushing the row
+ * into a scroll it does not need.
+ */
 .card__pips .pip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 11px;
   font-weight: 900;
   line-height: 13px;
   min-width: 15px;
   text-align: center;
-  padding: 0 3px;
+  padding: 1px 2px;
   border-radius: 3px;
   color: var(--gold);
   background: rgba(217, 165, 32, 0.16);
   border: 1px solid rgba(217, 165, 32, 0.55);
   cursor: help;
+}
+
+.card__pips .pip svg {
+  display: block;
 }
 
 [data-theme='light'] .card__pips .pip {
@@ -936,32 +950,246 @@ button.is-on {
   box-shadow: 0 0 16px rgba(127, 211, 255, 0.9);
 }
 
-/* ---------- inspect ---------- */
+/* ---------- inspect: the panel that explains a card ---------- */
 
+/*
+ * Laid out sideways on purpose.
+ *
+ * The panel used to be a card stacked on a caption, 190px wide and 375px tall,
+ * and a 375px-tall panel does not fit anywhere on this screen that is not one of
+ * the two lines of the board. `app.ts` places it by measuring what each position
+ * would cover; this layout is what makes a position with zero coverage exist at
+ * all. Art on the left, everything else in a column beside it.
+ */
 .inspect {
   position: fixed;
   z-index: 90;
   pointer-events: none;
-  filter: drop-shadow(0 12px 30px rgba(0, 0, 0, 0.45));
+  display: flex;
+  gap: 10px;
+  /*
+   * Wide and short beats narrow and tall, and the width is a measured number
+   * rather than a taste. At 1440x900 the two rows leave three free bands - 120px
+   * above, 180px between, 270px below - and the panel can only be placed clear
+   * of the board if it is shorter than the tallest of them. At 560px it came out
+   * 304px tall and had to sit on the player's own line; at 680px the same
+   * content is 240px and fits the bottom band with room to spare.
+   */
+  width: 680px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 9px 10px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  line-height: 1.4;
 }
 
 .inspect svg {
   display: block;
 }
 
-.inspect__text {
-  margin-top: 6px;
-  width: 190px;
-  padding: 7px 9px;
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  font-size: var(--fs-small);
-  color: var(--ink-2);
+.xp__art {
+  flex: 0 0 auto;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.35));
 }
 
-.inspect__text b {
+.xp__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.xp__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 4px;
+}
+
+.xp__name {
+  font-size: var(--fs-lead);
+  font-weight: 800;
   color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.xp__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* The numbers, as one strip. Each chip shows its icon, its value AND its name,
+   so no number on this panel is a bare glyph anybody has to have been told
+   about. The full sentence is on the chip's title and aria-label. */
+.xp__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.xp__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px 2px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  background: var(--panel-2);
+  cursor: help;
+  white-space: nowrap;
+}
+
+.xp__chip b {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.xp__chip .xp__unit {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.xp__chip.is-safe {
+  border-color: var(--vert);
+  color: var(--vert);
+}
+
+[data-theme='dark'] .xp__chip.is-safe {
+  border-color: #63c47a;
+  color: #63c47a;
+}
+
+.xp__gloss {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+}
+
+.xp__rules,
+.xp__channels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.xp__rule {
+  display: grid;
+  grid-template-columns: 15px 1fr;
+  gap: 6px;
+  align-items: start;
+}
+
+.xp__rule b {
+  color: var(--ink);
+}
+
+.xp__rule svg {
+  margin-top: 2px;
+  color: var(--gold);
+}
+
+[data-theme='light'] .xp__rule svg {
+  color: #8a6707;
+}
+
+.xp__rule--pending svg,
+.xp__rule--pending b {
+  color: var(--azure);
+}
+
+[data-theme='dark'] .xp__rule--pending svg,
+[data-theme='dark'] .xp__rule--pending b {
+  color: #7fa8e8;
+}
+
+/* The three heraldic channels, as a table: what it is, what this card has,
+   and what that means. Three lines rather than three paragraphs, because the
+   panel's height is what decides whether it can avoid the board. */
+.xp__channel {
+  display: grid;
+  grid-template-columns: 13px 52px auto 1fr;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+}
+
+.xp__channel svg {
+  color: var(--ink-3);
+}
+
+.xp__cname {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.xp__cval {
+  color: var(--ink);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.xp__cwhy {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xp__swatch {
+  display: block;
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+.xp__note {
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid var(--rule);
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+  line-height: 1.4;
+}
+
+/*
+ * The panel lands wherever it hides the least board, which is not always beside
+ * the card it describes. This ring is what connects the two.
+ */
+.card.is-inspected .card__art,
+.handcard.is-inspected {
+  outline: 2px solid var(--azure);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.hero.is-inspected {
+  outline: 2px solid var(--azure);
+  outline-offset: 2px;
 }
 
 /* ---------- banner ---------- */

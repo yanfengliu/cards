@@ -16,6 +16,7 @@ export type Intent =
   | { readonly kind: 'skip' }
   | { readonly kind: 'speed'; readonly value: number }
   | { readonly kind: 'theme'; readonly value: 'light' | 'dark' }
+  | { readonly kind: 'hatch'; readonly value: boolean }
   | { readonly kind: 'newFight' }
   | { readonly kind: 'clearSelection' }
   | { readonly kind: 'inspect'; readonly target: HTMLElement | null };
@@ -74,6 +75,11 @@ export function wireInput(root: HTMLElement, dispatch: (intent: Intent) => void)
       case 'theme': {
         const value = act.dataset['themeValue'];
         if (value === 'light' || value === 'dark') dispatch({ kind: 'theme', value });
+        break;
+      }
+      case 'hatch': {
+        const value = act.dataset['hatchValue'];
+        if (value === 'on' || value === 'off') dispatch({ kind: 'hatch', value: value === 'on' });
         break;
       }
     }

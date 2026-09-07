@@ -40,16 +40,16 @@ import {
   lineCost,
   placementsFrom,
 } from './session.ts';
-import { type Beat, type BoardView, type EntityView, findView, snapshot, applyBeat, buildBeats, power, viewDrift } from '../render/view.ts';
+import { type Beat, type BoardView, type EntityView, findView, snapshot, applyBeat, buildBeats, viewDrift } from '../render/view.ts';
 import {
   type LineItem,
   cardViewOf,
   compressedCard,
-  expandedCardOf,
   fitWidth,
   renderRow,
-  titleCase,
 } from '../render/board.ts';
+import { explainCard } from '../render/inspect.ts';
+import { STAT_TERMS, TRAIT_TERMS, tribeTerm } from '../render/glossary.ts';
 import { incomingOdds, pct, projectOwnPhase } from '../render/odds.ts';
 import { type Playback, type Step, play, schedule } from '../render/anim.ts';
 import { makeFx } from '../render/fx.ts';
@@ -57,12 +57,21 @@ import { type Intent, wireInput } from './input.ts';
 
 type Mode = 'planning' | 'resolving' | 'over';
 
-const TRAIT_RULE: Readonly<Record<string, string>> = {
-  relay: 'After acting, the unit to my right gains +2 Power this turn.',
-  ward: 'After acting, the unit to my right cannot be struck this turn.',
-  wake: 'When the unit to my left dies this turn, gain +2 Power.',
-  guard: 'While I live, every attack against my side must target a Guard.',
-};
+/**
+ * A trait's rule, in one sentence, from the one table that has them.
+ *
+ * This used to be a copy of the rules written out in this file, which is how
+ * two of them came to disagree with the resolver's own numbers. `glossary.ts` is
+ * keyed by the engine's `Trait` union and reads `RELAY_POWER`/`WAKE_POWER` out
+ * of the resolver, so a trait that is deleted from the engine stops compiling
+ * here rather than lingering as a sentence about a rule the game no longer has.
+ */
+function traitRule(trait: string): string | null {
+  const term = (TRAIT_TERMS as Readonly<Record<string, { name: string; line: string } | undefined>>)[
+    trait
+  ];
+  return term === undefined ? null : `<b>${term.name}</b> — ${term.line}`;
+}
 
 function need<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -137,6 +146,18 @@ export function startApp(): void {
   let view: BoardView = { player: [], enemy: [] };
   let frozen: { player: number; enemy: number } | null = null;
   let mount = false;
+  /**
+   * Rule every field with its heraldic hatching.
+   *
+   * Tribe is carried by field colour and by nothing else, and gules sits next to
+   * vert on the player's own line - which roughly one man in twelve cannot
+   * separate. Hatching is the seventeenth-century answer to exactly that, and it
+   * is a switch rather than the default only because the reviewed heraldry
+   * goldens are bound to the unhatched bytes; see `RenderOptions.hatch`.
+   */
+  let hatch = false;
+  /** uid -> Power a Relay will hand it on commit, as of the last render. */
+  let pendingPowerNow: ReadonlyMap<number, number> = new Map();
 
   // ---------------------------------------------------------------- setup
 
@@ -262,6 +283,9 @@ export function startApp(): void {
       if (shown !== undefined) shown.warded = e.warded;
     }
     view = previewView;
+    // Kept for the hover panel, which is asked about one card at a time and
+    // must give the same forecast the pip on that card is already showing.
+    pendingPowerNow = pendingPower;
 
     const armed = mode === 'planning' && selected !== null;
     const enemyOdds = incomingOdds(p.state, 'player').chance;
@@ -271,12 +295,14 @@ export function startApp(): void {
     renderRow(dom.enemyRow, liveItems(previewView.enemy), {
       available: rowWidth(dom.enemyRow),
       mount,
+      hatch,
       odds: mode === 'planning' ? enemyOdds : null,
       resolving: false,
     });
     renderRow(dom.playerRow, planItems(previewView, armed), {
       available: rowWidth(dom.playerRow),
       mount,
+      hatch,
       odds: mode === 'planning' ? playerOdds : null,
       ...(mode === 'planning' ? { pendingPower } : {}),
       resolving: false,
@@ -298,6 +324,7 @@ export function startApp(): void {
       available: rowWidth(dom.enemyRow),
       ...(enemyW !== undefined ? { cardWidth: enemyW } : {}),
       mount,
+      hatch,
       odds: null,
       resolving: true,
     });
@@ -305,6 +332,7 @@ export function startApp(): void {
       available: rowWidth(dom.playerRow),
       ...(playerW !== undefined ? { cardWidth: playerW } : {}),
       mount,
+      hatch,
       odds: null,
       resolving: true,
     });
@@ -412,9 +440,26 @@ export function startApp(): void {
       const placedFrom = [...ghostFromHand.values()].includes(index);
       node.disabled = mode !== 'planning' || placedFrom || card.cost > affordable;
       node.classList.toggle('is-selected', selected === index);
-      node.title = placedFrom
-        ? `${card.name} — already in your line this turn`
-        : `${card.name} — cost ${card.cost}`;
+      /*
+       * The whole card, in one sentence, on the button itself.
+       *
+       * A hand card draws a cost bubble, a name and four heraldic channels and
+       * explains none of them; the panel does that on hover, and this is what a
+       * pointer and a screen reader get before the panel opens. The trait names
+       * are here rather than only in the panel because "Guard" is the difference
+       * between a card that protects your hero and one that does not.
+       */
+      const summary =
+        `${card.name}. ${tribeTerm(card.tribe).name} unit. ` +
+        `Costs ${card.cost} ${STAT_TERMS.cost.name}, ${card.power} ${STAT_TERMS.power.name}, ` +
+        `${card.health} ${STAT_TERMS.health.name}` +
+        (card.armour > 0 ? `, ${card.armour} ${STAT_TERMS.armour.name}` : '') +
+        (card.traits.length > 0
+          ? `. ${card.traits.map((t) => TRAIT_TERMS[t].name).join(', ')}`
+          : '. No trait') +
+        (placedFrom ? '. Already in your line this turn' : '');
+      node.title = summary;
+      node.setAttribute('aria-label', summary);
 
       const art = document.createElement('div');
       art.className = 'card__art';
@@ -422,6 +467,7 @@ export function startApp(): void {
       const cost = document.createElement('span');
       cost.className = 'handcard__cost';
       cost.textContent = String(card.cost);
+      cost.title = `${card.cost} ${STAT_TERMS.cost.name} — ${STAT_TERMS.cost.line}`;
       const name = document.createElement('span');
       name.className = 'handcard__name';
       name.textContent = card.name;
@@ -442,7 +488,7 @@ export function startApp(): void {
   function renderHandArt(card: UnitCard): string {
     const cached = handArtCache.get(card.id);
     if (cached !== undefined) return cached;
-    const svg = compressedCard(handCardView(card), 78, mount);
+    const svg = compressedCard(handCardView(card), 78, mount, hatch);
     handArtCache.set(card.id, svg);
     return svg;
   }
@@ -450,9 +496,18 @@ export function startApp(): void {
   function renderEnergy(): void {
     const used = spent();
     dom.energy.textContent = '';
+    // The pips are discs with no text. Named as a group, and each one told
+    // whether it is still yours to spend, because "three blue circles" is not
+    // an explanation of anything.
+    dom.energy.setAttribute(
+      'aria-label',
+      `${ENERGY_PER_TURN - used} of ${ENERGY_PER_TURN} ${STAT_TERMS.cost.name} left. ${STAT_TERMS.cost.line}`,
+    );
     for (let i = 0; i < ENERGY_PER_TURN; i++) {
       const pip = document.createElement('span');
-      pip.className = i < ENERGY_PER_TURN - used ? 'energy__pip' : 'energy__pip is-spent';
+      const left = i < ENERGY_PER_TURN - used;
+      pip.className = left ? 'energy__pip' : 'energy__pip is-spent';
+      pip.title = left ? `${STAT_TERMS.cost.name} — unspent` : `${STAT_TERMS.cost.name} — spent`;
       dom.energy.append(pip);
     }
     const label = document.createElement('span');
@@ -486,10 +541,10 @@ export function startApp(): void {
       return;
     }
     const card = fight.pool.card(cardId);
-    const rule = card.traits.map((t) => TRAIT_RULE[t] ?? '').filter((s) => s.length > 0);
+    const rules = card.traits.map(traitRule).filter((s): s is string => s !== null);
     dom.hint.innerHTML =
-      `Placing <b>${card.name}</b>. ${rule.join(' ')}` +
-      (rule.length === 0 ? ' No trait — where it stands changes only who gets hit.' : '');
+      `Placing <b>${card.name}</b>. ${rules.join(' ')}` +
+      (rules.length === 0 ? ' No trait — where it stands changes only who gets hit.' : '');
   }
 
   function renderBanner(): void {
@@ -825,15 +880,148 @@ export function startApp(): void {
       node.classList.toggle('is-on', (node as HTMLElement).dataset['themeValue'] === value);
     }
     // The mount halo changes the SVG, so every cached raster is stale.
+    repaintAllArt();
+  }
+
+  /**
+   * Turn the heraldic hatching on or off.
+   *
+   * The board tells tribes apart by field colour alone: dwarf is gules, elf is
+   * vert, and they stand next to each other on the player's own line. Roughly
+   * one man in twelve cannot separate red from green, and for them those two
+   * cards differ in nothing at all. Petra Sancta hatching is the answer print
+   * heraldry has used since 1638 - vertical lines for gules, diagonals for vert
+   * - and it puts the tribe channel into shape as well as hue.
+   */
+  function setHatch(value: boolean): void {
+    hatch = value;
+    for (const node of Array.from(dom.app.querySelectorAll('[data-act="hatch"]'))) {
+      node.classList.toggle('is-on', ((node as HTMLElement).dataset['hatchValue'] === 'on') === value);
+    }
+    repaintAllArt();
+  }
+
+  /** Every cached and painted card SVG is stale; make them all repaint. */
+  function repaintAllArt(): void {
     handArtCache.clear();
     for (const node of Array.from(dom.app.querySelectorAll('.card__art'))) {
       delete (node as HTMLElement).dataset['sig'];
     }
+    showInspect(null);
     if (mode === 'resolving') renderRows();
     else render();
   }
 
+  /** The chance the next enemy attack lands on `uid`, as the board shows it. */
+  function chanceFor(uid: number, side: 'player' | 'enemy'): number | null {
+    if (mode !== 'planning') return null;
+    const p = preview();
+    const odds =
+      side === 'player'
+        ? incomingOdds(projectOwnPhase(p.state, 'player'), 'enemy').chance
+        : incomingOdds(p.state, 'player').chance;
+    // Absent means "not in the target pool", which is a chance of zero and not
+    // an absence of information - the board's own badge reads it the same way.
+    // Returning null here is what made the panel silently drop the one number a
+    // player is hovering a Guard to check.
+    return odds.get(uid) ?? 0;
+  }
+
+  /**
+   * Place the panel where it hides the least board.
+   *
+   * The old rule was "below the card if it fits, otherwise above", and above is
+   * exactly where the other line is: hovering one of your own units put a
+   * 190x323 panel over 24,355 square pixels of the enemy row, which is the whole
+   * left half of the line whose numbers you are hovering your own card in order
+   * to compare against. The panel answered "what is this card" by deleting the
+   * question.
+   *
+   * So placement is *scored* rather than ordered. Candidates are the four sides
+   * of the hovered card plus the three free bands the two rows cut the window
+   * into, and the cost of each is the area it would cover, weighted: the row the
+   * card is *not* in is the expensive one, its own row is cheaper because the
+   * pointer is already there, and anything off-screen is worst of all. Distance
+   * from the card breaks ties, so the panel stays next to what it describes
+   * whenever it can do that for free.
+   */
+  function placeInspect(anchor: HTMLElement): void {
+    const pad = 8;
+    const gap = 10;
+    const box = anchor.getBoundingClientRect();
+    const panel = dom.inspect.getBoundingClientRect();
+    const vw = globalThis.innerWidth;
+    const vh = globalThis.innerHeight;
+    const pw = panel.width;
+    const ph = panel.height;
+
+    const rows = {
+      enemy: dom.enemyRow.getBoundingClientRect(),
+      player: dom.playerRow.getBoundingClientRect(),
+    };
+    const ownRow = anchor.closest('#enemy-row') !== null ? 'enemy' : 'player';
+    const otherRow = ownRow === 'enemy' ? 'player' : 'enemy';
+
+    const overlap = (x: number, y: number, r: DOMRect): number => {
+      const w = Math.max(0, Math.min(x + pw, r.right) - Math.max(x, r.left));
+      const h = Math.max(0, Math.min(y + ph, r.bottom) - Math.max(y, r.top));
+      return w * h;
+    };
+    const offscreen = (x: number, y: number): number => {
+      const w = Math.max(0, Math.min(x + pw, vw) - Math.max(x, 0));
+      const h = Math.max(0, Math.min(y + ph, vh) - Math.max(y, 0));
+      return pw * ph - w * h;
+    };
+
+    const clampX = (x: number): number => Math.min(Math.max(pad, x), Math.max(pad, vw - pw - pad));
+    const nearX = clampX(box.left + box.width / 2 - pw / 2);
+    const midY = box.top + box.height / 2;
+    const bandY = (top: number, bottom: number): number =>
+      Math.min(Math.max(top + pad, midY - ph / 2), Math.max(top + pad, bottom - ph - pad));
+
+    const candidates: { x: number; y: number }[] = [
+      { x: nearX, y: box.bottom + gap },
+      { x: nearX, y: box.top - ph - gap },
+      { x: clampX(box.right + gap), y: Math.min(Math.max(pad, midY - ph / 2), vh - ph - pad) },
+      { x: clampX(box.left - pw - gap), y: Math.min(Math.max(pad, midY - ph / 2), vh - ph - pad) },
+      // The three bands the two rows leave: above the top line, between the
+      // lines, and below the bottom one. These are the placements that can be
+      // free of the board entirely, and one of them almost always is.
+      { x: nearX, y: bandY(0, rows.enemy.top) },
+      { x: nearX, y: bandY(rows.enemy.bottom, rows.player.top) },
+      { x: nearX, y: bandY(rows.player.bottom, vh) },
+    ];
+
+    let best = candidates[0]!;
+    let bestCost = Number.POSITIVE_INFINITY;
+    for (const c of candidates) {
+      const cost =
+        overlap(c.x, c.y, rows[otherRow]) * 6 +
+        overlap(c.x, c.y, rows[ownRow]) * 2 +
+        // Covering the card being explained is its own failure - the ring that
+        // says "this one" would be underneath the panel drawn to describe it -
+        // and it is the case a hand card runs into, since the hand sits in the
+        // one band that is free of both rows.
+        overlap(c.x, c.y, box) * 8 +
+        offscreen(c.x, c.y) * 12 +
+        Math.abs(c.y + ph / 2 - midY) * 0.6 +
+        Math.abs(c.x + pw / 2 - (box.left + box.width / 2)) * 0.3;
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = c;
+      }
+    }
+
+    dom.inspect.style.left = `${Math.round(clampX(best.x))}px`;
+    dom.inspect.style.top = `${Math.round(Math.min(Math.max(pad, best.y), Math.max(pad, vh - ph - pad)))}px`;
+  }
+
+  /** The card the panel is currently describing, so the board can point at it. */
+  let inspected: HTMLElement | null = null;
+
   function showInspect(target: HTMLElement | null): void {
+    if (inspected !== null) inspected.classList.remove('is-inspected');
+    inspected = null;
     if (target === null) {
       dom.inspect.hidden = true;
       return;
@@ -845,32 +1033,27 @@ export function startApp(): void {
       const uid = Number.parseInt(target.dataset['uid'] ?? '', 10);
       if (Number.isFinite(uid)) entity = findView(view, uid);
     }
-    if (entity === null || entity.isHero) {
+    if (entity === null) {
       dom.inspect.hidden = true;
       return;
     }
-    const rules = entity.traits
-      .map((t) => `<b>${titleCase(t)}</b> — ${TRAIT_RULE[t] ?? ''}`)
-      .join('<br>');
-    dom.inspect.innerHTML =
-      expandedCardOf(cardViewOf(entity)) +
-      `<div class="inspect__text"><b>${entity.name}</b> · cost ${entity.cost} · ` +
-      `${power(entity)} Power / ${Math.max(0, entity.health)} Health` +
-      (entity.armour > 0 ? ` · armour ${entity.armour}` : '') +
-      (rules.length > 0 ? `<br>${rules}` : '') +
-      '</div>';
+
+    // A hand card is not on the board, so it has no target chance and no
+    // incoming Relay; a card in a line has both, and they are the two things a
+    // player is reading the panel to compare.
+    const onBoard = cardId === undefined;
+    dom.inspect.innerHTML = explainCard(entity, cardViewOf(entity), {
+      chance: onBoard ? chanceFor(entity.uid, entity.side) : null,
+      pendingPower: onBoard ? (pendingPowerNow.get(entity.uid) ?? 0) : 0,
+      hatch,
+      pct,
+    });
     dom.inspect.hidden = false;
-    const box = target.getBoundingClientRect();
-    const panel = dom.inspect.getBoundingClientRect();
-    const left = Math.min(
-      Math.max(8, box.left + box.width / 2 - panel.width / 2),
-      globalThis.innerWidth - panel.width - 8,
-    );
-    const above = box.top - panel.height - 10;
-    const below = box.bottom + 10;
-    const top = below + panel.height < globalThis.innerHeight - 8 ? below : Math.max(8, above);
-    dom.inspect.style.left = `${left}px`;
-    dom.inspect.style.top = `${top}px`;
+    // The panel does not always land beside the card it describes - it lands
+    // wherever it hides the least board - so the card says which one it is.
+    target.classList.add('is-inspected');
+    inspected = target;
+    placeInspect(target);
   }
 
   function dispatch(intent: Intent): void {
@@ -910,6 +1093,9 @@ export function startApp(): void {
       case 'theme':
         setTheme(intent.value);
         break;
+      case 'hatch':
+        setHatch(intent.value);
+        break;
       case 'newFight': {
         const seed = Number.parseInt(dom.seed.value, 10);
         encounterId = dom.encounter.value;
@@ -925,6 +1111,9 @@ export function startApp(): void {
 
   wireInput(document.body, dispatch);
   globalThis.addEventListener('resize', () => {
+    // The panel is placed against the rows' measured rectangles, so a resize
+    // invalidates the placement as surely as it invalidates the card widths.
+    showInspect(null);
     if (mode === 'resolving') renderRows();
     else render();
   });
@@ -934,6 +1123,9 @@ export function startApp(): void {
     globalThis.matchMedia('(prefers-color-scheme: dark)').matches;
   const themeParam = params.get('theme');
   setTheme(themeParam === 'light' || themeParam === 'dark' ? themeParam : prefersDark ? 'dark' : 'light');
+  // `?hatch=1` opens the fight with hatching on, the way `?theme=` and `?seed=`
+  // already make a fight addressable.
+  setHatch(params.get('hatch') === '1' || params.get('hatch') === 'on');
   setSpeed(1);
   newFight(startSeed);
 }
