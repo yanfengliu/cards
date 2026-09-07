@@ -6,10 +6,32 @@
 // RNG has not actually reproduced the fight.
 
 import type { Fight } from './fight.ts';
-import type { Entity, GameState } from './state.ts';
+import { type Entity, type EquipmentSlots, type GameState, EQUIP_SLOTS } from './state.ts';
 
+/**
+ * The three slots, in slot order, each as its card's id and the two numbers the
+ * card contributes. The numbers are there because a rebalanced piece keeps its
+ * id: without them a replay of an old log against a retuned pool would agree
+ * with itself while the fight differed.
+ */
+function equipmentToCanonical(s: EquipmentSlots): string {
+  return EQUIP_SLOTS.map((slot) => {
+    const item = s[slot];
+    return item === null ? `${slot}=-` : `${slot}=${item.id}/${item.power}/${item.armour}`;
+  }).join(',');
+}
+
+/**
+ * An entity, canonically.
+ *
+ * Equipment is appended only when something is worn. That is not tidiness: it
+ * means every hash recorded before equipment existed still reproduces, so the
+ * measurement's numbers and this addition are independent. An empty set of
+ * slots and no slots at all are the same string for the same reason - a hero
+ * wearing nothing is in the same position a unit is.
+ */
 function entityToCanonical(e: Entity): string {
-  return [
+  const base = [
     e.uid,
     e.cardId,
     e.side,
@@ -23,6 +45,11 @@ function entityToCanonical(e: Entity): string {
     e.alive ? 1 : 0,
     e.warded ? 1 : 0,
   ].join(':');
+  const eq = e.equipment;
+  if (eq === null || (eq.weapon === null && eq.armour === null && eq.trinket === null)) {
+    return base;
+  }
+  return `${base}:eq(${equipmentToCanonical(eq)})`;
 }
 
 export function stateToCanonical(state: GameState): string {

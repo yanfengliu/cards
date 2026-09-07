@@ -16,10 +16,12 @@
 // card lookup and the two per-round numbers, so nothing under `src/engine/`
 // reaches into `src/content/`. See `CardPool` in `state.ts`.
 
+import { castSpell, equipItem } from './cast.ts';
 import { type Rng, cloneRng, makeRng, shuffle } from './rng.ts';
 import {
   type Effect,
   type GameEvent,
+  endFight,
   resolvePhase,
   startTurn,
 } from './resolver.ts';
@@ -28,6 +30,8 @@ import {
   type GameState,
   type HeroSpec,
   type Side,
+  cardCost,
+  castableById,
   cloneState,
   heroOf,
   insertUnit,
@@ -73,11 +77,28 @@ export type FightSetup = {
 /** One placed card: which card, and where in the line it goes. */
 export type Placement = { cardId: string; index: number };
 
+/**
+ * One spell cast or one piece of equipment worn. There is nothing to choose
+ * beyond the card: a spell's targeting is the game's own random rule and a
+ * piece of equipment's slot is printed on it.
+ */
+export type CastAction = { cardId: string };
+
 /** Everything a bot decided on one round, and the hand it decided from. */
 export type RoundRecord = {
   round: number;
   handBefore: string[];
   placements: Placement[];
+  /**
+   * Spells and equipment spent this round, in the order they resolved.
+   *
+   * Absent rather than empty when the round cast nothing, so a record from a
+   * unit-only fight is exactly the record it was before spells existed, and an
+   * older log replays without migration - `replayFight` reads `?? []`. Gated by
+   * "a record written before spells existed still replays" in
+   * `test/spells.test.ts`.
+   */
+  casts?: CastAction[];
 };
 
 export type FightRun = {
@@ -180,7 +201,9 @@ export function selectPlays(
     const chosen: number[] = [];
     for (let i = 0; i < n; i++) {
       if ((mask & (1 << i)) === 0) continue;
-      spend += pool.card(hand[i]!).cost;
+      // `cardCost` answers for all three types. For a unit-only pool it is
+      // `pool.card(id).cost`, which is what this line used to read.
+      spend += cardCost(pool, hand[i]!);
       count++;
       chosen.push(i);
     }
@@ -192,6 +215,26 @@ export function selectPlays(
     }
   }
   return best ?? [];
+}
+
+/**
+ * Split already-chosen card ids into bodies to place and cards to spend.
+ *
+ * A pool with no spells or equipment returns everything as a unit, which is
+ * what makes this free to put on the existing path: `castableById` answers
+ * `null` for every id such a pool knows.
+ */
+export function splitPlays(
+  pool: CardPool,
+  ids: readonly string[],
+): { units: string[]; casts: CastAction[] } {
+  const units: string[] = [];
+  const casts: CastAction[] = [];
+  for (const id of ids) {
+    if (castableById(pool, id) === null) units.push(id);
+    else casts.push({ cardId: id });
+  }
+  return { units, casts };
 }
 
 /** Place already-chosen cards at already-chosen indices. */
@@ -209,6 +252,61 @@ export function applyPlacements(f: Fight, placements: readonly Placement[]): voi
   }
 }
 
+/**
+ * Cast already-chosen spells and wear already-chosen equipment, in order.
+ *
+ * Run after `applyPlacements`, so a board-wide buff reaches the bodies played
+ * on the same turn. `docs/design/game.md` lists the spend phase as "place
+ * units, cast spells, equip the hero" and leaves the order inside it to the
+ * player; this is the fixed order the engine offers, and it is the one that
+ * makes a turn's own placements count.
+ */
+export function applyCasts(f: Fight, casts: readonly CastAction[]): void {
+  for (const c of casts) {
+    const i = f.player.hand.indexOf(c.cardId);
+    if (i < 0) {
+      throw new Error(
+        `fight: cannot cast "${c.cardId}" - it is not in hand [${f.player.hand.join(', ')}]`,
+      );
+    }
+    const card = castableById(f.pool, c.cardId);
+    if (card === null) {
+      throw new Error(
+        `fight: "${c.cardId}" is not a spell or a piece of equipment in this pool, ` +
+          `so it cannot be cast. A unit is placed into the line instead.`,
+      );
+    }
+    f.player.hand.splice(i, 1);
+    if (card.kind === 'spell') castSpell(f.state, 'player', card, f.rngCombat);
+    else equipItem(f.state, 'player', card, f.rngCombat);
+  }
+}
+
+/**
+ * Energy is one pool for all three card types.
+ *
+ * `ARCHITECTURE.md` lists conservation - energy spent never exceeds energy
+ * available - among the invariants a property test should hold. `selectPlays`
+ * already respects it, so this never fires for a bot; it fires for a hand-built
+ * round, which is what a UI will produce.
+ */
+function checkEnergy(
+  f: Fight,
+  placements: readonly Placement[],
+  casts: readonly CastAction[],
+): void {
+  let spent = 0;
+  for (const p of placements) spent += cardCost(f.pool, p.cardId);
+  for (const c of casts) spent += cardCost(f.pool, c.cardId);
+  if (spent > f.pool.energyPerTurn) {
+    throw new Error(
+      `fight: round ${f.round} spends ${spent} energy on ${placements.length} unit(s) and ` +
+        `${casts.length} cast(s), but a side has ${f.pool.energyPerTurn} per turn. ` +
+        `Units, spells and equipment all draw from the same pool.`,
+    );
+  }
+}
+
 /** The enemy plays the same selection policy and always appends at its right end. */
 function enemyPlays(f: Fight): void {
   drawTo(f.enemy, f.pool.handSize);
@@ -217,8 +315,17 @@ function enemyPlays(f: Fight): void {
   for (const id of ids) {
     const at = f.enemy.hand.indexOf(id);
     f.enemy.hand.splice(at, 1);
-    const unit = makeUnit(f.state, 'enemy', f.pool.card(id));
-    insertUnit(f.state, 'enemy', unit, unitCount(f.state, 'enemy'));
+    // Units are placed; spells and equipment are spent. A unit-only pool takes
+    // the first branch every time, which is the whole of the existing path.
+    const castable = castableById(f.pool, id);
+    if (castable === null) {
+      const unit = makeUnit(f.state, 'enemy', f.pool.card(id));
+      insertUnit(f.state, 'enemy', unit, unitCount(f.state, 'enemy'));
+    } else if (castable.kind === 'spell') {
+      castSpell(f.state, 'enemy', castable, f.rngCombat);
+    } else {
+      equipItem(f.state, 'enemy', castable, f.rngCombat);
+    }
   }
 }
 
@@ -227,14 +334,28 @@ function settleResult(f: Fight): void {
   const playerHero = heroOf(f.state, 'player');
   if (!enemyHero.alive) f.result = 'playerWin';
   else if (!playerHero.alive) f.result = 'enemyWin';
+  // "Equipment resets at the end of every fight" - the design's own rule, and
+  // the split that keeps equipment the per-fight layer and sigils the run-long
+  // one. A fight where nothing was equipped is untouched by this.
+  if (f.result !== 'ongoing') endFight(f.state);
 }
 
 /**
  * Run one round. `decide` is called after the draw and before any placement,
  * and returns the cards to place and where. There is exactly one round code
  * path, so replay exercises the same one the bots do.
+ *
+ * `decideCasts` is the same thing for spells and equipment, and it defaults to
+ * `null`, which is no casts at all. A caller written before the other two card
+ * types existed compiles and behaves exactly as it did - the parameter is not
+ * read, `casts` is left off the record, and no energy, hand card or random draw
+ * moves.
  */
-export function runRound(f: Fight, decide: (f: Fight) => Placement[]): RoundRecord | null {
+export function runRound(
+  f: Fight,
+  decide: (f: Fight) => Placement[],
+  decideCasts: ((f: Fight) => CastAction[]) | null = null,
+): RoundRecord | null {
   if (f.result !== 'ongoing') return null;
   f.round++;
 
@@ -242,9 +363,15 @@ export function runRound(f: Fight, decide: (f: Fight) => Placement[]): RoundReco
   drawTo(f.player, f.pool.handSize);
   const handBefore = f.player.hand.slice();
   const placements = decide(f);
-  const record: RoundRecord = { round: f.round, handBefore, placements };
+  const casts = decideCasts === null ? [] : decideCasts(f);
+  checkEnergy(f, placements, casts);
+  const record: RoundRecord =
+    casts.length === 0
+      ? { round: f.round, handBefore, placements }
+      : { round: f.round, handBefore, placements, casts };
 
   applyPlacements(f, placements);
+  applyCasts(f, casts);
   resolvePhase(f.state, 'player', f.rngCombat);
   settleResult(f);
   if (f.result !== 'ongoing') return record;
@@ -255,7 +382,10 @@ export function runRound(f: Fight, decide: (f: Fight) => Placement[]): RoundReco
   settleResult(f);
   if (f.result !== 'ongoing') return record;
 
-  if (f.round >= f.maxRounds) f.result = 'timeout';
+  if (f.round >= f.maxRounds) {
+    f.result = 'timeout';
+    endFight(f.state);
+  }
   return record;
 }
 
@@ -265,19 +395,29 @@ export function runFight(setup: FightSetup, policy: PlacementPolicy): FightRun {
   const log: RoundRecord[] = [];
 
   while (f.result === 'ongoing') {
-    const record = runRound(f, (fight) => {
-      const chosen = selectPlays(fight.player.hand, fight.pool.energyPerTurn, fight.pool).map(
-        (i) => fight.player.hand[i]!,
-      );
-      const indices = policy(fight, chosen);
-      if (indices.length !== chosen.length) {
-        throw new Error(
-          `fight: placement policy returned ${indices.length} index/indices for ` +
-            `${chosen.length} chosen card(s); it must return exactly one per card`,
+    // Selection happens once, in `decide`; the cards that are not bodies are
+    // handed to `decideCasts` through this. With a unit-only pool `splitPlays`
+    // puts everything in `units` and this stays empty for the whole fight.
+    let pendingCasts: CastAction[] = [];
+    const record = runRound(
+      f,
+      (fight) => {
+        const chosen = selectPlays(fight.player.hand, fight.pool.energyPerTurn, fight.pool).map(
+          (i) => fight.player.hand[i]!,
         );
-      }
-      return chosen.map((cardId, i) => ({ cardId, index: indices[i]! }));
-    });
+        const split = splitPlays(fight.pool, chosen);
+        pendingCasts = split.casts;
+        const indices = policy(fight, split.units);
+        if (indices.length !== split.units.length) {
+          throw new Error(
+            `fight: placement policy returned ${indices.length} index/indices for ` +
+              `${split.units.length} chosen card(s); it must return exactly one per card`,
+          );
+        }
+        return split.units.map((cardId, i) => ({ cardId, index: indices[i]! }));
+      },
+      () => pendingCasts,
+    );
     if (record !== null) log.push(record);
   }
 
@@ -292,7 +432,14 @@ export function replayFight(setup: FightSetup, log: readonly RoundRecord[]): Fig
   const f = setupFight(setup);
   for (const rec of log) {
     if (f.result !== 'ongoing') break;
-    runRound(f, () => rec.placements.slice());
+    // A record written before spells existed has no `casts` field. That is the
+    // whole migration: absent means the round cast nothing.
+    const casts = rec.casts ?? [];
+    runRound(
+      f,
+      () => rec.placements.slice(),
+      () => casts.slice(),
+    );
   }
   return f;
 }

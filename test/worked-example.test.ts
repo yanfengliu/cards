@@ -2,10 +2,16 @@
 // walks it through the engine and checks every number in it.
 //
 // One substitution: the design's third card is an Iron Sword (Equipment,
-// hero +3 Power) and equipment is out of scope for this probe, so the Knight
-// is given base Power 5 instead of 2. The arithmetic the example is proving -
-// armour subtracted per attack, Relay's flat +2 landing on whoever is to the
-// right, the hero swinging last - is unchanged.
+// hero +3 Power) and equipment did not exist when this was written, so the
+// Knight is given base Power 5 instead of 2. The arithmetic the example is
+// proving - armour subtracted per attack, Relay's flat +2 landing on whoever is
+// to the right, the hero swinging last - is unchanged.
+//
+// Equipment exists now, and the substitution is kept rather than undone: this
+// file is about the cascade and the packaging, and folding the sword in keeps
+// one thing under test per file. The real card, at its printed numbers, is run
+// against the example's own Troll by "the worked example's Iron Sword" in
+// `test/equipment.test.ts`.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

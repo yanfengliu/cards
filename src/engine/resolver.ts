@@ -18,12 +18,25 @@
 // The queue is drained once per acting entity, which is what "resolves left to
 // right, one unit at a time" means: a unit's whole cascade finishes before its
 // neighbour starts.
+//
+// Two more orderings arrived with spells, and both are player-visible for the
+// first time because AoE is the first effect that can put two entities at zero
+// Health at once:
+//
+//   - an effect that touches many entities touches them in board order, and
+//     emits one event per entity in that order
+//   - all of that damage lands before any of it is checked, so the deaths it
+//     causes are announced together at one checkpoint rather than interleaved
 
 import { type Rng, pick } from './rng.ts';
 import {
   type Entity,
+  type EquipSlot,
+  type EquipmentCard,
   type GameState,
   type Side,
+  EQUIP_SLOTS,
+  armourOf,
   findEntity,
   otherSide,
   power,
@@ -35,7 +48,14 @@ export type Effect =
   | { kind: 'attack'; uid: number }
   | { kind: 'afterAct'; uid: number }
   | { kind: 'gainPower'; uid: number; amount: number; sourceUid: number }
-  | { kind: 'grantWard'; uid: number; sourceUid: number };
+  | { kind: 'grantWard'; uid: number; sourceUid: number }
+  // The spell and equipment verbs. `uid` is the caster throughout, matching
+  // `attack`, so every effect in the union still names the entity that is doing
+  // something and the loop trace stays one shape.
+  | { kind: 'damageOne'; uid: number; amount: number }
+  | { kind: 'damageAll'; uid: number; side: Side; amount: number }
+  | { kind: 'buffAll'; uid: number; side: Side; amount: number }
+  | { kind: 'equip'; uid: number; item: EquipmentCard };
 
 export type GameEvent =
   | { kind: 'acted'; uid: number }
@@ -44,7 +64,16 @@ export type GameEvent =
   | { kind: 'fizzled'; uid: number }
   | { kind: 'powerGained'; uid: number; amount: number }
   | { kind: 'warded'; uid: number }
-  | { kind: 'died'; uid: number; side: Side; leftUid: number | null; rightUid: number | null };
+  | { kind: 'died'; uid: number; side: Side; leftUid: number | null; rightUid: number | null }
+  /** Damage that did not come from an attack. Same four fields as `attacked`. */
+  | { kind: 'damaged'; uid: number; targetUid: number; raw: number; dealt: number }
+  | {
+      kind: 'equipped';
+      uid: number;
+      itemId: string;
+      slot: EquipSlot;
+      replacedId: string | null;
+    };
 
 /**
  * One extra trigger rule, asked of every living entity inside the same
@@ -143,7 +172,7 @@ function apply(
       const raw = power(e);
       // Armour is flat per attack, to a minimum of zero. Damage does not carry:
       // the whole hit lands on one target and any excess is wasted.
-      const dealt = Math.max(0, raw - target.armour);
+      const dealt = Math.max(0, raw - armourOf(target));
       target.health -= dealt;
       return {
         events: [{ kind: 'attacked', uid: e.uid, targetUid: target.uid, raw, dealt }],
@@ -173,6 +202,113 @@ function apply(
       e.warded = true;
       return { events: [{ kind: 'warded', uid: e.uid }], spawned: [] };
     }
+
+    /**
+     * A spell's single-target damage. It picks the way an attack does - same
+     * `legalTargets`, so Guard narrows the pool and a warded entity is out of
+     * it - and it lands a number from the card instead of the caster's Power.
+     * With no legal target it fizzles rather than throwing, as an attack does.
+     */
+    case 'damageOne': {
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive) return { events: [], spawned: [] };
+      const targets = legalTargets(state, e);
+      if (targets.length === 0) {
+        return { events: [{ kind: 'fizzled', uid: e.uid }], spawned: [] };
+      }
+      const target = pick(rng, targets);
+      const dealt = Math.max(0, effect.amount - armourOf(target));
+      target.health -= dealt;
+      return {
+        events: [
+          { kind: 'damaged', uid: e.uid, targetUid: target.uid, raw: effect.amount, dealt },
+        ],
+        spawned: [],
+      };
+    }
+
+    /**
+     * The AoE, and the first effect in the game that can put two entities at
+     * zero Health at once. Three properties, each of them load-bearing:
+     *
+     *   - It is ONE effect. Every target is damaged here, and the checkpoint
+     *     runs once afterwards, so both deaths are announced at one checkpoint
+     *     in `checkStateBased`'s board order and the triggers answering them
+     *     queue in that same order. Splitting it into one effect per target
+     *     would interleave the deaths with the damage and change that order.
+     *   - It consults no target-selection rule. `legalTargets` is where Guard
+     *     and Ward live, and it is asked which single entity to strike; an AoE
+     *     picks nobody, so it never asks. A wide board of Guards is exactly the
+     *     board `docs/design/game.md` names AoE as the counter to.
+     *   - It hits units and not heroes. AoE is the answer to a wide board, not
+     *     a way to burn a hero down; a hero is reached by attacking it.
+     *
+     * Armour still applies, per target, so the design's "concentrate against
+     * armour, spread against a swarm" inversion survives contact with spells.
+     */
+    case 'damageAll': {
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive) return { events: [], spawned: [] };
+      const events: GameEvent[] = [];
+      for (const t of state.board[effect.side]) {
+        if (!t.alive || t.isHero) continue;
+        const dealt = Math.max(0, effect.amount - armourOf(t));
+        t.health -= dealt;
+        events.push({ kind: 'damaged', uid: e.uid, targetUid: t.uid, raw: effect.amount, dealt });
+      }
+      if (events.length === 0) {
+        return { events: [{ kind: 'fizzled', uid: e.uid }], spawned: [] };
+      }
+      return { events, spawned: [] };
+    }
+
+    /**
+     * A board-wide buff, which `docs/design/game.md` puts in spells precisely
+     * so no cascade trait has to count anything. It reaches the hero too: the
+     * hero is the rightmost entity of its own line, not a back rank.
+     *
+     * Like every other buff it lasts until the owner's next `startTurn`.
+     */
+    case 'buffAll': {
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive) return { events: [], spawned: [] };
+      const events: GameEvent[] = [];
+      for (const t of state.board[effect.side]) {
+        if (!t.alive) continue;
+        t.bonusPower += effect.amount;
+        events.push({ kind: 'powerGained', uid: t.uid, amount: effect.amount });
+      }
+      if (events.length === 0) {
+        return { events: [{ kind: 'fizzled', uid: e.uid }], spawned: [] };
+      }
+      return { events, spawned: [] };
+    }
+
+    /**
+     * Wear a piece of equipment. A new piece replaces whatever is in that slot,
+     * and the replaced piece is named in the event so the animation can show
+     * the swap. An entity with no slots - every unit - is skipped, the same
+     * answer `apply` gives to every other effect it cannot land.
+     */
+    case 'equip': {
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive || e.equipment === null) return { events: [], spawned: [] };
+      const slot = effect.item.slot;
+      const replaced = e.equipment[slot];
+      e.equipment[slot] = effect.item;
+      return {
+        events: [
+          {
+            kind: 'equipped',
+            uid: e.uid,
+            itemId: effect.item.id,
+            slot,
+            replacedId: replaced === null ? null : replaced.id,
+          },
+        ],
+        spawned: [],
+      };
+    }
   }
 }
 
@@ -194,9 +330,13 @@ function apply(
  * `test/resolver-order.test.ts`, which need no seam - a unit sitting at zero
  * Health before a checkpoint is enough.
  *
- * Nothing shipped puts two units at zero at once. AoE is the first designed
- * effect that does, and `docs/design/game.md` names AoE as the only counter to
- * a wide board, so this stops being invisible the day that lands.
+ * AoE is the first shipped effect that puts two units at zero at once, and it
+ * landed with `damageAll`. Before it, the order below was reachable only by
+ * parking a unit at zero Health in a fixture; now one spell does it, and the
+ * order two Wake units gain Power in is what a player watches. Gated from the
+ * spell itself by "two Wake units answering one AoE gain Power in board order"
+ * in `test/spells.test.ts`, as well as by the fixture tests in
+ * `test/resolver-order.test.ts`.
  */
 function checkStateBased(state: GameState): GameEvent[] {
   const deaths: GameEvent[] = [];
@@ -414,5 +554,26 @@ export function startTurn(state: GameState, side: Side): void {
   for (const e of state.board[side]) {
     e.bonusPower = 0;
     e.warded = false;
+  }
+}
+
+/**
+ * End of the fight: everything worn comes off.
+ *
+ * "Equipment resets at the end of every fight" is the design's own rule, and it
+ * is what keeps equipment the per-fight tactical layer while sigils stay the
+ * run-long one. Sitting beside `startTurn` for the same reason `startTurn` is
+ * not an `Effect`: both are phase-boundary bookkeeping rather than something a
+ * card did, and neither is a response to an event.
+ *
+ * A fight in which nothing was ever equipped is unchanged by this, which is why
+ * every hash recorded before equipment existed still reproduces.
+ */
+export function endFight(state: GameState): void {
+  for (const side of ['player', 'enemy'] as const) {
+    for (const e of state.board[side]) {
+      if (e.equipment === null) continue;
+      for (const slot of EQUIP_SLOTS) e.equipment[slot] = null;
+    }
   }
 }

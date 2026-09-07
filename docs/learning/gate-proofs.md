@@ -6,6 +6,202 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-07 — spells and equipment, and the AoE that makes simultaneous-death order visible (`test/spells.test.ts`, `test/equipment.test.ts`, `test/casting.test.ts`)
+
+Taken at `06c87c7` with this round's changes applied; the suite is **86 tests** here, 55 before it.
+
+`docs/design/game.md` has three card types and only units existed. This round adds the other two and the four effect verbs they need — `damageOne`, `damageAll`, `buffAll`, `equip` — plus the end-of-fight equipment reset. Twenty-two mutations were applied one at a time, `node --test` run over the whole suite, and the tree restored after each. Every one goes red, and the table records which tests see it.
+
+| mutation | site | failed, of 86 | which |
+|---|---|---|---|
+| `checkStateBased` index loop reversed | `resolver.ts:checkStateBased` | 2 | the AoE board-order test and the existing fixture one |
+| `damageAll` marks the dead inside its own loop | `resolver.ts:apply` | 3 | one-effect-one-checkpoint, AoE board order, enemy casting |
+| `damageAll` no longer skips heroes | `resolver.ts:apply` | 6 | five AoE tests and enemy casting |
+| `damageAll` filtered through `legalTargets` | `resolver.ts:apply` | 1 | AoE consults no target-selection rule |
+| `damageAll` drops the armour term | `resolver.ts:apply` | 1 | AoE armour, per target |
+| `damageOne` picks from every living defender | `resolver.ts:apply` | 2 | bolt targeting, bolt fizzle |
+| `damageOne` drops the armour term | `resolver.ts:apply` | 1 | bolt damage |
+| `buffAll` skips heroes | `resolver.ts:apply` | 4 | the buff tests and both spell-order tests |
+| `equip` refuses to overwrite a filled slot | `resolver.ts:apply` | 1 | slot replacement |
+| `equip` ignores the item's own slot | `resolver.ts:apply` | 2 | slot independence, end-of-fight reset |
+| `equip` drops the no-slots guard | `resolver.ts:apply` | 1 | equipping a unit |
+| `attack` reads `target.armour` again instead of `armourOf` | `resolver.ts:apply` | 1 | worn Armour |
+| `power()` drops `equipPower` | `state.ts:power` | 6 | every equipment test that reads a number |
+| `cloneEntity` shares the slots object | `state.ts:cloneEntity` | 1 | the clone test |
+| `spellQueue` builds its effects in reverse | `cast.ts:spellQueue` | 2 | spell order, verb binding |
+| `spellQueue` drops the `buffAll` case | `cast.ts:spellQueue` | 5 | every buff test and verb binding |
+| `runRound` no longer checks the energy budget | `fight.ts:runRound` | 2 | conservation, and the third arm of the message test |
+| casts applied before placements | `fight.ts:runRound` | 1 | placements-before-casts |
+| `settleResult` no longer calls `endFight` | `fight.ts:settleResult` | 1 | a fight that ends armed |
+| `replayFight` drops the `casts` argument | `fight.ts:replayFight` | 1 | replay over the mixed deck |
+| `splitPlays` inverts its branch | `fight.ts:splitPlays` | 17 | its own test plus every fight-level test in the suite |
+| the equipment segment appended unconditionally | `hash.ts:entityToCanonical` | 1 | the canonical-form test |
+
+### The one the round exists for: AoE makes simultaneous-death order player-visible
+
+Before this, nothing in the game put two units at zero Health in a single effect. The order two simultaneous deaths are announced in was gated — in the entry below — but only through a fixture with a unit parked at zero Health, which is the *state* AoE produces and is not AoE. One Firestorm now reaches it, and what a player watches is two units waking in the order they stand.
+
+The fixture is two corpse-and-waker pairs on one enemy line, built right to left so uid order is the exact reverse of board order, killed by one `damageAll 4`. Mutation: `checkStateBased`'s index loop walked backwards.
+
+```
+✖ two Wake units answering one AoE gain Power in board order
+  AssertionError [ERR_ASSERTION]: one AoE, two deaths, announced left to right
+    actual: [ 4, 6 ], expected: [ 6, 4 ]
+✖ two deaths on one line at one checkpoint are announced left to right
+ℹ tests 86   ℹ pass 84   ℹ fail 2
+```
+
+The test asserts the `died` order and then the `powerGained` order, because the second is the part a player sees: the same two deaths and the same final Power, in a different order down the event stream the animation layer replays.
+
+### An AoE is one effect, and that is what puts both deaths at one checkpoint
+
+`ARCHITECTURE.md`: "Health is checked at defined checkpoints, not the instant damage lands." AoE is the first shipped effect where that is observable. The mutation is the one an implementation that had not read the contract would write — mark the dead inside `damageAll`'s own loop:
+
+```ts
+        t.health -= dealt;
+        events.push({ kind: 'damaged', ... });
+        if (t.health <= 0) { t.alive = false; events.push({ kind: 'died', ... }); }   // added
+```
+
+```
+✖ an AoE is one effect: every target is damaged before any death is announced
+  AssertionError [ERR_ASSERTION]: all four hits land, then the checkpoint announces both deaths, then the wakes answer
+    actual:   [ 'damaged', 'died', 'damaged', 'damaged', 'died', 'damaged' ]
+    expected: [ 'damaged', 'damaged', 'damaged', 'damaged', 'died', 'died', 'powerGained', 'powerGained' ]
+✖ two Wake units answering one AoE gain Power in board order
+✖ the enemy spends on spells too, not only on bodies
+ℹ tests 86   ℹ pass 83   ℹ fail 3
+```
+
+Two things in that diff rather than one: the deaths interleave with the damage, **and** both Wake triggers vanish entirely, because a death announced by hand never reaches `triggersFor`. Splitting one AoE into one effect per target is the same defect wearing different clothes and the same test catches it.
+
+### The verbs, one mutation each
+
+`damageAll` consults no target-selection rule — `legalTargets` is where Guard and Ward live, and it answers "which single entity does this strike". Filtering the AoE through it:
+
+```
+✖ an AoE consults no target-selection rule: Guard and Ward do not narrow it
+  AssertionError [ERR_ASSERTION]: and so is the unit the Guard would otherwise have covered
+    actual: 9, expected: 7
+ℹ tests 86   ℹ pass 85   ℹ fail 1
+```
+
+Armour still applies, per target, so the design's "concentrate against armour, spread against a swarm" inversion survives contact with spells. Dropping the armour term from `damageAll`:
+
+```
+✖ an AoE subtracts each target’s own Armour, so it is blunted unit by unit
+  AssertionError [ERR_ASSERTION]: flat per target, to a minimum of zero
+    actual: [ 3, 3, 3 ], expected: [ 3, 1, 0 ]
+ℹ tests 86   ℹ pass 85   ℹ fail 1
+```
+
+`damageOne` picks the way an attack does. Pointing it at every living defender instead of at `legalTargets` breaks both the Guard half and the fizzle half:
+
+```
+✖ single-target spell damage picks the way an attack does: Guard narrows the pool
+  AssertionError [ERR_ASSERTION]: the only Guard is the only legal target
+    actual: [ 4, 3, 2 ], expected: [ 3 ]
+✖ a single-target spell with no legal target fizzles rather than throwing
+ℹ tests 86   ℹ pass 84   ℹ fail 2
+```
+
+`buffAll` reaches the hero, which `damageAll` deliberately does not. Skipping heroes there:
+
+```
+✖ a board-wide buff reaches every living unit on the caster’s line and the hero
+  AssertionError [ERR_ASSERTION]: left to right along the caster’s own line, hero last because the hero stands last
+    actual: [ 3, 4 ], expected: [ 3, 4, 1 ]
+ℹ tests 86   ℹ pass 82   ℹ fail 4
+```
+
+`spellQueue` is the one place a card's data becomes an effect, so both ways it can be wrong are gated: order, and a dropped verb. Reversing the array, and separately deleting the `buffAll` case:
+
+```
+✖ a spell’s effects resolve in the order they are written
+    actual: [ 'buffAll', 'damageAll' ], expected: [ 'damageAll', 'buffAll' ]
+✖ every verb a spell can name is bound to an effect, and the shipped spells only name those
+    actual: [ 'damageOne', 'damageAll', 'gainPower' ]
+    expected: [ 'damageOne', 'damageAll', 'buffAll', 'gainPower' ]
+```
+
+The second is the `AGENTS.md` invariant — card behaviour is data plus a named effect — as an assertion: one effect out per spec in, over the cards actually shipped. A card naming a verb the binder silently drops is the failure it catches.
+
+### Equipment: the worked example's own third card, and the reset
+
+`docs/design/game.md`'s worked example gives the Knight an Iron Sword (weapon, hero +3 Power) against a Stone Troll with Armour 2, and says 5 Power − 2 armour = 3 damage. Until this round that line could only be run by giving the Knight base Power 5, which is what `test/worked-example.test.ts` says in its own header. It now runs with the shipped card at its printed numbers. Mutation: `equipPower(e)` dropped from `power()`.
+
+```
+✖ the worked example’s Iron Sword: the Knight swings at 2 base + 3 sword, for 3 through Armour 2
+  AssertionError [ERR_ASSERTION]: 2 base + 3 sword
+    actual: 2, expected: 5
+ℹ tests 86   ℹ pass 80   ℹ fail 6
+```
+
+Equipment is a summand in `power()` and `armourOf()` rather than a write to `basePower`, so taking a piece off is exact by construction and `basePower` keeps meaning "printed". A unit has no slots at all rather than three empty ones, and dropping that guard is a crash rather than a wrong number:
+
+```
+✖ a unit has no slots at all, so equipping one is skipped rather than thrown at
+  TypeError: Cannot read properties of null (reading 'weapon')
+      at apply (src/engine/resolver.ts:297:35)
+ℹ tests 86   ℹ pass 85   ℹ fail 1
+```
+
+"Equipment resets at the end of every fight" is reached through `runRound`, the one round code path, rather than by calling `endFight` directly — so the test pins that the reset is wired in at all. Mutation: the `endFight` call deleted from `settleResult`.
+
+```
+✖ a fight that ends with the hero armed leaves it unarmed
+  AssertionError [ERR_ASSERTION]: the fight is over, so the sword is off
+    actual: { weapon: { id: 'test:sword', ... }, armour: null, trinket: null }
+    expected: { weapon: null, armour: null, trinket: null }
+ℹ tests 86   ℹ pass 85   ℹ fail 1
+```
+
+### The additive claim, and the gate that holds it
+
+Everything above is an addition, and the claim that it is one rests on a single property: **an entity wearing nothing serialises exactly as it did before equipment existed**. `entityToCanonical` appends its equipment segment only when something is worn, and an empty set of slots is the same string as no slots at all. Mutation: append it unconditionally.
+
+```
+✖ an entity wearing nothing serialises exactly as it did before equipment existed
+  AssertionError [ERR_ASSERTION]: nothing is worn, so nothing about equipment is in the canonical form
+    actual: true, expected: false
+ℹ tests 86   ℹ pass 85   ℹ fail 1
+```
+
+**Behaviour held still, and this is the evidence for it.** `npm run verify` before and after the whole round is **identical line for line apart from its wall-clock line** — same 400-seed arms, same 2,454 compared rounds, same 2,167/4,238 differing placements, same 40 distinct final hashes, same 15.25 pp gap (CI 10.06..20.44), same four-encounter sweep, same negative control, same greedy-vs-exhaustive row. The shipped spells and equipment are deliberately absent from `PLAYER_DECK`, so no fight the measurement runs draws one, and the canonical form of a fight that draws none is byte-identical to what it was.
+
+### Conservation, and the record format
+
+`ARCHITECTURE.md` lists conservation — energy spent never exceeds energy available — among the invariants that should hold over every game, and it had no check. `selectPlays` caps the spend so a bot never breaks it; a hand-built round is where it can be broken, and a UI is a hand-built round. Mutation: the `checkEnergy` call deleted.
+
+```
+✖ units, spells and equipment all draw from the same three energy
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+    expected: /spends 4 energy on 1 unit\(s\) and 2 cast\(s\), but a side has 3 per turn\./
+ℹ tests 86   ℹ pass 84   ℹ fail 2
+```
+
+The second failure there is worth naming rather than hiding: the third arm of "casting says which input was wrong" asserts that an id the pool has never heard of surfaces the **pool's** message, and it does so because `checkEnergy` has to price the card before anything else touches it. Remove the check and that id reaches the "not in hand" message instead. The two tests are coupled through the order of the two errors, and that coupling is real behaviour rather than a test artefact.
+
+`RoundRecord` gained an optional `casts` field, and it is left off rather than set to `[]` when a round casts nothing — so a record from a unit-only fight is exactly the record it was before spells existed. The reader's rule is `rec.casts ?? []`. Dropping the argument from `replayFight`'s `runRound` call replays the placements and casts nothing, which desynchronises the hand within one round:
+
+```
+✖ a fight that casts replays byte-identically from its recorded action list
+  Error: fight: cannot play "u_shieldbearer" - it is not in hand [s_bolt, q_iron_sword, s_volley, u_captain, u_hornblower]
+ℹ tests 86   ℹ pass 85   ℹ fail 1
+```
+
+That test runs 25 fights over `PLAYER_DECK_MIXED` and asserts more than 20 rounds actually cast something before it reports success, so a green run cannot mean "the deck never drew a spell".
+
+### What this round does not prove
+
+The AoE ordering tests use two corpse-and-waker pairs on **one** line at **one** checkpoint. A three-way answer, or one spanning both sides from a single AoE, is not covered — the cross-side case is still only gated by the fixture test in the entry below.
+
+The replay and determinism evidence is bound to `PLAYER_DECK_MIXED` over 25 seeds. That deck is not the measured one, on purpose, so none of it is evidence about balance: what a spell costs, and whether any of them belongs in a deck, is untested and is the content-and-balance node's question.
+
+`npm run verify` holding still is evidence that the additions are inert on the path the measurement runs, not that they are correct on the path it does not. The measurement never draws a spell, so it can say nothing about one.
+
+Three decisions inside these gates are guesses that the owner may want to reverse, and each is a data or one-line change rather than a redesign: that Armour applies to spell damage, that an AoE hits units and never heroes, and that an AoE ignores Guard and Ward. They are recorded in `docs/work/4_spells-equipment/plan.md`.
+
 ## 2026-09-06 — six ordering gates that were pinned to nothing, and a latent crash closed (`test/resolver-order.test.ts`)
 
 Taken at `49f017b` with this round's changes applied; the suite is **55 tests** here, 47 before it.
