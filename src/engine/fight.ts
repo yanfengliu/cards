@@ -11,6 +11,10 @@
 // are inserted, which changes how many targeting rolls a fight consumes. A
 // single shared stream would let that shift the card draw order too, and the
 // two arms would then differ by more than the variable under test.
+//
+// The card data is handed in, never imported: `FightSetup.pool` carries the
+// card lookup and the two per-round numbers, so nothing under `src/engine/`
+// reaches into `src/content/`. See `CardPool` in `state.ts`.
 
 import { type Rng, cloneRng, makeRng, shuffle } from './rng.ts';
 import {
@@ -20,6 +24,7 @@ import {
   startTurn,
 } from './resolver.ts';
 import {
+  type CardPool,
   type GameState,
   type HeroSpec,
   type Side,
@@ -30,7 +35,6 @@ import {
   makeUnit,
   unitCount,
 } from './state.ts';
-import { ENERGY_PER_TURN, HAND_SIZE, cardById } from '../content/cards.ts';
 
 export type FightResult = 'ongoing' | 'playerWin' | 'enemyWin' | 'timeout';
 
@@ -50,10 +54,14 @@ export type Fight = {
   enemy: SideState;
   rngCombat: Rng;
   rngDeck: Rng;
+  /** The cards this fight is fought with. Data in, never reached for. */
+  pool: CardPool;
 };
 
 export type FightSetup = {
   seed: number;
+  /** The card data, the energy per round and the hand size. */
+  pool: CardPool;
   playerDeck: readonly string[];
   enemyDeck: readonly string[];
   enemyOpening: readonly string[];
@@ -99,7 +107,7 @@ export function setupFight(setup: FightSetup): Fight {
   const enemyDeck = shuffle(rngDeck, setup.enemyDeck.slice());
 
   for (const id of setup.enemyOpening) {
-    const unit = makeUnit(state, 'enemy', cardById(id));
+    const unit = makeUnit(state, 'enemy', setup.pool.card(id));
     insertUnit(state, 'enemy', unit, unitCount(state, 'enemy'));
   }
 
@@ -113,6 +121,7 @@ export function setupFight(setup: FightSetup): Fight {
     enemy: { deck: enemyDeck, cursor: 0, hand: [] },
     rngCombat,
     rngDeck,
+    pool: setup.pool,
   };
 }
 
@@ -123,15 +132,21 @@ export function cloneFight(f: Fight): Fight {
     maxRounds: f.maxRounds,
     result: f.result,
     state: cloneState(f.state),
-    player: { deck: f.player.deck, cursor: f.player.cursor, hand: f.player.hand.slice() },
-    enemy: { deck: f.enemy.deck, cursor: f.enemy.cursor, hand: f.enemy.hand.slice() },
+    // The decks are copied, not shared. Nothing writes to a deck today, so this
+    // costs two array copies and buys the first mill, shuffle-in or tutor
+    // effect: without it a lookahead rollout would write through into the live
+    // fight it is only supposed to be looking at.
+    player: { deck: f.player.deck.slice(), cursor: f.player.cursor, hand: f.player.hand.slice() },
+    enemy: { deck: f.enemy.deck.slice(), cursor: f.enemy.cursor, hand: f.enemy.hand.slice() },
     rngCombat: cloneRng(f.rngCombat),
     rngDeck: cloneRng(f.rngDeck),
+    // The pool is immutable data shared by every fight, so the reference is the copy.
+    pool: f.pool,
   };
 }
 
-/** Draw to `HAND_SIZE`. Running the deck out just stops the draw. */
-export function drawTo(side: SideState, handSize: number = HAND_SIZE): void {
+/** Draw to `handSize`. Running the deck out just stops the draw. */
+export function drawTo(side: SideState, handSize: number): void {
   while (side.hand.length < handSize && side.cursor < side.deck.length) {
     side.hand.push(side.deck[side.cursor]!);
     side.cursor++;
@@ -149,7 +164,11 @@ export function drawTo(side: SideState, handSize: number = HAND_SIZE): void {
  * The rule: spend as much of the energy as possible; break ties toward playing
  * more cards; break remaining ties toward earlier positions in hand.
  */
-export function selectPlays(hand: readonly string[], energy: number): number[] {
+export function selectPlays(
+  hand: readonly string[],
+  energy: number,
+  pool: CardPool,
+): number[] {
   const n = hand.length;
   let best: number[] | null = null;
   let bestSpend = -1;
@@ -161,7 +180,7 @@ export function selectPlays(hand: readonly string[], energy: number): number[] {
     const chosen: number[] = [];
     for (let i = 0; i < n; i++) {
       if ((mask & (1 << i)) === 0) continue;
-      spend += cardById(hand[i]!).cost;
+      spend += pool.card(hand[i]!).cost;
       count++;
       chosen.push(i);
     }
@@ -185,20 +204,20 @@ export function applyPlacements(f: Fight, placements: readonly Placement[]): voi
       );
     }
     f.player.hand.splice(i, 1);
-    const unit = makeUnit(f.state, 'player', cardById(p.cardId));
+    const unit = makeUnit(f.state, 'player', f.pool.card(p.cardId));
     insertUnit(f.state, 'player', unit, p.index);
   }
 }
 
 /** The enemy plays the same selection policy and always appends at its right end. */
 function enemyPlays(f: Fight): void {
-  drawTo(f.enemy);
-  const idx = selectPlays(f.enemy.hand, ENERGY_PER_TURN);
+  drawTo(f.enemy, f.pool.handSize);
+  const idx = selectPlays(f.enemy.hand, f.pool.energyPerTurn, f.pool);
   const ids = idx.map((i) => f.enemy.hand[i]!);
   for (const id of ids) {
     const at = f.enemy.hand.indexOf(id);
     f.enemy.hand.splice(at, 1);
-    const unit = makeUnit(f.state, 'enemy', cardById(id));
+    const unit = makeUnit(f.state, 'enemy', f.pool.card(id));
     insertUnit(f.state, 'enemy', unit, unitCount(f.state, 'enemy'));
   }
 }
@@ -220,7 +239,7 @@ export function runRound(f: Fight, decide: (f: Fight) => Placement[]): RoundReco
   f.round++;
 
   startTurn(f.state, 'player');
-  drawTo(f.player);
+  drawTo(f.player, f.pool.handSize);
   const handBefore = f.player.hand.slice();
   const placements = decide(f);
   const record: RoundRecord = { round: f.round, handBefore, placements };
@@ -247,7 +266,7 @@ export function runFight(setup: FightSetup, policy: PlacementPolicy): FightRun {
 
   while (f.result === 'ongoing') {
     const record = runRound(f, (fight) => {
-      const chosen = selectPlays(fight.player.hand, ENERGY_PER_TURN).map(
+      const chosen = selectPlays(fight.player.hand, fight.pool.energyPerTurn, fight.pool).map(
         (i) => fight.player.hand[i]!,
       );
       const indices = policy(fight, chosen);
@@ -291,4 +310,4 @@ export function simulateRoundForEval(f: Fight, evalRng: Rng): void {
   settleResult(f);
 }
 
-export type { GameEvent, Effect, Side };
+export type { CardPool, GameEvent, Effect, Side };

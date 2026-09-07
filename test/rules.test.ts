@@ -93,23 +93,35 @@ test('damage does not carry: overkill is wasted', () => {
 
 test('Guard forces attacks onto Guards, randomly among them', () => {
   const f = fixture();
-  const g1 = f.add('enemy', card('g1', 0, 20, 0, ['guard']));
-  const g2 = f.add('enemy', card('g2', 0, 20, 0, ['guard']));
-  f.add('enemy', card('soft', 0, 20, 0));
+  // Health well above the 200 points of damage this test deals, so nothing dies
+  // and the target pool is the same on every one of the rolls below.
+  const g1 = f.add('enemy', card('g1', 0, 400, 0, ['guard']));
+  const g2 = f.add('enemy', card('g2', 0, 400, 0, ['guard']));
+  const soft = f.add('enemy', card('soft', 0, 400, 0));
 
   const attacker = f.add('player', card('att', 1, 5, 0));
   const targets = legalTargets(f.state, attacker).map((e) => e.uid);
   assert.deepEqual(targets.sort(), [g1.uid, g2.uid].sort());
 
-  // Over many rolls both Guards get picked and nothing else ever does.
-  const seen = new Set<number>();
+  // The randomness half has to go through `pick`, on one real combat stream,
+  // and read the targets back out of the events. Indexing the target list with
+  // arithmetic of the test's own would measure the arithmetic: `i * 7919 % 2`
+  // alternates whatever the resolver does, and passes with `pick` deleted.
   const rng = makeRng(11, 'combat');
+  const struck = new Set<number>();
   for (let i = 0; i < 200; i++) {
-    const t = legalTargets(f.state, attacker);
-    seen.add(t[Math.floor((i * 7919) % t.length)]!.uid);
+    const { events } = drain(f.state, [{ kind: 'attack', uid: attacker.uid }], rng);
+    for (const e of events) if (e.kind === 'attacked') struck.add(e.targetUid);
   }
-  assert.equal(seen.size, 2);
-  void rng;
+  const ascending = (a: number, b: number): number => a - b;
+  assert.deepEqual(
+    [...struck].sort(ascending),
+    [g1.uid, g2.uid].sort(ascending),
+    'both Guards were struck and nothing else ever was',
+  );
+  assert.equal(struck.has(soft.uid), false, 'the unguarded unit is never in the pool');
+  assert.ok(g1.health < g1.maxHealth, 'the first Guard actually took hits');
+  assert.ok(g2.health < g2.maxHealth, 'so did the second - a stuck picker fails here');
 });
 
 test('the hero is a legal target once the last Guard dies', () => {
@@ -186,6 +198,41 @@ test('Wake fires when the unit to my left dies', () => {
   );
 });
 
+test('KNOWN DEFECT: Wake is inert - the +2 is always cleared before it can swing', () => {
+  // This records current behaviour. It does not endorse it, and the rule is the
+  // owner's to decide - see docs/work/1_turn-prototype/plan.md, which found Wake
+  // dead for the side that resolves first and left the rule alone.
+  //
+  // The mechanism: `startTurn` clears bonusPower at the start of a side's own
+  // phase, and a side's units only die during the opponent's phase. So the +2
+  // Wake grants is always wiped before the woken unit next acts, and deleting
+  // the trait from the resolver moves no row in any measurement.
+  //
+  // Both directions are gated here. Delete Wake and the first assertion fails;
+  // make the buff survive to the swing and the last two fail. Either way this
+  // test goes red, which is the point: a fix must be noticed, not silently
+  // absorbed by a green suite.
+  const f = fixture(0);
+  const victim = f.add('player', card('victim', 0, 1, 0, ['guard']));
+  const waker = f.add('player', card('waker', 1, 5, 0, ['wake']));
+  // The only Guard on its side, so the woken unit's swing has one legal target.
+  f.add('enemy', card('killer', 5, 40, 0, ['guard']));
+
+  startTurn(f.state, 'enemy');
+  resolvePhase(f.state, 'enemy', makeRng(9, 'combat'));
+  assert.equal(victim.alive, false);
+  assert.equal(waker.bonusPower, 2, 'Wake fired: the unit to the right of the dead one woke');
+
+  // The player's next turn is the earliest the woken unit can spend it.
+  startTurn(f.state, 'player');
+  assert.equal(waker.bonusPower, 0, 'and the buff is gone before the unit can spend it');
+
+  const events = resolvePhase(f.state, 'player', makeRng(10, 'combat'));
+  const swing = events.find((e) => e.kind === 'attacked' && e.uid === waker.uid);
+  assert.ok(swing !== undefined && swing.kind === 'attacked', 'the woken unit swung');
+  assert.equal(swing.raw, 1, 'at its printed Power. Wake never reaches a swing.');
+});
+
 test('Wake does not fire for a death that is not my left neighbour', () => {
   const f = fixture(0);
   const victim = f.add('player', card('victim', 0, 1, 0, ['guard']));
@@ -236,15 +283,37 @@ test('an attack with no legal target fizzles rather than throwing', () => {
   assert.equal(events.some((e) => e.kind === 'fizzled'), true);
 });
 
-test('no unit acts after dying', () => {
+test('no unit acts after dying, even with its action already queued', () => {
+  // The guard being exercised is the `!e.alive` check in `apply`'s `act` case.
+  // Taking the unit off the board before the phase starts does not reach it -
+  // the phase loop skips what it cannot find, and the guard can be deleted
+  // outright with the suite still green. So the unit has to be on the board,
+  // alive when its action is queued, and dead when that action comes up.
   const f = fixture(0);
-  const doomed = f.add('player', card('doomed', 1, 1, 0));
+  const first = f.add('player', card('first', 1, 5, 0));
   f.add('enemy', card('dummy', 0, 99, 0));
-  doomed.health = 0;
-  doomed.alive = false;
-  f.state.board.player = f.state.board.player.filter((e) => e.alive || e.isHero);
-  const events = resolvePhase(f.state, 'player', makeRng(8, 'combat'));
-  assert.equal(events.some((e) => e.kind === 'attacked' && e.uid === doomed.uid), false);
+  const hero = heroOf(f.state, 'player');
+  // Zero Health and not yet through a checkpoint: the state anything is in
+  // between taking a lethal hit and the resolver noticing. A hero stays on the
+  // board when it dies, so the queued action still finds it.
+  hero.health = 0;
+
+  const { events } = drain(
+    f.state,
+    [
+      { kind: 'act', uid: first.uid },
+      { kind: 'act', uid: hero.uid },
+    ],
+    makeRng(8, 'combat'),
+  );
+
+  assert.equal(hero.alive, false, 'the checkpoint after the first action killed the hero');
+  assert.equal(events.some((e) => e.kind === 'died' && e.uid === hero.uid), true);
+  assert.equal(
+    events.some((e) => e.uid === hero.uid && (e.kind === 'acted' || e.kind === 'attacked')),
+    false,
+    'an entity that died before its queued action came up does not act',
+  );
 });
 
 test('the resolver caps its loop and throws with the queue trace', () => {

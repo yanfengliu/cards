@@ -30,6 +30,7 @@ import {
 } from '../engine/fight.ts';
 import { hashFight } from '../engine/hash.ts';
 import {
+  CARD_POOL,
   ENCOUNTERS,
   ENEMY_DECK,
   MAX_ROUNDS,
@@ -56,6 +57,7 @@ export function setupFor(
   const enc = encounterById(encounterId);
   return {
     seed,
+    pool: CARD_POOL,
     playerDeck: cascade ? PLAYER_DECK : PLAYER_DECK_NO_CASCADE,
     enemyDeck: ENEMY_DECK,
     enemyOpening: enc.opening,

@@ -51,6 +51,23 @@ export type Entity = {
   warded: boolean;
 };
 
+/**
+ * The cards a fight is fought with, handed in by whoever starts the fight.
+ *
+ * `engine` depends on nothing and everything depends on `engine` -
+ * ARCHITECTURE.md's module rule - so a fight is *given* its cards rather than
+ * reaching into `src/content/` for them. A pool is data plus a lookup; the
+ * engine never asks it for behaviour.
+ */
+export type CardPool = {
+  /** Card data by id. Throws for an unknown id - the pool owns that message. */
+  readonly card: (id: string) => UnitCard;
+  /** Energy a side may spend on cards each round. */
+  readonly energyPerTurn: number;
+  /** The hand size a side draws up to at the start of its turn. */
+  readonly handSize: number;
+};
+
 export type GameState = {
   board: { player: Entity[]; enemy: Entity[] };
   nextUid: number;

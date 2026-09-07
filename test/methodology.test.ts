@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ENERGY_PER_TURN, PLAYER_CARDS, cardById } from '../src/content/cards.ts';
+import { CARD_POOL, ENERGY_PER_TURN, PLAYER_CARDS, cardById } from '../src/content/cards.ts';
 import { runFight, selectPlays } from '../src/engine/fight.ts';
 import { appendLeftPlacer, appendRightPlacer, lookaheadPlacer, randomPlacer } from '../src/sim/bots.ts';
 import { BOTS, checkSameCards, runArm, setupFor } from '../src/sim/measure.ts';
@@ -18,9 +18,9 @@ test('card selection is a pure function of hand and energy - it cannot see the b
   // The signature is the guarantee. Assert the behaviour too: identical hands
   // give identical selections regardless of anything else in the world.
   const hand = ['u_squire', 'u_captain', 'u_berserker', 'u_shieldbearer', 'u_warden'];
-  const first = selectPlays(hand, ENERGY_PER_TURN);
+  const first = selectPlays(hand, ENERGY_PER_TURN, CARD_POOL);
   for (let i = 0; i < 50; i++) {
-    assert.deepEqual(selectPlays(hand.slice(), ENERGY_PER_TURN), first);
+    assert.deepEqual(selectPlays(hand.slice(), ENERGY_PER_TURN, CARD_POOL), first);
   }
 });
 
@@ -31,7 +31,7 @@ test('card selection never overspends the energy', () => {
     for (let b = 0; b < ids.length; b++) {
       for (let c = 0; c < ids.length; c++) {
         const hand = [ids[a]!, ids[b]!, ids[c]!];
-        const chosen = selectPlays(hand, ENERGY_PER_TURN);
+        const chosen = selectPlays(hand, ENERGY_PER_TURN, CARD_POOL);
         const spend = chosen.reduce((s, i) => s + cardById(hand[i]!).cost, 0);
         assert.ok(spend <= ENERGY_PER_TURN, `spent ${spend} of ${ENERGY_PER_TURN} on ${hand}`);
         assert.equal(new Set(chosen).size, chosen.length, 'a card cannot be played twice');
