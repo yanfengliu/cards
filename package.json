@@ -12,7 +12,10 @@
     "measure": "node src/sim/measure.ts",
     "verify": "node src/sim/measure.ts --verify --seeds 400 --sweep-seeds 400 --search-check 200",
     "probe:heraldry": "node tools/heraldry-probe/shoot.ts",
-    "gates": "npm run typecheck && npm test && npm run verify"
+    "gate:boundaries": "node tools/gates/boundaries.ts",
+    "gate:banned-apis": "node tools/gates/banned-apis.ts",
+    "audit": "npm audit --audit-level=high",
+    "gates": "npm run typecheck && npm run gate:boundaries && npm run gate:banned-apis && npm test && npm run verify"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

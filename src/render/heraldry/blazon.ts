@@ -112,7 +112,15 @@ export function parseBlazon(source: string): Blazon {
     charge = { id: head, tincture: tail };
   }
 
-  return { field: fieldWord, bordure, charge, source };
+  // Spread conditionally rather than assigning `undefined`: under
+  // `exactOptionalPropertyTypes` an absent optional and one present-but-undefined
+  // are different types, and "this card has no bordure" means absent.
+  return {
+    field: fieldWord,
+    ...(bordure !== undefined ? { bordure } : {}),
+    ...(charge !== undefined ? { charge } : {}),
+    source,
+  };
 }
 
 /**
