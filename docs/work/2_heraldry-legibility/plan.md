@@ -103,7 +103,7 @@ A sable field is `#26262b`. The card outline is `#0d0d12`, darker than both the 
 
 Guards escape it, because their heavy bordure supplies the silhouette the outline failed to.
 
-**It is an outline defect, not a palette defect, and the cheap fix works.** A pale mount (`#9aa0ad`) stroked outside the dark outline gives every card an edge on any ground. Verified: `evidence/row15-70px-dark-with-mount.png` against `evidence/row15-70px-dark.png`, same fifteen cards, same size, same background. On a light ground the mount is invisible and costs nothing.
+**It is an outline defect, not a palette defect, and the cheap fix works.** A pale mount (`#9aa0ad`) stroked outside the dark outline gives every card an edge on any ground. Verified: `test/golden/heraldry/row15-70px-dark-with-mount.png` against `test/golden/heraldry/row15-70px-dark.png`, same fifteen cards, same size, same background. On a light ground the mount is invisible and costs nothing.
 
 The renderer exposes this as `RenderOptions.mount`, opt-in, so both arms of the comparison stay reproducible. **The recommendation for the real renderer is to turn it on by default.** Palette B (dragon moved to purpure, dwarf to tenne) also removes the defect and was checked across all six pairs on both grounds, but it is the more expensive answer to a problem the outline causes.
 
@@ -140,7 +140,7 @@ Nothing structural. The four-channel split holds and the compression premise is 
 
 ### Evidence
 
-Promoted under `docs/work/2_heraldry-legibility/evidence/`. Review binds to these bytes; regenerating the probe strands this review rather than inheriting it.
+Promoted under `docs/work/../../../test/golden/heraldry/`. Review binds to these bytes; regenerating the probe strands this review rather than inheriting it.
 
 | File | sha256 | What it shows |
 |---|---|---|
