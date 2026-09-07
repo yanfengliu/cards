@@ -4,6 +4,162 @@ A gate counts only once it has been made to go red by reintroducing the defect i
 
 Auditing a gate means reaching what was measured at the time, never the sentence the gate carries about itself — a gate and its claim can be wrong together and look exactly like a gate that is right.
 
+Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
+
+## 2026-09-06 — six ordering gates that were pinned to nothing, and a latent crash closed (`test/resolver-order.test.ts`)
+
+Taken at `49f017b` with this round's changes applied; the suite is **55 tests** here, 47 before it.
+
+An independent review of the twelve gates below found the seam sound and several gates not gating what they claimed. Each mutation was applied to the stated file, `node --test` run over the whole suite, and the tree restored.
+
+| mutation | site | tests failed, of 55 | which |
+|---|---|---|---|
+| `extra(...)` hoisted into a correct pass of its own after both loops | `resolver.ts:triggersFor` | 1 | the new interleave test, only |
+| that hoist, plus the shipped side and entity loops reversed | `resolver.ts:triggersFor` | 1 | the new interleave test, only |
+| the shipped side and entity loops reversed | `resolver.ts:triggersFor` | 3 | both board-order tests and the interleave test |
+| the shipped entity loop ordered by `uid` | `resolver.ts:triggersFor` | 2 | the index-not-uid test and the interleave test |
+| `checkStateBased` side loop reversed | `resolver.ts:checkStateBased` | 1 | simultaneous deaths, across sides |
+| `checkStateBased` index loop reversed | `resolver.ts:checkStateBased` | 1 | simultaneous deaths, one line |
+| the `deaths` trigger loop moved above the `spawned` loop | `resolver.ts:drain` | 2 | both new reaction-order tests |
+| the `produced` and `deaths` trigger loops swapped | `resolver.ts:drain` | 1 | reactions in event-emission order |
+| `requireEntity` restored in `apply`'s five cases | `resolver.ts:apply` | 1 | the skip-a-departed-entity test |
+| `drain`'s seam default `null` → a no-op `TriggerRule` | `resolver.ts:drain` | 1 | the seam-is-off test |
+| a production call site hands the seam a rule | `fight.ts:248` | 1 | the seam-is-off test |
+| `iterations >= maxIterations` → `>` | `resolver.ts:drain` | 1 | the cap-boundary test |
+
+### The board-order gates were pinned to the shipped loop by nothing but where the seam call sits
+
+The three board-order tests that existed were built from the seam alone, and `extra(...)` happens to be called inside the shipped `for (side) / for (entity)` nest. Nothing asserted that coupling, and the seam's own doc comment sanctioned a separate pass — "after the shipped traits have had their say". Hoisting `extra` into a pass of its own, correctly ordered by board index, and then reversing the shipped loop, left every test green with the shipped board-order loop inverted.
+
+The new test puts a shipped trigger and a seam trigger on **one event**: a `watchDeaths` unit at index 0 and a Wake unit at index 2, both answering one death. Correct is `[watcher, waker]`; the hoist reorders it whether or not the shipped loop is also reversed. The fixture is built right to left, so uid order is the exact reverse of board order and the same test also catches a uid-ordered walk.
+
+Hoist alone — nothing else in the suite sees it:
+
+```
+✖ a shipped trigger and a seam trigger answering one event interleave by board index
+  AssertionError [ERR_ASSERTION]: the seam rule standing at index 0 answers before the shipped Wake at index 2
+    actual: [ 3, 5 ], expected: [ 5, 3 ]
+ℹ tests 55   ℹ pass 54   ℹ fail 1
+```
+
+Hoist plus the shipped loops reversed produces the identical failure, and the identical 1-of-55. That is the review's finding stated as a number: with the seam decoupled, reversing the shipped board-order loop costs one test, and before this round it cost none.
+
+### Simultaneous-death order is decided in `checkStateBased`, which the board-order gate does not reach
+
+When two entities are at zero at one checkpoint, the order their `died` events reach triggers is fixed by `checkStateBased`'s own two loops, not by `triggersFor`. Both are reachable with **no seam**: Wake, plus the corpse-at-zero-Health state already used elsewhere in the file.
+
+One corpse-and-waker pair per side catches the side loop:
+
+```
+✖ two deaths at one checkpoint are announced player line first, then enemy line
+  AssertionError [ERR_ASSERTION]: the player line is checked before the enemy line
+    actual: [ 5, 3 ], expected: [ 3, 5 ]
+ℹ tests 55   ℹ pass 54   ℹ fail 1
+```
+
+Two pairs on one line catch the index loop, and neither test sees the other's mutation:
+
+```
+✖ two deaths on one line at one checkpoint are announced left to right
+  AssertionError [ERR_ASSERTION]: the leftmost death is announced first
+    actual: [ 5, 3 ], expected: [ 3, 5 ]
+ℹ tests 55   ℹ pass 54   ℹ fail 1
+```
+
+Each test asserts the `died` order and then the `powerGained` order, because the second is the part a player sees: the same two deaths, the same final Power, in a different order down the event stream the animation layer replays. `docs/design/game.md` names AoE as the only designated counter to a wide board, and AoE is the first designed effect that puts two units at zero at once.
+
+### "Continuations before reactions" gated one of the two reaction sources
+
+`drain` pushes three loops: `spawned`, then triggers for `produced` events, then triggers for `deaths`. The recorded mutation swapped the first two. The third was untouched by any test, and both of its orderings are reachable from shipped traits alone.
+
+An acting unit with Wake whose left neighbour is a corpse makes one `act` both spawn a continuation and produce a death. Moving the `deaths` loop above `spawned`:
+
+```
+✖ a death's triggers queue behind the acting unit's own continuations
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+    actual:   [ 'act', 'gainPower', 'attack', 'afterAct' ]
+    expected: [ 'act', 'attack', 'afterAct', 'gainPower' ]
+ℹ tests 55   ℹ pass 53   ℹ fail 2
+```
+
+The unit swings at its printed 3 with the loops in order and at 5 with them moved, so this is a damage number and not only a trace.
+
+Swapping `produced` with `deaths` needs both sources non-empty at one checkpoint: a Relay unit's `afterAct` while a corpse sits at zero to its left. Both are reactions, so "continuations before reactions" cannot separate them; what does is that `produced` events are pushed to the event stream before `deaths` are, and the triggers follow the stream.
+
+```
+✖ reactions queue in the order their events were emitted: an effect's own, then the checkpoint's deaths
+  AssertionError [ERR_ASSERTION]: Relay answers the afterActed it was emitted with, before Wake answers the death
+    actual: [ 4, 6 ], expected: [ 6, 4 ]
+ℹ tests 55   ℹ pass 54   ℹ fail 1
+```
+
+### The latent crash, and the two answers the engine gave to one situation
+
+All five `apply` cases called `requireEntity` before their `!e.alive` guard, and `checkStateBased` removes dead non-heroes from the board. So an effect queued against a living unit that dies before the effect comes up reached `requireEntity` and threw. Aimed at a **hero** the same sequence was silent, because line 181 keeps dead heroes on the board and the `!e.alive` guard caught them. One situation, two answers, decided by a filter that exists to anchor the right end of the line.
+
+The fix is to skip: `findEntity`, then `if (e === null || !e.alive) return { events: [], spawned: [] }`. `ARCHITECTURE.md:74` says deaths are batched precisely so this does not depend on evaluation order, and the throw could not have been a useful diagnostic either — `findEntity` returns null identically for "died and was removed" and "never existed".
+
+Reached through `resolvePhase`, the real entry point, with a test-only trigger keyed to `acted` that queues an action against a named entity — `Echo`'s shape in `docs/design/game.md`, "repeat the base action of the unit that resolved immediately before me". Mutation: `requireEntity` restored in all five cases.
+
+```
+✖ an effect naming an entity that has left the board is skipped, and a hero answers the same way
+  Error: state: no entity with uid 5 is on the board
+      at requireEntity (src/engine/state.ts:159:11)
+      at apply (src/engine/resolver.ts:117:17)
+      at drain (src/engine/resolver.ts:350:43)
+      at resolvePhase (src/engine/resolver.ts:392:20)
+ℹ tests 55   ℹ pass 54   ℹ fail 1
+```
+
+The split itself, under that same mutation, by running one half of the test at a time. Hero half only:
+
+```
+ℹ tests 55   ℹ pass 55   ℹ fail 0
+```
+
+Unit half only: the throw above. Same sequence, same trigger, same queued effect — the only difference is whether the victim is filtered off the board.
+
+**Behaviour held still.** The review measured this path unreachable at this revision: 72,000 fights, 79,946,615 effect applications, zero effects naming an absent or dead entity. `npm run verify` before and after the fix is identical line for line apart from its wall-clock line — same 400-seed arms, same 2,454 compared rounds, same 2,167/4,238 differing placements, same 40 distinct final hashes, same 15.25 pp gap. The fix only changes what happens on a path that throws today, so any reachable difference would have shown up as a crash rather than as a different number.
+
+### The seam's `null` default, and why this one gate reads source
+
+Changing `drain`'s `extraTriggers` default from `null` to a no-op `TriggerRule` left the whole suite green, and no fixture can separate them: `triggersFor` asks a no-op rule and it returns nothing. So the test reads the declaration and the call sites instead of the behaviour. What it defends is not the token but what the token buys — the seam is off unless a caller asks, and no caller in `src/` asks.
+
+```
+✖ the test seam is off in production: its default is null, and nothing in src/ passes one
+  AssertionError [ERR_ASSERTION]: both entry points default the seam to null, so an omitted argument is no rule at all
+    actual: [ [ 'drain', '() => []' ], ... ]
+ℹ tests 55   ℹ pass 54   ℹ fail 1
+```
+
+And the other half, adding a fifth argument to one of the four `resolvePhase` calls in `src/engine/fight.ts` — a no-op rule and the same iteration cap, so nothing about the fight changes:
+
+```
+✖ the test seam is off in production: its default is null, and nothing in src/ passes one
+  AssertionError [ERR_ASSERTION]: production passes the seam nothing
+    actual: [ 'src/engine/fight.ts:248  resolvePhase is handed a trigger rule' ]
+    expected: []
+ℹ tests 55   ℹ pass 54   ℹ fail 1
+```
+
+The call scan asserts it reached at least four call sites before it reports zero offenders, so "did not run" cannot come back as "passed". Bound: it proves nothing about a rule handed in at runtime from outside `src/`.
+
+### The iteration cap's boundary
+
+`iterations >= maxIterations` → `>` shifts the cap by exactly one effect and nothing else in the engine notices. The gate holds both sides of the boundary: `act` spawns `attack` and `afterAct`, so the cascade is exactly three effects; at `maxIterations = 3` it finishes, and at `2` it throws having applied exactly two.
+
+```
+✖ the iteration cap is the exact number of effects that may be applied
+  AssertionError [ERR_ASSERTION]: Missing expected exception: a drain needing maxIterations + 1 effects throws
+ℹ tests 55   ℹ pass 54   ℹ fail 1
+```
+
+The half that fired here is the `maxIterations = 2` half; the `= 3` half holds the other direction, so a cap that starts throwing one effect early is caught too.
+
+### What this round does not prove
+
+The interleave test uses one shipped trigger and one seam rule on one line. A three-way interleave, or one that spans both sides, is not covered. The simultaneous-death tests reach the checkpoint through a unit parked at zero Health, which is the state AoE will produce but is not AoE. The seam test reads `src/`, so a rule reaching `drain` from anywhere else is invisible to it. And `npm run verify` holding still is evidence about the 400 seeds it runs, not a proof that no fight anywhere queues an effect against a departed entity — it is evidence that this fix changed nothing that was already happening.
+
 ## 2026-09-06 — `npm run verify`, the optimal-vs-random gap
 
 Claim: at the primary encounter, over the seed window the run names, a bot that searches insertion positions beats a bot that places at random by at least 5.00 percentage points, by a margin whose 95% paired interval excludes zero. Bound stated in `src/sim/measure.ts` — at `gapVerdict` for the threshold and inline at the `--verify` block for what a green run does and does not prove.
@@ -177,7 +333,7 @@ Mutation: `src/sim/bots.ts` restored to its `26e55a8` content, i.e. the `salt` c
 
 The first failure's diff shows the concrete divergence — the same card going to index 1 in the warmed instance and index 0 in the fresh one on round 1 of seed 1, and diverging further every round after.
 
-Reverted; `npm test` green at 37/37.
+Reverted; `npm test` green at 37/37 — taken at `4b45a7e`, where the suite is 37 tests. This branch's merge with the resolver-ordering one made the suite 47 at `49f017b`.
 
 ### What these tests do not prove
 
@@ -188,21 +344,23 @@ Claim: the ordering properties `ARCHITECTURE.md` promises — trigger order is b
 
 These six were the reason for the work. An independent review at `26e55a8` found the engine correct and the suite weak: of 28 mutations that reintroduce a defect the code or docs claim to prevent, **10 left 34/34 green**, and six of those ten were resolution order. They were not untested by oversight — they were **unobservable**. With the shipped pool every trigger is keyed to one uid (`event.uid === e.uid`, or `event.rightUid === e.uid`), so no event can match two units and the board-order loop decides nothing; and no shipped effect both spawns a continuation and produces an event anything triggers on, so the order of those two queue pushes decides nothing either. No fixture built from Relay, Guard, Wake and Ward can tell the correct resolver from any of these broken ones.
 
-Three of the six therefore needed a trigger rule that fires for more than one unit, and the game has none. `drain` and `resolvePhase` gained an optional `extraTriggers` parameter for exactly that: it defaults to `null`, every production caller passes nothing, and `triggersFor`'s doc comment carries the argument for why it exists. **This is the one engine-source change in this round that is not behaviour**, and it is here because a gate nobody can make go red is not a gate.
+Three of the six therefore needed a trigger rule that fires for more than one unit, and the game has none. **Narrowed after review:** that is a claim about the exact recorded mutations *in `triggersFor`*, and it was first written as though it were a claim about resolution order. It is not. Sibling orderings at `checkStateBased` and at `drain`'s third push loop are reachable from Wake alone, were ungated, and are gated in the entry above with no seam at all. `drain` and `resolvePhase` gained an optional `extraTriggers` parameter for exactly that: it defaults to `null`, every production caller passes nothing, and `triggersFor`'s doc comment carries the argument for why it exists. **This is the one engine-source change in this round that is not behaviour**, and it is here because a gate nobody can make go red is not a gate.
 
-Each mutation below was applied to the stated file, `npm test` run against the whole suite, and the tree restored. The suite is 44 tests after this round. Where a mutation fails *only* tests added in this round, that is the review's finding reproduced: the 34 that existed before it do not see the defect.
+Taken at `bcd7dc9`, where the suite is **44 tests**. Every transcript quoted below is from that revision, so its `ℹ tests 44` lines are correct there and nowhere else: `49f017b` merged this branch with the one carrying `src/sim/bots.test.ts` and the suite became 47, and the round after this one took it to 55. All seven mutations were re-run at `49f017b` with that later round applied; the same tests fail, and the re-run column below carries the denominators as they stand there.
+
+Each mutation was applied to the stated file, `npm test` run against the whole suite, and the tree restored. Where a mutation fails *only* tests added in this round, that is the review's finding reproduced: the 34 that existed before it do not see the defect.
 
 Line numbers are as they stood at `26e55a8`, which is how the review named them.
 
-| mutation | site | tests failed | which |
-|---|---|---|---|
-| sides and lines iterated in reverse | `resolver.ts:181-182` | 2 of 44 | both new trigger-order tests |
-| line ordered by `uid` instead of index | `resolver.ts:182` | 1 of 44 | the index-not-uid test |
-| Ward's block moved above Relay's | `resolver.ts:186-199` | 1 of 44 | the within-unit tie-break test |
-| `queue.shift()` → `queue.pop()` | `resolver.ts:254` | 7 of 44 | six new tests and the rewritten act guard |
-| `checkStateBased` deferred to the end of the drain | `resolver.ts:258` | 2 of 44 | the batching test and the act guard |
-| acting order read live by index | `resolver.ts:285-289` | 1 of 44 | the snapshot test |
-| the two `queue.push` loops swapped | `resolver.ts:264-265` | 1 of 44 | the continuations-before-reactions test |
+| mutation | site | failed, of 44 at `bcd7dc9` | re-run, of 55 | which |
+|---|---|---|---|---|
+| sides and lines iterated in reverse | `resolver.ts:181-182` | 2 | 3 | both trigger-order tests, plus the later interleave test |
+| line ordered by `uid` instead of index | `resolver.ts:182` | 1 | 2 | the index-not-uid test, plus the later interleave test |
+| Ward's block moved above Relay's | `resolver.ts:186-199` | 1 | 1 | the within-unit tie-break test |
+| `queue.shift()` → `queue.pop()` | `resolver.ts:254` | 7 | 14 | six of this round's tests and the rewritten act guard, plus seven added later |
+| `checkStateBased` deferred to the end of the drain | `resolver.ts:258` | 2 | 3 | the batching test and the act guard, plus the later departed-entity test |
+| acting order read live by index | `resolver.ts:285-289` | 1 | 1 | the snapshot test |
+| the two `queue.push` loops swapped | `resolver.ts:264-265` | 1 | 2 | the continuations-before-reactions test, plus the later departed-entity test |
 
 The failures themselves.
 
@@ -279,6 +437,8 @@ Bound worth stating, because it is the difference between a gate and a coinciden
 
 Claim: Guard's random target selection really goes through `pick`, and the `!e.alive` guard in `apply`'s `act` case really stops a dead entity acting.
 
+Taken at `bcd7dc9`, where the suite is 44 tests; the `ℹ tests 44` lines below are that revision's.
+
 **"Guard forces attacks onto Guards, randomly among them"** created a generator, discarded it (`void rng`), and then indexed the target list with `t[Math.floor((i * 7919) % t.length)]`. 7919 is odd and the list has two entries, so `seen.size === 2` was the test's own arithmetic alternating; `pick` and `resolvePhase` were never called. It now resolves 200 real attacks on one combat stream and reads the targets out of the events.
 
 Mutation, `src/engine/rng.ts` — `pick` consumes its draw and returns the first element:
@@ -313,6 +473,8 @@ Mutation, `src/engine/resolver.ts` — the `if (!e.alive) return { events: [], s
 
 Claim: `cloneFight` returns a fight that can be written to without reaching the live one. Bound: the test writes to the deck, the hand, an entity and the generator; it does not enumerate future fields, so a new mutable field added to `Fight` and not copied would pass it.
 
+Taken at `bcd7dc9`, where the suite is 44 tests; the `ℹ tests 44` lines below are that revision's.
+
 `cloneFight` passed both decks by reference, so `clone.player.deck === live.player.deck`. Harmless only because nothing writes to a deck after setup — the first mill, shuffle-in or tutor effect makes every lookahead rollout a write into the fight it is searching from.
 
 Mutation, `src/engine/fight.ts` — the two `.slice()` calls removed:
@@ -331,6 +493,8 @@ Two arrays that print identically and fail `notStrictEqual` is the defect stated
 ## 2026-09-06 — Wake's inertness, gated in both directions (`test/rules.test.ts`)
 
 Claim: Wake fires, and the +2 it grants is always cleared before the woken unit can swing. This **documents a defect and does not endorse it** — the rule is the owner's decision. `startTurn` clears `bonusPower` at the start of a side's own phase and a side's units only die during the opponent's phase, so the buff is wiped before it can be spent, and `docs/work/1_turn-prototype/plan.md` measured the trait changing zero rows in 20,000 fights.
+
+Taken at `bcd7dc9`, where the suite is 44 tests; the `ℹ tests 44` lines below are that revision's.
 
 The test that existed asserted `waker.bonusPower === 2` and stopped, which is green on a dead trait. The new one carries the whole sequence to the swing, so both a regression and a fix are visible.
 

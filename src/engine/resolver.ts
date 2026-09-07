@@ -4,9 +4,16 @@
 //   - `apply` is the only place state mutates
 //   - deaths are batched at a state-based checkpoint after every effect
 //   - trigger order is board order, and board order means board *index*
+//   - two deaths at one checkpoint are announced in that same board order, and
+//     that is decided in `checkStateBased`, not in `triggersFor`
 //   - inside one unit, trait order is the source order of the blocks in
 //     `triggersFor`
-//   - a loop iteration cap that throws with the queue trace
+//   - an effect's own continuations queue ahead of any reaction to it, and the
+//     two reaction sources queue in the order their events were emitted
+//   - an effect naming an entity that has left the board is skipped, not an
+//     error, and a unit and a hero answer that the same way
+//   - a loop iteration cap that throws with the queue trace, capping the exact
+//     number of effects that may be applied
 //
 // The queue is drained once per acting entity, which is what "resolves left to
 // right, one unit at a time" means: a unit's whole cascade finishes before its
@@ -17,9 +24,9 @@ import {
   type Entity,
   type GameState,
   type Side,
+  findEntity,
   otherSide,
   power,
-  requireEntity,
   rightNeighbour,
 } from './state.ts';
 
@@ -40,9 +47,11 @@ export type GameEvent =
   | { kind: 'died'; uid: number; side: Side; leftUid: number | null; rightUid: number | null };
 
 /**
- * One extra trigger rule, asked of every living entity in board order after the
- * shipped traits have had their say. It exists for tests and production passes
- * nothing; `triggersFor` says why it has to exist at all.
+ * One extra trigger rule, asked of every living entity inside the same
+ * board-order walk as the shipped traits - immediately after that entity's own
+ * shipped blocks, not in a pass of its own once every entity has been asked.
+ * It exists for tests and production passes nothing; `triggersFor` says why it
+ * has to exist at all, and why where it is asked is load-bearing.
  */
 export type TriggerRule = (
   state: GameState,
@@ -85,6 +94,25 @@ export function legalTargets(state: GameState, attacker: Entity): Entity[] {
  * Returns the events it produced and any effects that directly continue it.
  * Spawned effects are queued ahead of trigger effects, which is what keeps
  * "its action, then any after-acting trait" in that order.
+ *
+ * An effect that names an entity which is no longer there is skipped, not an
+ * error, and that is the same answer for a unit as for a hero. Deaths are
+ * batched at a checkpoint precisely so that "A kills B, B's trigger kills A"
+ * does not depend on evaluation order (`ARCHITECTURE.md`), which means an
+ * effect can be queued against a living entity and come up after that entity
+ * has died. A dead hero stays on the board and every case's `!e.alive` guard
+ * already caught it; a dead unit is *removed* from the board, so the same
+ * sequence used to reach `requireEntity` and throw. One situation, two
+ * answers, decided by a filter that exists for an unrelated reason.
+ *
+ * Throwing could not have been a useful diagnostic either: `findEntity`
+ * returns null identically for "died and was removed" and "never existed", so
+ * the message named a uid and could say nothing about which had happened.
+ *
+ * This is reachable the moment a trigger queues an action against a unit that
+ * can die first - `Echo` in `docs/design/game.md` is exactly that shape.
+ * Gated by "an effect naming an entity that has left the board is skipped" in
+ * `test/resolver-order.test.ts`.
  */
 function apply(
   state: GameState,
@@ -93,8 +121,8 @@ function apply(
 ): { events: GameEvent[]; spawned: Effect[] } {
   switch (effect.kind) {
     case 'act': {
-      const e = requireEntity(state, effect.uid);
-      if (!e.alive) return { events: [], spawned: [] };
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive) return { events: [], spawned: [] };
       return {
         events: [{ kind: 'acted', uid: e.uid }],
         spawned: [
@@ -105,8 +133,8 @@ function apply(
     }
 
     case 'attack': {
-      const e = requireEntity(state, effect.uid);
-      if (!e.alive) return { events: [], spawned: [] };
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive) return { events: [], spawned: [] };
       const targets = legalTargets(state, e);
       if (targets.length === 0) {
         return { events: [{ kind: 'fizzled', uid: e.uid }], spawned: [] };
@@ -124,14 +152,14 @@ function apply(
     }
 
     case 'afterAct': {
-      const e = requireEntity(state, effect.uid);
-      if (!e.alive) return { events: [], spawned: [] };
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive) return { events: [], spawned: [] };
       return { events: [{ kind: 'afterActed', uid: e.uid }], spawned: [] };
     }
 
     case 'gainPower': {
-      const e = requireEntity(state, effect.uid);
-      if (!e.alive) return { events: [], spawned: [] };
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive) return { events: [], spawned: [] };
       e.bonusPower += effect.amount;
       return {
         events: [{ kind: 'powerGained', uid: e.uid, amount: effect.amount }],
@@ -140,8 +168,8 @@ function apply(
     }
 
     case 'grantWard': {
-      const e = requireEntity(state, effect.uid);
-      if (!e.alive) return { events: [], spawned: [] };
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive) return { events: [], spawned: [] };
       e.warded = true;
       return { events: [{ kind: 'warded', uid: e.uid }], spawned: [] };
     }
@@ -155,6 +183,20 @@ function apply(
  *
  * Dead units leave the board. Heroes stay in place even when dead: the hero
  * anchors the right end of the line, and the fight ends the moment one dies.
+ *
+ * When two entities are at zero at one checkpoint, the order their `died`
+ * events come out is decided by the two loops below and nowhere else - the
+ * player's line left to right, then the enemy's - and that is the order the
+ * triggers answering those deaths queue in. It is the same board order
+ * `triggersFor` walks in, but it is a *separate* walk: reversing either loop
+ * here leaves `triggersFor` untouched, so the board-order gates do not cover
+ * it. Gated by the two "simultaneous deaths" tests in
+ * `test/resolver-order.test.ts`, which need no seam - a unit sitting at zero
+ * Health before a checkpoint is enough.
+ *
+ * Nothing shipped puts two units at zero at once. AoE is the first designed
+ * effect that does, and `docs/design/game.md` names AoE as the only counter to
+ * a wide board, so this stops being invisible the day that lands.
  */
 function checkStateBased(state: GameState): GameEvent[] {
   const deaths: GameEvent[] = [];
@@ -199,12 +241,27 @@ function checkStateBased(state: GameState): GameEvent[] {
  *
  * `extra` is a seam for tests, and the reason it is here is worth stating.
  * Every shipped trigger is keyed to a single uid - `event.uid === e.uid`, or
- * `event.rightUid === e.uid` - so no event can ever match two units, and the
- * two loops below decide nothing that a fixture built from the shipped traits
- * can observe. Reversing them, or ordering by uid, leaves the whole suite
- * green. A rule that fires for more than one unit is the only way to make those
- * two properties fail when they are broken, and a gate nobody can make go red
- * is not a gate. See `test/resolver-order.test.ts`.
+ * `event.rightUid === e.uid` - so no event can ever match two units, and for
+ * *these two loops* no fixture built from the shipped traits alone can tell the
+ * correct order from a reversed one or a uid-ordered one. A rule that fires for
+ * more than one unit is the only way to make those two properties fail when
+ * they are broken, and a gate nobody can make go red is not a gate.
+ *
+ * That is a claim about this function, not about resolution order generally.
+ * Two sibling orderings *are* reachable from the shipped traits and are gated
+ * without any seam: which of two simultaneous deaths is announced first
+ * (`checkStateBased`) and whether a death's triggers queue behind the acting
+ * effect's own continuations (`drain`).
+ *
+ * Where `extra` is asked is load-bearing, not incidental. It runs inside this
+ * walk, right after the same entity's shipped blocks. Hoisting it into a pass
+ * of its own after both loops would still order the seam's triggers by board
+ * index - so every board-order test written with the seam alone stays green -
+ * while silently putting every seam trigger after every shipped trigger. A
+ * shipped trait and a seam rule answering one event would stop interleaving,
+ * and with the seam decoupled the shipped loops could then be reversed with the
+ * whole suite green. Gated by "a shipped trigger and a seam trigger answering
+ * one event interleave by board index" in `test/resolver-order.test.ts`.
  */
 function triggersFor(state: GameState, event: GameEvent, extra: TriggerRule | null): Effect[] {
   const out: Effect[] = [];
@@ -262,6 +319,12 @@ export type DrainResult = {
  *
  * A hang is strictly worse than a crash, so the iteration cap throws and hands
  * back the full trace of what it was chewing on.
+ *
+ * `maxIterations` is the number of effects that may be applied, exactly: a
+ * drain needing `maxIterations` effects finishes, and one needing
+ * `maxIterations + 1` throws. `>` in place of `>=` below moves that boundary
+ * by one and nothing else in the engine notices, so the boundary itself is
+ * gated - both sides of it - in `test/resolver-order.test.ts`.
  */
 export function drain(
   state: GameState,
@@ -298,6 +361,12 @@ export function drain(
     // Direct continuations first, then reactions. An effect's own continuation
     // is part of the thing that is happening; a trigger is a response to it
     // having happened, and responses queue behind it.
+    //
+    // There are two reaction sources, not one, and they queue in the order
+    // their events were emitted three lines up: the effect's own events first,
+    // then the deaths the checkpoint found. The event stream is what the
+    // animation layer replays, so the triggers follow the stream. Both
+    // orderings are gated in `test/resolver-order.test.ts`.
     for (const s of spawned) queue.push(s);
     for (const e of produced) for (const t of triggersFor(state, e, extraTriggers)) queue.push(t);
     for (const d of deaths) for (const t of triggersFor(state, d, extraTriggers)) queue.push(t);
