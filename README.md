@@ -14,23 +14,39 @@ Three influences, three distinct jobs:
 
 ## Status
 
-Design stage, plus one throwaway prototype. There is no game to play yet — no renderer, no run structure, no cards beyond the fifteen the prototype needed.
+One fight is playable. There is no run around it yet — no map, no shop, no sigils — and the card pool is the fifteen the prototype needed.
 
 - [Design of record](docs/design/game.md) — the full rules, a worked example with exact numbers, and the ranked open questions.
 - [Work unit 0](docs/work/0_game-design/plan.md) — how the design was settled and what remains.
 - [Work unit 1](docs/work/1_turn-prototype/plan.md) — the headless single-fight probe, and what it measured.
+- [Work unit 2](docs/work/2_heraldry-legibility/plan.md) — is a heraldic card legible at seventy pixels?
+- [Work unit 3](docs/work/3_playable-fight/plan.md) — the screen, and what the fight is like to play.
 
 Every number in the design is a reasoned starting guess, not a balanced value.
 
-## Running the prototype
+## Playing it
 
-Node 24 (see `.nvmrc`). TypeScript runs directly, so there is no build step and no runtime dependency.
+Node 24 (see `.nvmrc`).
 
 ```
-npm install     # dev-only: typescript and @types/node, for the typecheck
-npm test        # the rules, the design's worked example, and determinism
+npm install
+npm start       # http://127.0.0.1:5175/src/ui/index.html
+```
+
+Pick a card, pick a gap in your line, commit. Your line resolves left to right and your hero swings last, so where you put a unit decides who its Relay reaches and who the enemy is allowed to hit. The number under each card is the chance the next enemy attack lands there; it updates as you place, before you commit.
+
+Controls: `1`–`5` pick a card, `Enter` commits, `Esc` clears the selection. Drop slots are ordinary buttons, so Tab and Enter place a unit without a mouse. The speed control and **Resolve now** are there because the animation is a tutorial and stops earning its time once you know the rules.
+
+A fight is addressable: `?seed=42&encounter=hard&theme=dark` opens exactly that one.
+
+There is no build step. `npm start` serves the TypeScript sources with their types stripped on the way out, so what the browser runs is what is on disk.
+
+## Checking it
+
+```
+npm test        # the rules, the design's worked example, determinism, and the screen's own gates
 npm run measure # the A/B: does optimal placement beat random placement?
-npm run gates   # typecheck, tests, and the measurement's own instrument checks
+npm run gates   # typecheck, both boundary gates, tests, and the measurement's instrument checks
 ```
 
 `npm run measure` takes `--seeds`, `--encounter` and a few other flags; it prints its methodology and its instrument checks alongside the numbers.

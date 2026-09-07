@@ -1,0 +1,1009 @@
+/*
+ * Design tokens first, per ARCHITECTURE.md's "Making it beautiful": colour,
+ * spacing, type scale and elevation are variables, because coherence is a
+ * system property and cannot be retrofitted card by card.
+ *
+ * The two board grounds are the ones the heraldry goldens were reviewed
+ * against - #f1ede4 and #15171c - so what the reviewed cards sit on here is
+ * what they sat on there.
+ */
+
+:root {
+  color-scheme: light;
+
+  --ground: #f1ede4;
+  --panel: #fbf9f3;
+  --panel-2: #efe9dc;
+  --ink: #17181d;
+  --ink-2: #55585f;
+  --ink-3: #8a8d94;
+  --rule: #dcd5c5;
+  --gold: #d9a520;
+  --gules: #a3202a;
+  --vert: #2f6b3c;
+  --azure: #26508f;
+  --danger: #b3252f;
+  --shadow: 0 1px 2px rgba(20, 18, 12, 0.12), 0 6px 18px rgba(20, 18, 12, 0.08);
+  --shadow-lift: 0 2px 6px rgba(20, 18, 12, 0.18), 0 14px 32px rgba(20, 18, 12, 0.16);
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 18px;
+  --sp-5: 26px;
+  --radius: 8px;
+
+  --font: 'Segoe UI', system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  --mono: 'Cascadia Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --fs-micro: 10px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-lead: 15px;
+  --fs-title: 19px;
+
+  --meta-h: 20px;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --ground: #15171c;
+  --panel: #1d2027;
+  --panel-2: #262a33;
+  --ink: #eef0f4;
+  --ink-2: #a9aeb9;
+  --ink-3: #767c88;
+  --rule: #333844;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.6), 0 14px 32px rgba(0, 0, 0, 0.5);
+  --danger: #e0555f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 var(--fs-body) / 1.45 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 100vh;
+  padding: var(--sp-3);
+  max-width: 1560px;
+  margin: 0 auto;
+}
+
+/* ---------- HUD ---------- */
+
+.hud {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.hud__title {
+  font-size: var(--fs-title);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin-right: auto;
+}
+
+.hud__title small {
+  display: block;
+  font-size: var(--fs-small);
+  font-weight: 400;
+  color: var(--ink-2);
+  letter-spacing: 0;
+}
+
+.hud__group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.hud__label {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-3);
+  font-weight: 700;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 90ms ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--ink-3);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.is-on {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #201a06;
+  font-weight: 700;
+}
+
+.btn--primary {
+  background: var(--gules);
+  border-color: var(--gules);
+  color: #fff;
+  font-weight: 700;
+  padding: 8px 18px;
+}
+
+.btn--primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+/* ---------- lines ---------- */
+
+.side {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: var(--sp-2) var(--sp-3);
+  box-shadow: var(--shadow);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.side.is-active {
+  border-color: var(--gold);
+  box-shadow: var(--shadow), 0 0 0 2px rgba(217, 165, 32, 0.25);
+}
+
+.side__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+  min-height: 20px;
+}
+
+.side__name {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-weight: 800;
+  color: var(--ink-3);
+}
+
+.side__intent {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+
+.side__intent b {
+  color: var(--ink);
+}
+
+.side__intent .warn {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/*
+ * The row that must compress and must never wrap. `flex-wrap: nowrap` is the
+ * rule; `overflow-x: auto` is what happens past the 44px floor, because a
+ * horizontal scroll costs a drag and a second row costs the player every
+ * adjacency trait in the game.
+ */
+.row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 6px;
+  overflow-x: auto;
+  /*
+   * `overflow-y: visible` next to `overflow-x: auto` computes to `auto`, so the
+   * row clips vertically whether or not it is asked to. Everything that sits
+   * outside a card - the acting ring, a ghost's remove button, the ward mark -
+   * therefore needs room *inside* the box rather than a promise that the box
+   * will not cut it off.
+   */
+  padding: 12px 3px 4px;
+  min-height: calc(var(--card-w, 70px) * 1.4 + var(--meta-h) + 16px);
+  background: var(--ground);
+  border-radius: 6px;
+}
+
+.row--empty::after {
+  content: 'no units on this line';
+  color: var(--ink-3);
+  font-size: var(--fs-small);
+  font-style: italic;
+  align-self: center;
+}
+
+/* ---------- cards ---------- */
+
+.card {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--w, 70px);
+  display: flex;
+  flex-direction: column;
+  cursor: default;
+  /*
+   * No `width` transition here on purpose. The row measures its own overflow
+   * right after painting in order to re-fit the cards, and a width that is
+   * still gliding to its new value makes that measurement describe the previous
+   * layout. The dying collapse below opts back in, because there the animation
+   * is the point and nothing measures during it.
+   */
+  transition: transform 160ms ease, opacity 220ms ease, filter 180ms ease;
+}
+
+.card__art {
+  line-height: 0;
+}
+
+.card__art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.card__meta,
+.card__pips,
+.card__odds {
+  font-size: var(--fs-micro);
+}
+
+.card__pips {
+  height: var(--meta-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--ink-2);
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+
+.card__pips .pip {
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 13px;
+  min-width: 15px;
+  text-align: center;
+  padding: 0 3px;
+  border-radius: 3px;
+  color: var(--gold);
+  background: rgba(217, 165, 32, 0.16);
+  border: 1px solid rgba(217, 165, 32, 0.55);
+  cursor: help;
+}
+
+[data-theme='light'] .card__pips .pip {
+  color: #8a6707;
+}
+
+.card__pips .pip--pending {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #201a06;
+}
+
+[data-theme='light'] .card__pips .pip--pending {
+  color: #201a06;
+}
+
+.card__odds {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--meta-h) - 2px);
+  background: var(--ink);
+  color: var(--ground);
+  border-radius: 999px;
+  padding: 1px 5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+}
+
+/*
+ * "Cannot be hit" is real information and stays on screen, but it is the same
+ * answer on most of the line most of the time. A row of fifteen shouting green
+ * pills buries the one number the player is actually reading, so the zero case
+ * is quiet and the live chances are loud.
+ */
+.card__odds.is-safe {
+  background: transparent;
+  color: var(--vert);
+  box-shadow: none;
+  font-size: 9px;
+  opacity: 0.85;
+  padding: 1px 3px;
+}
+
+[data-theme='dark'] .card__odds.is-safe {
+  color: #63c47a;
+}
+
+.card.is-buffed .card__art {
+  filter: drop-shadow(0 0 6px rgba(217, 165, 32, 0.95));
+}
+
+.card.is-warded::after {
+  content: '◇';
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  font-size: 15px;
+  color: #7fd3ff;
+  text-shadow: 0 0 6px rgba(127, 211, 255, 0.9);
+}
+
+.card.is-dead {
+  opacity: 0;
+  width: 0 !important;
+  overflow: hidden;
+  transform: translateY(10px) rotate(-6deg);
+  pointer-events: none;
+  transition: transform 260ms ease, opacity 260ms ease, width 260ms ease 60ms;
+}
+
+.card--ghost .card__art {
+  opacity: 0.75;
+  filter: saturate(0.85);
+}
+
+.card--ghost::before {
+  content: '';
+  position: absolute;
+  inset: -3px -3px calc(var(--meta-h) - 3px) -3px;
+  border: 2px dashed var(--gold);
+  border-radius: 7px;
+  pointer-events: none;
+}
+
+.card__pull {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+/* The acting spotlight: resolution order is observed, never inferred. */
+/*
+ * The spotlight. It carries `ARCHITECTURE.md`'s "the acting unit is
+ * unambiguously highlighted, so resolution order is observable rather than
+ * inferred", and it is tuned per theme because the same opacity does not do the
+ * same job on both: fading toward a dark ground darkens a card, fading toward a
+ * pale one bleaches the field tincture out of it, and the field tincture is the
+ * tribe channel.
+ */
+.row.is-resolving .card:not(.is-acting),
+.row.is-resolving .hero:not(.is-acting) {
+  opacity: 0.55;
+  filter: saturate(0.7);
+}
+
+[data-theme='light'] .row.is-resolving .card:not(.is-acting),
+[data-theme='light'] .row.is-resolving .hero:not(.is-acting) {
+  opacity: 0.72;
+  filter: saturate(0.82) brightness(0.94);
+}
+
+.card.is-acting,
+.hero.is-acting {
+  z-index: 3;
+}
+
+.card.is-acting .card__art {
+  transform: translateY(-7px) scale(1.06);
+  filter: drop-shadow(0 0 0 3px var(--gold)) drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35));
+}
+
+.card.is-acting::before,
+.hero.is-acting::before {
+  content: '';
+  position: absolute;
+  inset: -6px -5px calc(var(--meta-h) - 4px) -5px;
+  border: 3px solid var(--gold);
+  border-radius: 9px;
+  box-shadow: 0 0 16px rgba(217, 165, 32, 0.75);
+  animation: pulse 700ms ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes pulse {
+  from {
+    opacity: 0.65;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.card.is-acting .card__art,
+.hero.is-acting {
+  transition: transform 140ms ease;
+}
+
+/* ---------- hero ---------- */
+
+/*
+ * Sticky, so the hero survives the one case the compression rule hands off to a
+ * scrollbar. Past the 44px floor the row scrolls, and the thing it would scroll
+ * out of view first is the hero at the right end - which is the unit whose
+ * Health is the fight, and the one the rightmost adjacency trait reaches.
+ */
+.hero {
+  position: sticky;
+  right: 0;
+  flex: 0 0 auto;
+  width: var(--w, 80px);
+  /* Matches a card's full height - art plus the trait strip - so the hero's
+     foot lands on the same line as every unit's. */
+  min-height: calc(var(--card-w, 70px) * 1.4 + var(--meta-h) - 6px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  margin-left: 10px;
+  border: 2px solid var(--gold);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  box-shadow: var(--shadow);
+  text-align: center;
+  transition: opacity 220ms ease, filter 180ms ease, transform 160ms ease;
+}
+
+.hero::after {
+  /* The gap that says "the hero stands immediately to the right of the line". */
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 12%;
+  bottom: 12%;
+  width: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--rule) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+.hero--enemy {
+  border-color: var(--gules);
+}
+
+.hero__crest {
+  font-size: 17px;
+  line-height: 1;
+  color: var(--gold);
+}
+
+.hero--enemy .hero__crest {
+  color: var(--gules);
+}
+
+.hero__name {
+  font-size: var(--fs-micro);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+}
+
+.hero__stats {
+  display: flex;
+  gap: 5px;
+}
+
+.hero__pw,
+.hero__hp {
+  min-width: 22px;
+  border-radius: 999px;
+  padding: 1px 5px;
+  font-weight: 900;
+  font-size: 12px;
+  color: #fff;
+  background: #0d0d12;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+
+.hero__hp {
+  background: var(--gules);
+}
+
+.hero__bar {
+  width: 88%;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--rule);
+  overflow: hidden;
+}
+
+.hero__bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--gules), #d8434e);
+  transition: width 260ms ease;
+}
+
+.hero.is-dead {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+
+.hero .card__odds {
+  bottom: -9px;
+}
+
+/* ---------- slots ---------- */
+
+.slot {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 16px;
+  min-height: calc(var(--card-w, 70px) * 1.4);
+  max-height: calc(var(--card-w, 70px) * 1.4 + var(--meta-h));
+  padding: 0;
+  border: 1px dashed var(--rule);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  opacity: 0.5;
+  transition: background 120ms ease, border-color 120ms ease, width 140ms ease, opacity 140ms ease;
+}
+
+.slot__mark {
+  opacity: 0;
+}
+
+.row.is-armed .slot {
+  width: 30px;
+  opacity: 1;
+  border-color: var(--gold);
+  border-style: dashed;
+  background: rgba(217, 165, 32, 0.12);
+}
+
+.row.is-armed .slot__mark {
+  opacity: 1;
+  color: var(--gold);
+}
+
+.row.is-armed .slot:hover,
+.row.is-armed .slot:focus-visible {
+  background: rgba(217, 165, 32, 0.35);
+  outline: none;
+  border-style: solid;
+}
+
+/* ---------- hand ---------- */
+
+.tray {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.hand {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  flex: 1 1 auto;
+  min-height: 148px;
+  align-items: flex-start;
+  padding-top: 12px;
+}
+
+.handcard {
+  position: relative;
+  flex: 0 0 auto;
+  width: 78px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: transform 130ms ease, border-color 130ms ease, opacity 130ms ease;
+}
+
+.handcard .card__art {
+  line-height: 0;
+}
+
+.handcard .card__art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.handcard__name {
+  display: block;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--ink-2);
+  text-align: center;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Both top corners of a card belong to the Power and Health discs, which
+ * `ARCHITECTURE.md` puts on the strongest channel and says nothing may
+ * occlude. So the cost sits on the top edge between them, half outside the
+ * card.
+ */
+.handcard__cost {
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  background: var(--azure);
+  color: #fff;
+  font-weight: 900;
+  font-size: 12px;
+  line-height: 19px;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: var(--shadow);
+}
+
+.handcard:hover:not(:disabled) {
+  transform: translateY(-6px);
+}
+
+.handcard.is-selected {
+  border-color: var(--gold);
+  transform: translateY(-8px);
+  box-shadow: var(--shadow-lift);
+}
+
+/*
+ * A card you cannot afford still has to be readable: its cost and its stats are
+ * what the player is planning next turn around. Desaturate it, do not fade it
+ * into the panel.
+ */
+.handcard:disabled {
+  opacity: 0.72;
+  filter: saturate(0.35);
+  cursor: not-allowed;
+}
+
+.handcard:disabled .handcard__cost {
+  background: var(--ink-3);
+}
+
+.tray__side {
+  flex: 0 0 auto;
+  width: 232px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.energy {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.energy__pip {
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--azure);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 8px rgba(38, 80, 143, 0.55);
+}
+
+.energy__pip.is-spent {
+  background: transparent;
+  border: 1px dashed var(--ink-3);
+  box-shadow: none;
+}
+
+.hint {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  min-height: 34px;
+}
+
+.hint b {
+  color: var(--ink);
+}
+
+/* ---------- log ---------- */
+
+.log {
+  height: 118px;
+  overflow-y: auto;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  box-shadow: var(--shadow);
+}
+
+.log p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.log p.is-head {
+  color: var(--ink);
+  font-weight: 700;
+  margin-top: 5px;
+  border-top: 1px solid var(--rule);
+  padding-top: 5px;
+}
+
+.log p.is-kill {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.log p.is-buff {
+  color: #a07a05;
+}
+
+[data-theme='dark'] .log p.is-buff {
+  color: var(--gold);
+}
+
+.log p b {
+  color: var(--ink);
+}
+
+/* ---------- fx layer ---------- */
+
+.stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.fxlayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 40;
+}
+
+.fx {
+  position: absolute;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.fx--beam {
+  height: 5px;
+  transform-origin: 0 50%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(255, 90, 90, 0), #ff5f5f 55%, #fff2b0);
+  box-shadow: 0 0 12px rgba(255, 95, 95, 0.85);
+  animation: beam var(--ms, 220ms) ease-out forwards;
+}
+
+@keyframes beam {
+  0% {
+    opacity: 0;
+    filter: blur(0);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.fx--float {
+  transform: translate(-50%, -50%);
+  font-weight: 900;
+  font-size: 20px;
+  color: var(--danger);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5), 0 0 10px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  animation: rise var(--ms, 520ms) ease-out forwards;
+}
+
+.fx--float.is-small {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink-2);
+  text-shadow: none;
+}
+
+.fx--float.is-guard {
+  font-size: 12px;
+  color: #fff;
+  background: var(--azure);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+.fx--float.is-death {
+  color: #fff;
+  background: #0d0d12;
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+@keyframes rise {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -20%) scale(0.7);
+  }
+  22% {
+    opacity: 1;
+    transform: translate(-50%, -60%) scale(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -170%) scale(1);
+  }
+}
+
+.fx--token {
+  transform: translate(-50%, -50%);
+  font-weight: 900;
+  font-size: 15px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: #201a06;
+  background: var(--gold);
+  box-shadow: 0 0 16px rgba(217, 165, 32, 0.9);
+  white-space: nowrap;
+}
+
+.fx--token.is-moving {
+  transition: transform var(--ms, 320ms) cubic-bezier(0.32, 0.9, 0.4, 1),
+    opacity var(--ms, 320ms) ease-in 160ms;
+}
+
+.fx--token.is-ward {
+  background: #7fd3ff;
+  color: #062430;
+  box-shadow: 0 0 16px rgba(127, 211, 255, 0.9);
+}
+
+/* ---------- inspect ---------- */
+
+.inspect {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;
+  filter: drop-shadow(0 12px 30px rgba(0, 0, 0, 0.45));
+}
+
+.inspect svg {
+  display: block;
+}
+
+.inspect__text {
+  margin-top: 6px;
+  width: 190px;
+  padding: 7px 9px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+
+.inspect__text b {
+  color: var(--ink);
+}
+
+/* ---------- banner ---------- */
+
+.banner {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  font-size: var(--fs-lead);
+  font-weight: 800;
+  text-align: center;
+  border: 2px solid;
+}
+
+.banner--win {
+  background: rgba(47, 107, 60, 0.14);
+  border-color: var(--vert);
+  color: var(--vert);
+}
+
+.banner--loss {
+  background: rgba(163, 32, 42, 0.14);
+  border-color: var(--gules);
+  color: var(--danger);
+}
+
+.banner--draw {
+  background: rgba(138, 141, 148, 0.14);
+  border-color: var(--ink-3);
+  color: var(--ink-2);
+}
+
+.banner small {
+  display: block;
+  font-size: var(--fs-small);
+  font-weight: 400;
+  margin-top: 4px;
+  color: var(--ink-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}

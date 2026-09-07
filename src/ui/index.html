@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cards — a fight</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23a3202a'/%3E%3Cpath d='M16 6l7 3v8c0 5-4 8-7 9-3-1-7-4-7-9V9z' fill='%23d9a520'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="hud">
+        <div class="hud__title">
+          Cards
+          <small id="subtitle">a fight you can play</small>
+        </div>
+
+        <div class="hud__group">
+          <span class="hud__label">Seed</span>
+          <input
+            id="seed"
+            type="number"
+            min="1"
+            step="1"
+            value="7"
+            style="width: 74px; font: inherit; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--rule); background: var(--panel-2); color: inherit"
+          />
+          <select
+            id="encounter"
+            style="font: inherit; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--rule); background: var(--panel-2); color: inherit"
+          ></select>
+          <button id="newfight" type="button" data-act="newfight">New fight</button>
+        </div>
+
+        <div class="hud__group">
+          <span class="hud__label">Speed</span>
+          <button type="button" data-act="speed" data-speed="0.5">0.5&times;</button>
+          <button type="button" data-act="speed" data-speed="1" class="is-on">1&times;</button>
+          <button type="button" data-act="speed" data-speed="2">2&times;</button>
+          <button type="button" data-act="skip" id="skip" disabled>Resolve now</button>
+        </div>
+
+        <div class="hud__group">
+          <span class="hud__label">Theme</span>
+          <button type="button" data-act="theme" data-theme-value="light">Light</button>
+          <button type="button" data-act="theme" data-theme-value="dark">Dark</button>
+        </div>
+      </header>
+
+      <div class="stage" id="stage">
+        <section class="side" id="side-enemy">
+          <div class="side__head">
+            <span class="side__name" id="enemy-name">Enemy line</span>
+            <span class="side__intent" id="enemy-intent"></span>
+          </div>
+          <div class="row" id="enemy-row"></div>
+        </section>
+
+        <div class="log" id="log" aria-live="polite"></div>
+
+        <section class="side" id="side-player">
+          <div class="side__head">
+            <span class="side__name">Your line — resolves left to right, hero last</span>
+            <span class="side__intent" id="player-intent"></span>
+          </div>
+          <div class="row" id="player-row"></div>
+        </section>
+
+        <div class="fxlayer" id="fx"></div>
+      </div>
+
+      <div id="banner-slot"></div>
+
+      <footer class="tray">
+        <div class="tray__side">
+          <div class="hud__label">Energy</div>
+          <div class="energy" id="energy"></div>
+          <p class="hint" id="hint"></p>
+          <button class="btn--primary" id="commit" type="button" data-act="commit">
+            Commit turn
+          </button>
+        </div>
+        <div class="hand" id="hand"></div>
+      </footer>
+    </div>
+
+    <div class="inspect" id="inspect" hidden></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

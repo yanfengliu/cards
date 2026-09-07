@@ -6,6 +6,37 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-07 — the screen's six gates (`test/ui-session.test.ts`, `test/render-view.test.ts`)
+
+Taken on the `playable-fight` branch cut from `06c87c7`; the suite is **63 tests** here, 55 before it. Each mutation was applied to the stated file, the named test file run, and the tree restored before the next one.
+
+| mutation | site | failure |
+|---|---|---|
+| `insertUnit(..., unitCount(...))` → `insertUnit(..., 0)` in the enemy's turn | `src/ui/session.ts:enemyPlays` | `seed 1/even: the UI driver and runRound diverged after round 2` |
+| `target.bonusPower += beat.amount` → `+= 0` | `src/render/view.ts:applyBeat` | `seed 1/even round 5: the view derived from the player phase's events disagrees with the engine's state` — `['uid 14 bonusPower: view 0, engine 2']` |
+| the Relay branch of the attribution disabled | `src/render/view.ts:attributeBuff` | `seed 1/even round 5: a +2 buff on uid 14 could not be attributed to the card that granted it` |
+| `right.warded = true` deleted from the projection | `src/render/odds.ts:projectOwnPhase` | `seed 1 round 2: the Wards shown before commit are not the Wards that landed` |
+| `Math.floor(per)` → `Math.ceil(per) + 2` | `src/render/board.ts:fitWidth` | `14 cards at 90px need 1338px of 1300px: the row would wrap or scroll while cards could still have shrunk` |
+| the bordure clause suppressed for one Guard | `src/render/blazons.ts:blazonFor` | `u_ironguard: the bordure is the Guard channel, so it must be present exactly when Guard is` |
+
+### The driver gate is the load-bearing one, and it is a duplication gate rather than a behaviour gate
+
+`src/ui/session.ts` exists because `resolvePhase` returns the event stream and `runRound` drops it, and that stream is the entire input to the animation. To keep the events it re-runs the round from exported engine pieces, which means it carries its own copy of two things `engine/fight.ts` keeps private: `settle`, and the enemy's draw-select-append turn. Two drivers that drift apart are two different games, and the one with a screen is the one nobody measured.
+
+So the gate compares `hashFight` after **every round**, not only at the end, over 120 seeds at `even` and 40 at `hard`, driving both from the same recorded placements. `hashFight` covers the board, both hands, both deck cursors and both generator states, so a driver that reached the same board through a different number of rolls fails too. Moving the enemy's insertion index by one slot is caught on the second round of the first seed.
+
+Its bound: it says nothing about a placement no bot makes, because the action lists come from `appendRightPlacer` and `randomPlacer`. The index arithmetic the *screen* generates — splicing a pending card anywhere in a line and turning that line back into ordered insertions — is covered separately by the `placementsFrom` test, over five orderings including ones that push earlier placements rightward.
+
+### The projection gate found a real defect before it gated it
+
+`projectOwnPhase` was written because the odds on screen were **wrong**, not merely incomplete. Ward is granted during your own resolution, so a pre-commit board that has not applied it says "each attack is 100% onto your 1 Guard" when the truth is that `legalTargets` will narrow to the Guards, remove the warded ones, find nothing, and fizzle every enemy attack. `ARCHITECTURE.md` calls being shown the opposite of what happens the definition of unfair, and this was reachable on turn one with two cheap cards.
+
+The first version of the gate went red immediately on a case the projection does not model, which is worth recording because it looked like the projection was wrong: `resolvePhase` stops the moment a hero dies, so units to the right of a killing blow never act and never grant their Ward. The gate now skips rounds that end the fight and says why in its own comment — there is no next turn for the forecast to be about.
+
+### What none of these six gates cover
+
+Pixels. Every one of them is arithmetic or state comparison, and a board can satisfy all six while being unreadable or unclickable. That half is `tools/ui-probe/play.ts`, which plays the app through its real controls and photographs it, and the review is bound to a sha256 manifest in `docs/work/3_playable-fight/plan.md`. Four of the five defects that round found — a skip control that skipped one phase of three, a header reading a different clock from the board, a row clipping its own overflow, and a fit that measured a layout still gliding to its new width — are invisible to all six.
+
 ## 2026-09-06 — six ordering gates that were pinned to nothing, and a latent crash closed (`test/resolver-order.test.ts`)
 
 Taken at `49f017b` with this round's changes applied; the suite is **55 tests** here, 47 before it.
