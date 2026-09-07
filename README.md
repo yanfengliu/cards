@@ -14,25 +14,35 @@ Three influences, three distinct jobs:
 
 ## Status
 
-Design stage, plus a headless prototype. There is no renderer and nothing to play by hand yet, but a whole run — three acts, a branching map, a hero and a deck carried from the first node to the final boss — runs deterministically from a seed and a list of choices.
+**One fight is playable in the browser.** A run also exists — three acts, a branching map, node types, forge upgrades, persistent hero health — but it is headless: the UI plays a single fight, and the two are not wired together yet.
 
-- [Design of record](docs/design/game.md) — the full rules, a worked example with exact numbers, and the ranked open questions.
-- [Work unit 0](docs/work/0_game-design/plan.md) — how the design was settled and what remains.
-- [Work unit 1](docs/work/1_turn-prototype/plan.md) — the headless single-fight probe, and what it measured.
-- [Work unit 5](docs/work/5_run-structure/plan.md) — the run: the map, the acts, and where runs end.
+What is still missing: sigils, classes, races as mechanical tribes, unlocks, and most of the content. The card pool is a few dozen cards against a design that implies hundreds.
 
 Every number in the design is a reasoned starting guess, not a balanced value.
 
-## Running the prototype
+- [Design of record](docs/design/game.md) — the rules, a worked example with exact numbers, and the ranked open questions.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — the module graph, the resolver contract, the balance metrics, and how agents are organised to build this.
+- [Work unit 3](docs/work/3_playable-fight/plan.md) — the screen, and what the fight is actually like to play.
+- [Work unit 5](docs/work/5_run-structure/plan.md) — the run: the map, the acts, and where runs end.
 
-Node 24 (see `.nvmrc`). TypeScript runs directly, so there is no build step and no runtime dependency.
+## Running it
+
+Node 24 (see `.nvmrc`). Node runs the TypeScript directly, so there is no build step.
 
 ```
-npm install     # dev-only: typescript and @types/node, for the typecheck
-npm test        # the rules, the design's worked example, and determinism
+npm install
+npm start        # then open http://127.0.0.1:5175/src/ui/index.html
+```
+
+A fight is addressable: `?seed=42&encounter=hard&theme=dark`.
+
+## Checking it
+
+```
+npm test            # rules, the design's worked example, determinism
 npm run measure     # the A/B: does optimal placement beat random placement?
 npm run measure:run # whole runs: win rate per act, where runs end, run length
-npm run gates       # typecheck, tests, and both measurements' instrument checks
+npm run gates       # typecheck, both boundary gates, tests, both instrument checks
 ```
 
-Both measurement commands print their methodology and their instrument checks alongside the numbers. `npm run measure` takes `--seeds`, `--encounter` and a few other flags; `npm run measure:run` takes `--seeds` and `--encounters`, the second of which prints every act's encounters fought on their own.
+`npm run gates` is what passes before any commit that touches code.

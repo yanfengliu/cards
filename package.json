@@ -7,6 +7,8 @@
     "node": ">=24"
   },
   "scripts": {
+    "start": "node tools/serve.ts",
+    "dev": "node tools/serve.ts",
     "test": "node --test",
     "typecheck": "tsc --noEmit",
     "measure": "node src/sim/measure.ts",
