@@ -6,7 +6,7 @@ A single-player roguelike deckbuilder: tactical card combat on a board, fought a
 
 Non-goals: multiplayer, live-service economy, real-money purchases, and a collection metagame. One player, one run. There is no raster art pipeline either, but that is a consequence rather than a goal — card art is a heraldic blazon in the card's own data, rendered to SVG by code, so there are no image assets to pipeline. See `ARCHITECTURE.md`.
 
-Stack: TypeScript on Node 24 (`.nvmrc`), browser front end. The repo is at design stage — no engine, no build, no tests yet. Gates below say what exists today; each grows its real command in the same commit that introduces the tool, and a Gate is never written ahead of the command that satisfies it.
+Stack: TypeScript on Node 24 (`.nvmrc`), browser front end. Node runs the `.ts` sources directly by stripping their types, so there is no build step and no compiled artifact to fall out of sync. What exists today is a headless deterministic prototype of one fight (`src/engine/`, `src/sim/`) and an SVG heraldry renderer driven by blazon strings (`src/render/`); there is no UI layer yet. Gates below say what exists today; each grows its real command in the same commit that introduces the tool, and a Gate is never written ahead of the command that satisfies it.
 
 <!-- FLEET-CANON:BEGIN sha=bafdd66f8299 generated from ../fleet/FLEET.md by `npm run sync-canon` — do not edit inside this block; this repo's own rules go in docs/policies/local-rules.md -->
 ## Fleet constitution
@@ -107,9 +107,16 @@ Do not declare the result fully verified while material findings or required che
 
 ## Gates
 
-- **Design-stage (now).** No code, so no code gates. A change to `docs/design/` restates the affected rule as a concrete play example — the exact sequence, the numbers, the resulting board — because a mechanic that cannot be walked through by hand is not yet specified. `npm run sync-canon` from `../fleet` must stay green when this file changes.
-- **First code commit** replaces this line with the real ones: Node 24 pinned by `.nvmrc`, unit suite, typecheck, lint/format, and the dependency-audit gate canon requires. Until those commands exist, do not list them.
-- Simulation is this repo's instrument. Once a headless match runner exists it is the first probe for any balance or rules question, and a scratch script that re-implements combat instead of calling it is not evidence.
+- **Node 24**, pinned by `.nvmrc` and by `engines.node` in `package.json`; run against v24.18.1. A version mismatch here is not a code failure, so check it before reading a red gate as one.
+- **`npm run gates` is the gate**, and it passes before any commit that touches code. It chains five commands with `&&`, cheapest first, each also runnable alone: `npm run typecheck` (`tsc --noEmit`, `strict` plus `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`), `npm run gate:boundaries`, `npm run gate:banned-apis`, `npm test` (`node --test`), `npm run verify`.
+- **`npm run gate:boundaries`** fails when anything under `src/engine/` imports from `src/render/`, `src/ui/` or `tools/`, or references a global that only `lib.dom` declares. This is `ARCHITECTURE.md`'s one module rule — `engine` depends on nothing, everything depends on `engine` — made to go red instead of left as an intention.
+- **`npm run gate:banned-apis`** fails when `Math.random`, `Date.now` or `performance.now` appears anywhere outside `src/engine/rng.ts`. Those three are how determinism dies quietly: a fight is a pure function of its seed and its action list, and each of them is a hidden extra argument the replay does not carry.
+- Both new gates read the TypeScript AST rather than grepping, and that is load-bearing rather than fastidious: comments in `src/engine/rng.ts` and `src/sim/measure.ts` name all three banned APIs in order to say they are never called, so a grep gate reports sixteen violations on a clean tree. Each gate states its own bound in its file header — what a green run does and does not prove — and each makes its detector fire on a built-in probe before it is trusted to report an absence, so "did not run" cannot come back as "passed".
+- **`npm run verify`** re-runs the placement measurement over 400 seeds and exits non-zero if the two arms did not play the same cards, or if determinism or replay broke. Bare `npm run measure` prints the same report over 2000 seeds but never fails — it is the instrument, not the gate.
+- **`npm run audit`** (`npm audit --audit-level=high`) is the dependency-audit gate canon requires; re-run it on any dependency change. It sits outside `npm run gates` deliberately, because it reaches the registry and an unreachable network would turn the per-commit gate red for a reason that has nothing to do with the code.
+- **There is no lint gate and no format gate, because this repo has no linter and no formatter.** Do not write either line here until the tool is installed and has been run once. A Gate written ahead of its command is the specific failure this section exists to prevent.
+- A change to `docs/design/` restates the affected rule as a concrete play example — the exact sequence, the numbers, the resulting board — because a mechanic that cannot be walked through by hand is not yet specified. `npm run sync-canon` from `../fleet` must stay green when this file changes.
+- Simulation is this repo's instrument, and it now has a runner: `npm run measure`. It is the first probe for any balance or rules question, and a scratch script that re-implements combat instead of calling it is not evidence.
 
 ## Invariants & boundaries
 

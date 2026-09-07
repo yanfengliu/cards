@@ -69,7 +69,16 @@ function card(
   showCharge?: boolean,
   mount?: boolean,
 ): string {
-  return renderCard(c, { tier, width, showCharge, label: true, mount });
+  // Omitted, not `undefined`: `renderCard` defaults `showCharge` from the tier
+  // and reads `mount === true`, so an absent key is what "caller said nothing"
+  // means. Under `exactOptionalPropertyTypes` the two are not interchangeable.
+  return renderCard(c, {
+    tier,
+    width,
+    label: true,
+    ...(showCharge !== undefined ? { showCharge } : {}),
+    ...(mount !== undefined ? { mount } : {}),
+  });
 }
 
 /**
