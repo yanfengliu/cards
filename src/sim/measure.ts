@@ -269,9 +269,10 @@ export function gapVerdict(
       `the optimal-vs-random gap is ${gapPp.toFixed(2)} pp, below the floor of ` +
         `${MIN_GAP_PP.toFixed(2)} pp this gate defends. ARCHITECTURE.md: "if their win rates ` +
         `are the same, placement is not a decision and the central claim of the design is ` +
-        `false." The measured noise floor is about 0.3 pp and the cascade-stripped negative ` +
-        `control about 0.9 pp, so a gap this small is the size of no-decision rather than the ` +
-        `size of a decision. To satisfy this, the gap must reach ${MIN_GAP_PP.toFixed(2)} pp - ` +
+        `false." The measured noise floor is about 0.2 pp and the cascade-stripped negative ` +
+        `control about 0.8 pp at a matched baseline, so a gap this small is the size of ` +
+        `no-decision rather than the size of a decision. ` +
+        `To satisfy this, the gap must reach ${MIN_GAP_PP.toFixed(2)} pp - ` +
         `which is a content or rules change, not a test change.`,
     );
   }
@@ -485,11 +486,16 @@ function main(): void {
   }
   console.log('');
 
-  // The negative control. Strip Relay, Ward and Wake - every trait that reads
-  // a neighbour - and run the identical comparison. What is left that placement
+  // The negative control. Strip Relay and Wake - every trait that reads a
+  // neighbour - and run the identical comparison. What is left that placement
   // can still touch is act order alone: who swings before the last enemy Guard
-  // dies. If the gap does not shrink here, the headline number is not measuring
-  // the cascade and should not be believed.
+  // dies, and which of your bodies walks into which retaliation. If the gap does
+  // not shrink here, the headline number is not measuring the cascade and should
+  // not be believed.
+  //
+  // Ward was the third name here until the owner removed it, so this control is
+  // not comparable across that removal; `npm run measure:ablate` is what
+  // re-measures each surviving trait at a matched baseline.
   console.log(`## Negative control: the same cards with the cascade removed (${sweepSeeds.length} seeds each)`);
   console.log('');
   console.log('Run at every difficulty, because a gap shrinks near a floor for');
@@ -503,7 +509,7 @@ function main(): void {
       const b = runArm('B', BOTS.random!, sweepSeeds, e.id, cascade);
       const g = pairedGap(a, b);
       console.log(
-        `| ${e.id} | ${cascade ? 'Relay/Ward/Wake intact' : 'cascade stripped'} | ` +
+        `| ${e.id} | ${cascade ? 'Relay/Wake intact' : 'cascade stripped'} | ` +
           `${pct(a.winRate)} | ${pct(b.winRate)} | ${pct(g.gap)} | ` +
           `${pct(g.ci95[0])}..${pct(g.ci95[1])} |`,
       );

@@ -248,39 +248,49 @@ test('Wake does not fire for a death that is not my left neighbour', () => {
   assert.equal(waker.bonusPower, 0, 'Wake reads its neighbour, never the whole line');
 });
 
-test('Ward removes the unit to my right from the target pool', () => {
+test('Guard is the only rule that narrows the pool: nothing else removes an entity', () => {
+  // Ward - "the unit to my right cannot be struck this turn" - was the second
+  // narrowing rule and the owner removed it, because a Ward on a side's only
+  // Guard emptied this pool and made that whole side untargetable. Both halves
+  // are pinned here: Guard still narrows, and with the Guard gone every living
+  // entity is back in the pool, hero included.
   const f = fixture(0);
-  f.add('player', card('warden', 0, 5, 0, ['ward']));
-  const protectedUnit = f.add('player', card('soft', 0, 1, 0));
+  const guard = f.add('player', card('g', 0, 5, 0, ['guard']));
+  const soft = f.add('player', card('soft', 0, 1, 0));
   const attacker = f.add('enemy', card('att', 5, 5, 0));
 
-  assert.equal(
-    legalTargets(f.state, attacker).some((e) => e.uid === protectedUnit.uid),
-    true,
-    'before the Warden acts, the unit to its right is a legal target',
+  assert.deepEqual(
+    legalTargets(f.state, attacker).map((e) => e.uid),
+    [guard.uid],
+    'while a Guard lives it is the whole pool',
   );
 
-  resolvePhase(f.state, 'player', makeRng(2, 'combat'));
-  assert.equal(protectedUnit.warded, true);
-  assert.equal(
-    legalTargets(f.state, attacker).some((e) => e.uid === protectedUnit.uid),
-    false,
-    'once the Warden has acted, its right neighbour cannot be struck',
+  guard.health = 0;
+  guard.alive = false;
+  f.state.board.player = f.state.board.player.filter((e) => e.alive || e.isHero);
+
+  assert.deepEqual(
+    legalTargets(f.state, attacker).map((e) => e.uid),
+    [soft.uid, heroOf(f.state, 'player').uid],
+    'with no Guard the pool is every living entity, in board order, hero included',
   );
 });
 
 test('an attack with no legal target fizzles rather than throwing', () => {
+  // The only way to empty the pool now that Ward is gone: a side with nothing
+  // alive on it. That is the state between a lethal hit and the checkpoint that
+  // ends the fight - a dead hero stays on the board and legalTargets skips it.
   const f = fixture(0);
-  f.add('player', card('warden', 0, 5, 0, ['ward']));
-  f.add('player', card('onlyGuard', 0, 5, 0, ['guard']));
   const attacker = f.add('enemy', card('att', 5, 5, 0));
+  const hero = heroOf(f.state, 'player');
+  hero.health = 0;
+  hero.alive = false;
 
-  resolvePhase(f.state, 'player', makeRng(2, 'combat'));
   assert.deepEqual(legalTargets(f.state, attacker), []);
 
-  startTurn(f.state, 'enemy');
-  const events = resolvePhase(f.state, 'enemy', makeRng(2, 'combat'));
+  const { events } = drain(f.state, [{ kind: 'attack', uid: attacker.uid }], makeRng(2, 'combat'));
   assert.equal(events.some((e) => e.kind === 'fizzled'), true);
+  assert.equal(attacker.health, 5, 'a fizzled attack draws no retaliation either');
 });
 
 test('no unit acts after dying, even with its action already queued', () => {

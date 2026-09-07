@@ -59,7 +59,6 @@ type Mode = 'planning' | 'resolving' | 'over';
 
 const TRAIT_RULE: Readonly<Record<string, string>> = {
   relay: 'After acting, the unit to my right gains +2 Power this turn.',
-  ward: 'After acting, the unit to my right cannot be struck this turn.',
   wake: 'When the unit to my left dies this turn, gain +2 Power.',
   guard: 'While I live, every attack against my side must target a Guard.',
 };
@@ -243,13 +242,13 @@ export function startApp(): void {
      * Two boards, on purpose.
      *
      * `previewView` is what the cards show: printed Power and Health on the
-     * line as it stands. `projected` is that same line with its own Wards and
-     * Relays already applied, and it answers the two questions a placement
-     * decision actually asks - who can be hit, and where the +2 lands.
+     * line as it stands. `projected` is that same line with its own Relays
+     * already applied, and it answers the question a placement decision
+     * actually asks - where the +2 lands.
      *
-     * The forecast is folded back in as *marks*, never as different numbers:
-     * the ward glyph and a `+2` pip. A Power disc that read 3 before the commit
-     * and 1 immediately after it would be worse than not forecasting at all.
+     * The forecast is folded back in as a *mark*, never as a different number:
+     * a `+2` pip. A Power disc that read 3 before the commit and 1 immediately
+     * after it would be worse than not forecasting at all.
      */
     const projected = projectOwnPhase(p.state, 'player');
     const previewView = snapshot(p.state, fight.pool);
@@ -258,8 +257,6 @@ export function startApp(): void {
     for (const e of projected.board.player) {
       const delta = e.bonusPower - (liveBonus.get(e.uid) ?? 0);
       if (delta > 0) pendingPower.set(e.uid, delta);
-      const shown = previewView.player.find((v) => v.uid === e.uid);
-      if (shown !== undefined) shown.warded = e.warded;
     }
     view = previewView;
 
@@ -357,8 +354,7 @@ export function startApp(): void {
       `<b>${incoming.attackers}</b> attack${incoming.attackers === 1 ? '' : 's'} on the line now ` +
       `(plus whatever it plays), <b>${incoming.totalPower}</b> Power. ` +
       (incoming.poolSize === 0
-        ? '<span class="warn">Nothing of yours can be struck</span> once your Wards land — ' +
-          'every attack fizzles.'
+        ? '<span class="warn">Nothing of yours is left to strike</span> — every attack fizzles.'
         : incoming.guarded
           ? `Your Guards absorb everything: each attack is <b>${pct(share)}</b> onto each of your ` +
             `<b>${incoming.poolSize}</b> Guard${incoming.poolSize === 1 ? '' : 's'}.`
@@ -394,7 +390,6 @@ export function startApp(): void {
       traits: card.traits,
       cost: card.cost,
       alive: true,
-      warded: false,
       acting: false,
     };
   }
@@ -549,6 +544,16 @@ export function startApp(): void {
         );
         break;
       }
+      case 'retaliate': {
+        const bits: string[] = [];
+        if (beat.absorbed > 0) bits.push(`${beat.absorbed} stopped by armour`);
+        logLine(
+          `<b>${nameOf(beat.uid)}</b> hits back for <b>${beat.dealt}</b>` +
+            (bits.length > 0 ? ` <i>(${bits.join('; ')})</i>` : '') +
+            '.',
+        );
+        break;
+      }
       case 'fizzle':
         logLine('has no legal target — the attack fizzles.');
         break;
@@ -565,12 +570,6 @@ export function startApp(): void {
         );
         break;
       }
-      case 'ward':
-        logLine(
-          `<b>${nameOf(beat.uid)}</b> is warded — it cannot be struck this turn.`,
-          'is-buff',
-        );
-        break;
       case 'death':
         logLine(`<b>${nameOf(beat.uid)}</b> dies.`, 'is-kill');
         break;
@@ -598,6 +597,15 @@ export function startApp(): void {
         }
         break;
       }
+      case 'retaliate': {
+        const from = elementFor(beat.uid);
+        const to = elementFor(beat.targetUid);
+        if (from !== null && to !== null) fx.beam(from, to, Math.min(300, ms * 0.7));
+        if (to !== null) {
+          fx.float(to, beat.dealt > 0 ? `−${beat.dealt}` : 'blocked', 'is-small', ms, 20);
+        }
+        break;
+      }
       case 'fizzle': {
         const at = elementFor(beat.uid);
         if (at !== null) fx.float(at, 'no target', 'is-small', ms);
@@ -611,16 +619,6 @@ export function startApp(): void {
           fx.travel(from, to, label, '', Math.min(700, Math.max(150, ms)));
         } else if (to !== null) {
           fx.float(to, label, '', ms);
-        }
-        break;
-      }
-      case 'ward': {
-        const to = elementFor(beat.uid);
-        const from = beat.sourceUid === null ? null : elementFor(beat.sourceUid);
-        if (from !== null && to !== null && from !== to) {
-          fx.travel(from, to, '◇ ward', 'is-ward', Math.min(700, Math.max(150, ms)));
-        } else if (to !== null) {
-          fx.float(to, '◇ ward', 'is-small', ms);
         }
         break;
       }

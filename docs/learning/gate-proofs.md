@@ -6,6 +6,224 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-07 — combat is mutual, Ward is gone, decks reshuffle (`test/trade.test.ts` and six retargeted gates)
+
+Taken on branch `worktree-agent-a57a336d565027bad`, cut from `b79abf9`, with this round's changes applied; the suite is **133 tests** here, 117 before it. Every mutation below was applied to the stated file, `node --test` run, and the tree restored before the next one. All sixteen go red.
+
+Three owner rulings changed the rules and a fourth removed a trait, so this is the first round in the repo's history where `npm run verify`'s numbers are *expected* to move. What each gate is bound to is in its own header; the bounds that matter most are collected at the end.
+
+| mutation | site | failed, of 133 |
+|---|---|---|
+| `attack` drops `e.health -= dealtBack` | `resolver.ts:apply` | 12 |
+| retaliation ignores the attacker's `armourOf` | `resolver.ts:apply` | 2 |
+| the `e.isHero ? 0 :` guard deleted, so a hero takes retaliation | `resolver.ts:apply` | 6 |
+| retaliation guarded by `if (target.health > 0)` | `resolver.ts:apply` | 2 |
+| `attack` spawns an `afterAct` for the defender | `resolver.ts:apply` | 9 |
+| the `retaliated` event suppressed, damage still applied | `resolver.ts:apply` | 7 |
+| `legalTargets` stops narrowing to Guards | `resolver.ts:legalTargets` | 18 |
+| the Wake block deleted | `resolver.ts:triggersFor` | 14 |
+| a second `afterActed` trait added to the Relay block | `resolver.ts:triggersFor` | 7 |
+| `drawTo` stops at the end of the deck instead of reshuffling | `fight.ts:drawTo` | 5 |
+| `reshuffle` puts the hand back in the pile too | `fight.ts:reshuffle` | 4 |
+| `reshuffle` does not shuffle | `fight.ts:reshuffle` | 2 |
+| `queue.shift()` → `queue.pop()` | `resolver.ts:drain` | 19 |
+| the checkpoint runs only when the queue empties | `resolver.ts:drain` | 5 |
+| buff attribution keeps only the most recent death | `view.ts:buildBeats` | 1 |
+| the Relay projection dropped | `odds.ts:projectOwnPhase` | 1 |
+
+### The rule itself: an attack is a trade
+
+`docs/design/game.md`: "When A attacks B, they both do damage to each other." Four separate claims, four mutations, because a single test covering all of them would pass with any one broken.
+
+```
+✖ an attack is a trade: the defender deals its own Power back
+  AssertionError [ERR_ASSERTION]: and took the defender’s 4 back
+    9 !== 5
+
+✖ the attacker’s Armour blunts retaliation exactly as it blunts any hit
+  AssertionError [ERR_ASSERTION]: 5 Power against Armour 2 comes back as 3
+    4 !== 6
+
+✖ a hero retaliates when struck and takes nothing back when it attacks
+  AssertionError [ERR_ASSERTION]: and took none of the brute’s 7 back
+    23 !== 30
+```
+
+The third is the one asymmetry in the rule and the reason for it is a measurement rather than a preference: a hero swings every turn and cannot be told not to, so retaliation on its own swing is unavoidable chip damage against the bar that carries a whole run. Both halves are in one test on purpose — a hero that stopped retaliating when *struck* would be the safest thing on the board to attack — and the mutation above only reaches the second half, so the first is held by the `29 !== 30` assertion two lines above it.
+
+### Simultaneity, which is a claim about the shape of `apply` and not a comment
+
+The mutation is the one an implementation that had not read `ARCHITECTURE.md` would write: let the defender's death cancel its own blow.
+
+```
+✖ both blows land before either is checked, so neither death cancels the other
+  AssertionError [ERR_ASSERTION]: one effect, one checkpoint, both deaths together
+  + actual - expected
+      [
+        'attacked',
+        'retaliated',
+        'died',
+  -     'died'
+      ]
+```
+
+Both entities are lethal to the other; both must die, at one checkpoint, in `checkStateBased`'s own board order. That is the property `ARCHITECTURE.md` batches deaths for — "A kills B, B's death trigger kills A, but A already acted" must not depend on evaluation order — and mutual damage is the first shipped effect where a player can watch it happen.
+
+### Retaliation is not an action, and it is not invisible either
+
+Two different mistakes with the same shape. Making the defender's answer spawn an `afterAct`:
+
+```
+✖ retaliation is not an action: the defender fires no after-acting trait
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+      [
+        'attacked',
+        'retaliated',
+  +     'afterActed'
+      ]
+```
+
+and suppressing the `retaliated` event while still applying the damage:
+
+```
+✖ an attack is a trade: the defender deals its own Power back
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+      [
+        'attacked',
+  -     'retaliated'
+      ]
+```
+
+The second matters more than it looks. `ARCHITECTURE.md` makes the event stream the render contract: the view derives its own state from events and never diffs two boards. Damage that lands without an event is damage the screen cannot show, and the whole-suite run of that mutation is 7 tests, not 1 — the view-drift gate catches it independently:
+
+```
+✖ the view derived from the event stream matches the engine, every phase
+  AssertionError [ERR_ASSERTION]: seed 1/even round 1: the view derived from the player
+    phase's events disagrees with the engine's state
+    + [ 'uid 5 health: view 2, engine 4', 'uid 4 health: view 1, engine 3' ]
+```
+
+### Wake, and the reason a fixture could not have proved this
+
+The defect being retired, from `docs/devlog/summary.md` (2026-09-06): *"ablating Wake changed the outcome of not one fight in 20,000, because a player unit can only die while the enemy is attacking and the enemy attacks after the player's whole line has resolved."*
+
+That defect was invisible to every fixture, because Wake **fired correctly**. `startTurn` cleared the +2 before the woken unit could spend it. A test asserting that Wake fires passed against it for the whole life of the trait, and one is still in `test/rules.test.ts`.
+
+So there are two new tests and neither is that test. The first asserts the woken unit **swings** at its raised Power:
+
+```
+✖ Wake reaches a swing: the +2 is spent inside the same phase it was granted
+  AssertionError [ERR_ASSERTION]: the woken unit swung at 2 printed + 2 from Wake
+  + actual - expected
+      [
+  +     2
+  -     4
+      ]
+```
+
+The second is an ablation over 200 real fights at `even`, comparing the shipped deck against the same deck with Wake stripped, and requiring some fight to come out differently. It compares outcomes and round counts, never `hashFight`: the hash serialises an entity's trait list, so it differs across any ablation whether or not the trait did anything — a lesson recorded in this file's 2026-09-06 entries and applied here.
+
+**Wake is alive.** Beyond the gate, `npm run measure:ablate` over 4,000 seeds at a matched 40% baseline puts it at 4.28 pp of the placement gap on its own and 2.46 pp against the intact deck. The old figure was zero outcomes changed in 20,000 fights.
+
+### The reshuffle, and the state it deliberately does not add
+
+There is no `discard` field. `reshuffle` is only ever called with the cursor at the end of the deck, so every card has been drawn and the discard is exactly `deck` minus `hand` as multisets. That is what the second mutation attacks:
+
+```
+✖ a deck that runs out reshuffles its discard and keeps drawing
+  AssertionError [ERR_ASSERTION]: the last undrawn card plus three from the reshuffle
+    2 !== 5
+
+✖ the reshuffled pile is the deck minus the hand, one instance per held card
+  AssertionError [ERR_ASSERTION]: the reshuffled pile is the six cards minus the two that
+    were in hand at the time
+    6 !== 4
+
+✖ the reshuffle runs on the deck stream, never on the combat stream
+  AssertionError [ERR_ASSERTION]: the reshuffle took draws from the deck stream
+```
+
+The third is stream separation, which is what keeps the A/B measurement paired, and it is checked by reading both generators' draw counts rather than by arguing from the call site. A fourth test holds the termination case that can actually spin — a deck smaller than the hand, where the reshuffle produces nothing.
+
+### Six gates that used Ward to build a fixture, and needed a different one
+
+`docs/learning/gate-proofs.md` warned that several gates use Ward *incidentally*. Each was retargeted rather than deleted, and each still goes red:
+
+- **"it is a queue, not a stack"** used a `grantWard` queued ahead of an `attack`, because a ward applied first left the attacker no target. It now queues a `gainPower` ahead of the attack: applied first the attacker swings at 5 and kills, applied second it swings at its printed 1 and the target lives.
+- **"an attack with no legal target fizzles"** (in `test/rules.test.ts`) and **"a single-target spell with no legal target fizzles"** (in `test/spells.test.ts`) both emptied the pool by warding the only Guard. The remaining route is a side with nothing alive on it, which is the real state between a lethal hit and the checkpoint that ends the fight: a dead hero stays on the board and `legalTargets` still skips it.
+- **"Ward removes the unit to my right from the target pool"** became **"Guard is the only rule that narrows the pool"**, which holds both halves — Guard narrows, and with the Guard gone every living entity is back in the pool, hero included.
+
+```
+✖ Guard is the only rule that narrows the pool: nothing else removes an entity
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+      [
+  +     2,
+        3,
+        4,
+  +     5
+      ]
+```
+
+- **"an AoE consults no target-selection rule: Guard and Ward do not narrow it"** lost its Ward half and keeps the Guard half, which is the half the claim was about.
+- **`test/render-view.test.ts`'s projection gate** lost its Ward half for a different reason: the Ward half existed because the odds on screen were *wrong* without it. That failure mode is gone with the trait. Its Relay half survives and still goes red.
+
+### The gate that could not be retargeted, and is recorded as lost
+
+**"inside one unit, traits fire in the source order of the `if` blocks in `triggersFor`"** was gated by a unit carrying both Relay and Ward, which are the only two shipped traits that ever keyed on the same event. With Ward gone the two remaining shipped triggers key on *different* events — `afterActed` and `died` — so no card and no seam rule can make two shipped blocks answer one event. **The property is currently unobservable and the gate is gone.**
+
+What replaced it pins the reason instead: a unit carrying both Relay and Wake gets exactly one effect out of each event, never two out of one. Adding a second `afterActed` trait makes it red, which is the moment somebody has to write the order gate back:
+
+```
+✖ the two shipped triggers key on different events, so no unit fires both at once
+  AssertionError [ERR_ASSERTION]: afterActed reaches Relay and nothing else
+  + actual - expected
+      [
+        'afterAct',
+        'gainPower',
+  +     'gainPower'
+      ]
+```
+
+`ARCHITECTURE.md` now says the rule is unreachable rather than implying a gate holds it. This is the honest version and it is weaker than what it replaced; it is written down here so an audit does not have to rediscover it.
+
+### The render gate that mutual damage broke before it gated it
+
+Buff attribution reconstructs which trait granted a `powerGained` from the position of the event in the stream, because the event carries no `sourceUid`. It kept **one** death. Mutual damage makes one attack put two entities at zero at one checkpoint, so a single effect emits two `died` events and then the Wake triggers answering them — and the first death's Wake matched nothing.
+
+```
+✖ the view derived from the event stream matches the engine, every phase
+  AssertionError [ERR_ASSERTION]: seed 7/even round 1: a +2 buff on uid 5 could not be
+    attributed to the card that granted it, so the animation would have nothing to draw
+    an arrow from
+```
+
+Found by the existing gate on the first run after the rule changed, which is the gate doing its job. Fixed by keeping every death in the phase and taking the newest match.
+
+### The gate that went red for real, and what it caught
+
+`npm run verify:run` failed on the first full-gate run after the three rules landed, with the content untouched:
+
+```
+- The instrument can see a difference: FAIL; the strongest arm won 0/200 and runs ended
+  after 3 distinct act counts. Enforced: --verify exits non-zero.
+
+FAIL: the run measurement is not trustworthy over 200 seeds.
+  - no run in 200 seeds was won, so this seed window cannot detect a change that makes the
+    run easier and every "win rate per act" below act 1 is a floor reading.
+```
+
+**Nothing was too hard.** Every shipped encounter still won 87-100% of the time in isolation at full Health; what had changed was the Health economy. Both new rules push the same way — your bodies die to the retaliation their own attacks draw, so the line protecting the hero thins faster, and the enemy's deck no longer runs dry, so it keeps fielding bodies for the whole fight. The measured cost of a won fight roughly doubled. `RUN_HERO.health` moved 80 → 200, by the same rule it was set by the first time, and the gate went green at 106/1000. That is the degeneracy gate earning its place: it is deliberately not a win-rate band, and a band would have been the wrong instrument here.
+
+### What this round does not prove
+
+- **The four preset encounters are no longer centred and were deliberately not re-tuned.** `even` was chosen so both arms straddle 50%; it now runs 66.5% against 58.1%, `easy` is 96.9/95.1 and `trivial` is 99.7/99.6. The headline gap is therefore measured above centre and compressed by the ceiling — 8.38 pp at `even` against 9.28 pp at a baseline matched back to 40% by `npm run measure:ablate`. Re-centring is a content change and it would have made the rules change unmeasurable against an unmoved content set.
+- **The measured deck lost two cards and gained none.** The Elf Warden was the only card carrying Ward, so `PLAYER_DECK` is 18 rather than 20 and the run's starting deck is 14 rather than 16. Nothing was minted to hold the slots, because inventing a card to fill a deck is a balance decision. Every before-and-after comparison in this entry therefore differs by two cards as well as by three rules, and no attempt is made here to separate them.
+- **`npm run measure:ablate` is new and has no red proof of its own.** It is an instrument rather than a gate — it exits 0 whatever it finds — and its calibration arm is Bot B alone, never Bot A, so it cannot tune the difficulty until the thing being measured has a chosen value. Its bisection converges to a *pair* of adjacent Health values and reports both, so a local inversion in the sampled win rate shows as a bracket rather than being hidden.
+- **The reshuffle gates are bound to `handSize` 5 and to `PLAYER_DECK` at 18 cards.** The determinism half runs 60 seeds at `hard` and refuses to report success unless some fight in the window actually reshuffled; it says nothing about a deck of 200 cards or a hand of 1.
+- **Nothing here was reviewed.** Sixteen mutations is evidence about the gates, not about the design.
+
 ## 2026-09-07 — spells and equipment, and the AoE that makes simultaneous-death order visible (`test/spells.test.ts`, `test/equipment.test.ts`, `test/casting.test.ts`)
 
 Taken at `06c87c7` with this round's changes applied; the suite is **86 tests** here, 55 before it.

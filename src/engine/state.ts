@@ -11,7 +11,7 @@
 
 export type Side = 'player' | 'enemy';
 
-export type Trait = 'guard' | 'relay' | 'wake' | 'ward';
+export type Trait = 'guard' | 'relay' | 'wake';
 
 export type Tribe = 'human' | 'dwarf' | 'elf' | 'orc' | 'beast' | 'hero';
 
@@ -126,8 +126,6 @@ export type Entity = {
   armour: number;
   traits: Trait[];
   alive: boolean;
-  /** Set by a Ward on my left when it acts. Cleared at the start of my side's turn. */
-  warded: boolean;
   /**
    * The three equipment slots, for a hero. `null` for a unit, which has no
    * slots at all rather than three empty ones - equipment attaches to the hero
@@ -239,7 +237,6 @@ export function makeHero(state: GameState, side: Side, spec: HeroSpec): Entity {
     armour: spec.armour,
     traits: [],
     alive: true,
-    warded: false,
     equipment: emptySlots(),
   };
 }
@@ -257,7 +254,6 @@ export function makeUnit(state: GameState, side: Side, card: UnitCard): Entity {
     armour: card.armour,
     traits: card.traits.slice(),
     alive: true,
-    warded: false,
     equipment: null,
   };
 }
@@ -336,7 +332,6 @@ export function cloneEntity(e: Entity): Entity {
     armour: e.armour,
     traits: e.traits.slice(),
     alive: e.alive,
-    warded: e.warded,
     // Copied, not shared: a lookahead rollout equips and un-equips on its own
     // clone, and the slots object is the only mutable part of an Entity that is
     // not a primitive besides `traits`. The cards inside it are immutable data.

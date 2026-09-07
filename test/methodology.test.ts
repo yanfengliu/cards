@@ -17,7 +17,7 @@ const SEEDS = Array.from({ length: 60 }, (_, i) => i + 1);
 test('card selection is a pure function of hand and energy - it cannot see the board', () => {
   // The signature is the guarantee. Assert the behaviour too: identical hands
   // give identical selections regardless of anything else in the world.
-  const hand = ['u_squire', 'u_captain', 'u_berserker', 'u_shieldbearer', 'u_warden'];
+  const hand = ['u_squire', 'u_captain', 'u_berserker', 'u_shieldbearer', 'u_hornblower'];
   const first = selectPlays(hand, ENERGY_PER_TURN, CARD_POOL);
   for (let i = 0; i < 50; i++) {
     assert.deepEqual(selectPlays(hand.slice(), ENERGY_PER_TURN, CARD_POOL), first);

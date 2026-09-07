@@ -214,44 +214,63 @@ test('trigger order is board index, not uid: a later-made unit standing left goe
   );
 });
 
-test('inside one unit, traits fire in the source order of the blocks: Relay before Ward', () => {
-  // Mutation watched going red: move Ward's block above Relay's in triggersFor.
-  // This is the only tie-break the resolver has for one unit with two triggering
-  // traits, and triggersFor's comment is the only place it is written down.
+test('the two shipped triggers key on different events, so no unit fires both at once', () => {
+  // This is what is left of "inside one unit, traits fire in the source order of
+  // the blocks in triggersFor" now that Ward is gone. That tie-break used to be
+  // gated by a unit carrying Relay and Ward, both keyed to `afterActed`; the
+  // only two shipped traits left key on different events, so no fixture and no
+  // seam rule can make two shipped blocks answer one event, and the tie-break is
+  // currently unobservable. Recorded in docs/learning/gate-proofs.md.
+  //
+  // What this test does instead is pin the reason. A unit carrying both traits
+  // gets exactly one effect out of each event, never two out of one, so the day
+  // a second `afterActed` trait is written this goes red and whoever writes it
+  // has to gate the order it fires in.
   const f = fixture();
-  const both = f.add('player', card('test:relay+ward', 1, 5, 0, ['relay', 'ward']));
+  const both = f.add('player', card('test:relay+wake', 1, 5, 0, ['relay', 'wake']));
+  const corpse = f.add('player', card('test:corpse', 0, 5, 0), 0);
   const right = f.add('player', card('test:right', 1, 5, 0));
 
-  const { events, trace } = drain(
-    f.state,
-    [{ kind: 'afterAct', uid: both.uid }],
-    makeRng(2, 'combat'),
+  const afterAct = drain(f.state, [{ kind: 'afterAct', uid: both.uid }], makeRng(2, 'combat'));
+  assert.deepEqual(
+    afterAct.trace.map((e) => e.kind),
+    ['afterAct', 'gainPower'],
+    'afterActed reaches Relay and nothing else',
   );
-
-  assert.deepEqual(trace.map((e) => e.kind), ['afterAct', 'gainPower', 'grantWard']);
-  assert.deepEqual(events.map((e) => e.kind), ['afterActed', 'powerGained', 'warded']);
   assert.equal(right.bonusPower, 2);
-  assert.equal(right.warded, true);
+
+  // Now put the left-hand neighbour at zero: the next checkpoint announces it
+  // and Wake answers - a separate event, a separate walk of triggersFor.
+  corpse.health = 0;
+  const death = drain(f.state, [{ kind: 'afterAct', uid: right.uid }], makeRng(3, 'combat'));
+  assert.deepEqual(
+    death.events.map((e) => e.kind),
+    ['afterActed', 'died', 'powerGained'],
+    'died reaches Wake and nothing else',
+  );
+  assert.equal(both.bonusPower, 2, 'Wake, not Relay: the unit to my left died');
 });
 
 test('it is a queue, not a stack: the first effect queued is the first applied', () => {
   // Mutation watched going red: queue.shift() -> queue.pop().
+  //
+  // The buff is what makes the order observable: applied first, the attacker
+  // swings at 5 and kills; applied second, it swings at its printed 1 and the
+  // target lives. This fixture used to grant a Ward instead, which the owner
+  // removed; the claim under test is the queue, not the verb.
   const f = fixture();
-  // The Guard is the only legal target on its side, so warding it leaves the
-  // attacker nothing to hit - and whether that happens is purely a question of
-  // which of these two effects is applied first.
-  const guard = f.add('player', card('test:guard', 0, 5, 0, ['guard']));
-  const attacker = f.add('enemy', card('test:attacker', 3, 5, 0));
+  const target = f.add('player', card('test:target', 0, 5, 0, ['guard']));
+  const attacker = f.add('enemy', card('test:attacker', 1, 5, 0));
 
   const queue: Effect[] = [
-    { kind: 'grantWard', uid: guard.uid, sourceUid: guard.uid },
+    { kind: 'gainPower', uid: attacker.uid, amount: 4, sourceUid: attacker.uid },
     { kind: 'attack', uid: attacker.uid },
   ];
   const { events, trace } = drain(f.state, queue, makeRng(3, 'combat'));
 
-  assert.deepEqual(trace.map((e) => e.kind), ['grantWard', 'attack']);
-  assert.equal(guard.health, 5, 'the ward was applied first, so the attack found no target');
-  assert.equal(events.some((e) => e.kind === 'fizzled'), true);
+  assert.deepEqual(trace.map((e) => e.kind), ['gainPower', 'attack']);
+  assert.equal(target.health, 0, 'the buff landed first, so the attack swung at 5');
+  assert.equal(events.some((e) => e.kind === 'died' && e.uid === target.uid), true);
 });
 
 test('deaths are batched after every effect, not once at the end of the drain', () => {
@@ -259,6 +278,9 @@ test('deaths are batched after every effect, not once at the end of the drain', 
   const f = fixture();
   const killer = f.add('player', card('test:killer', 5, 5, 0));
   const second = f.add('player', card('test:second', 4, 5, 0));
+  // 0 Power, so it retaliates for 0 and the trade cannot muddy which death
+  // this test is about. A `retaliated` event still comes out - a blow that
+  // bounced is a different thing from no blow at all.
   const guard = f.add('enemy', card('test:guard', 0, 1, 0, ['guard']));
   const enemyHero = heroOf(f.state, 'enemy');
 
@@ -271,7 +293,7 @@ test('deaths are batched after every effect, not once at the end of the drain', 
   assert.equal(guard.alive, false);
   assert.deepEqual(
     events.map((e) => e.kind),
-    ['attacked', 'died', 'attacked'],
+    ['attacked', 'retaliated', 'died', 'attacked', 'retaliated'],
     'the death landed between the two attacks, not after both of them',
   );
   assert.equal(

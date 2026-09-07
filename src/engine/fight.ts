@@ -4,13 +4,17 @@
 // left to right with the hero last, then the enemy does the same.
 //
 // Everything random flows through two named streams derived from the seed:
-//   - `deck`   shuffles both decks once, at setup
+//   - `deck`   shuffles both decks at setup, and reshuffles a discard back in
+//              whenever a deck runs out mid-fight
 //   - `combat` picks targets
 //
 // They are separate on purpose. The A/B measurement changes only where units
 // are inserted, which changes how many targeting rolls a fight consumes. A
 // single shared stream would let that shift the card draw order too, and the
-// two arms would then differ by more than the variable under test.
+// two arms would then differ by more than the variable under test. The
+// mid-fight reshuffle is on the `deck` stream for exactly that reason: both
+// arms play the same cards on the same rounds, so they run out on the same
+// round and take the same draws when they do.
 //
 // The card data is handed in, never imported: `FightSetup.pool` carries the
 // card lookup and the two per-round numbers, so nothing under `src/engine/`
@@ -166,9 +170,55 @@ export function cloneFight(f: Fight): Fight {
   };
 }
 
-/** Draw to `handSize`. Running the deck out just stops the draw. */
-export function drawTo(side: SideState, handSize: number): void {
-  while (side.hand.length < handSize && side.cursor < side.deck.length) {
+/**
+ * Shuffle the discard back into the draw pile.
+ *
+ * There is no `discard` field, and there does not need to be one: this is only
+ * ever called with the cursor at the end of the deck, so every card in `deck`
+ * has been drawn, and a drawn card is either still in hand or was played. The
+ * discard is therefore exactly `deck` minus `hand`, as multisets, and deriving
+ * it means the reshuffle adds no state for `cloneFight` to copy, for `hashFight`
+ * to serialise, or for a replay to get wrong.
+ *
+ * One instance is removed per hand card rather than every copy of that id,
+ * because a deck holding three Squires with one in hand must reshuffle two.
+ *
+ * The shuffle runs on the fight's `deck` stream, which is the same stream the
+ * opening shuffle used and is separate from `combat` by construction - see the
+ * header of this file. That separation is what keeps the A/B measurement
+ * paired: both arms play the same cards on the same rounds, so both reach the
+ * end of the deck on the same round and consume the same `deck` draws there.
+ */
+function reshuffle(side: SideState, rng: Rng): void {
+  const pile = side.deck.slice();
+  for (const held of side.hand) {
+    const i = pile.indexOf(held);
+    if (i >= 0) pile.splice(i, 1);
+  }
+  side.deck = shuffle(rng, pile);
+  side.cursor = 0;
+}
+
+/**
+ * Draw to `handSize`, reshuffling the discard back in when the deck runs out.
+ *
+ * `docs/design/game.md` lists "deck thinning as a skill" among Slay the Spire's
+ * three contributions, and without this the rule was inverted: nothing was
+ * reshuffled, so deck size was a resource budget and a thin deck simply stopped
+ * playing. Now a thin deck cycles faster and a fat one dilutes, which is what
+ * thinning is supposed to mean.
+ *
+ * The loop terminates: every iteration either draws a card - bounded by
+ * `handSize` - or reshuffles, and a reshuffle that produces no cards breaks out
+ * rather than spinning. That last case is a deck whose every card is in hand,
+ * which a deck smaller than the hand reaches on the first round.
+ */
+export function drawTo(side: SideState, handSize: number, rng: Rng): void {
+  while (side.hand.length < handSize) {
+    if (side.cursor >= side.deck.length) {
+      reshuffle(side, rng);
+      if (side.cursor >= side.deck.length) break;
+    }
     side.hand.push(side.deck[side.cursor]!);
     side.cursor++;
   }
@@ -309,7 +359,7 @@ function checkEnergy(
 
 /** The enemy plays the same selection policy and always appends at its right end. */
 function enemyPlays(f: Fight): void {
-  drawTo(f.enemy, f.pool.handSize);
+  drawTo(f.enemy, f.pool.handSize, f.rngDeck);
   const idx = selectPlays(f.enemy.hand, f.pool.energyPerTurn, f.pool);
   const ids = idx.map((i) => f.enemy.hand[i]!);
   for (const id of ids) {
@@ -360,7 +410,7 @@ export function runRound(
   f.round++;
 
   startTurn(f.state, 'player');
-  drawTo(f.player, f.pool.handSize);
+  drawTo(f.player, f.pool.handSize, f.rngDeck);
   const handBefore = f.player.hand.slice();
   const placements = decide(f);
   const casts = decideCasts === null ? [] : decideCasts(f);

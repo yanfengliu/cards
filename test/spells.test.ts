@@ -213,20 +213,18 @@ test('an AoE hits every living unit on the side and never the hero', () => {
   assert.equal(friendly.health, 9, 'and it lands on the caster’s opponent, not the caster’s line');
 });
 
-test('an AoE consults no target-selection rule: Guard and Ward do not narrow it', () => {
+test('an AoE consults no target-selection rule: Guard does not narrow it', () => {
   // Mutation watched going red: filter damageAll's targets through
-  // legalTargets, which is where Guard and Ward live.
+  // legalTargets, which is where Guard lives.
   //
-  // Guard and Ward answer "which single entity does this strike". An AoE picks
-  // nobody, so it never asks - and a wide board of Guards is precisely the board
-  // docs/design/game.md names AoE as the counter to. Flagged to the owner: this
-  // is a decision about Ward's scope, taken so the new verb touches none of the
-  // open question about Ward's timing.
+  // Guard answers "which single entity does this strike". An AoE picks nobody,
+  // so it never asks - and a wide board of Guards is precisely the board
+  // docs/design/game.md names AoE as the counter to. Ward used to be the second
+  // half of this test and of that sentence; the owner removed it.
   const f = fixture();
   const guard = f.add('enemy', card('test:guard', 0, 9, 0, ['guard']));
   const plain = f.add('enemy', card('test:plain', 0, 9, 0));
-  const warded = f.add('enemy', card('test:warded', 0, 9, 0));
-  warded.warded = true;
+  const third = f.add('enemy', card('test:third', 0, 9, 0));
 
   castSpell(
     f.state,
@@ -237,7 +235,7 @@ test('an AoE consults no target-selection rule: Guard and Ward do not narrow it'
 
   assert.equal(guard.health, 7, 'the Guard is hit');
   assert.equal(plain.health, 7, 'and so is the unit the Guard would otherwise have covered');
-  assert.equal(warded.health, 7, 'and so is the warded unit');
+  assert.equal(third.health, 7, 'every living unit on that side, with no pool to consult');
 });
 
 test('an AoE subtracts each target’s own Armour, so it is blunted unit by unit', () => {
@@ -324,9 +322,14 @@ test('single-target spell damage lands the card’s number, less the target’s 
 });
 
 test('a single-target spell with no legal target fizzles rather than throwing', () => {
+  // An empty pool used to be reachable by warding the only Guard. With Ward
+  // gone the remaining route is a side with nothing alive on it, which is the
+  // state between a lethal hit and the checkpoint that ends the fight: a dead
+  // hero stays on the board and `legalTargets` still skips it.
   const f = fixture();
-  const guard = f.add('enemy', card('test:guard', 0, 5, 0, ['guard']));
-  guard.warded = true;
+  const deadHero = heroOf(f.state, 'enemy');
+  deadHero.health = 0;
+  deadHero.alive = false;
 
   const events = castSpell(
     f.state,
@@ -335,7 +338,7 @@ test('a single-target spell with no legal target fizzles rather than throwing', 
     makeRng(29, 'combat'),
   );
   assert.deepEqual(events.map((e) => e.kind), ['fizzled']);
-  assert.equal(guard.health, 5);
+  assert.equal(deadHero.health, 0, 'nothing was struck');
 });
 
 test('a board-wide buff reaches every living unit on the caster’s line and the hero', () => {

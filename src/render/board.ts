@@ -101,7 +101,6 @@ export function titleCase(s: string): string {
 /** The glyph strip under a compressed card. See `TRAIT_GLYPH` for why it exists. */
 const TRAIT_GLYPH: Readonly<Record<string, { glyph: string; title: string }>> = {
   relay: { glyph: '→', title: 'Relay - after acting, the unit to my right gains +2 Power this turn' },
-  ward: { glyph: '◇', title: 'Ward - the unit to my right cannot be struck this turn' },
   wake: { glyph: '▲', title: 'Wake - when the unit to my left dies this turn, gain +2 Power' },
   guard: { glyph: '◆', title: 'Guard - while I live, attacks against my side must target a Guard' },
 };
@@ -343,7 +342,6 @@ function paintItems(
         // recycled node has to be told which it is on every pass.
         node.classList.toggle('is-acting', e.acting);
         node.classList.toggle('is-dead', !e.alive);
-        node.classList.toggle('is-warded', e.warded);
         node.classList.toggle('is-buffed', e.bonusPower > 0);
         paintCard(node.querySelector('.card__art') as HTMLElement, cardViewOf(e), width, opts.mount);
         paintTraits(
@@ -368,7 +366,6 @@ function paintItems(
         hero.dataset['uid'] = String(e.uid);
         hero.classList.toggle('is-acting', e.acting);
         hero.classList.toggle('is-dead', !e.alive);
-        hero.classList.toggle('is-warded', e.warded);
         hero.classList.toggle('is-buffed', e.bonusPower > 0);
         hero.classList.toggle('hero--enemy', e.side === 'enemy');
         (hero.querySelector('.hero__crest') as HTMLElement).textContent = '♗';
