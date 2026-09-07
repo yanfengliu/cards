@@ -2,7 +2,7 @@
 
 How the game gets built, verified, and improved. The game itself is [`docs/design/game.md`](docs/design/game.md); this is the engineering that has to hold it up.
 
-Status: **planned**. No code exists. Commands described here as gates are planned gates — `AGENTS.md` lists a gate only once the command that satisfies it exists.
+Status: **partly built**. A headless deterministic prototype of one fight exists — `src/engine/`, `src/content/`, `src/sim/` — alongside the SVG heraldry renderer in `src/render/`. There is no UI layer. Four of the gates described below are real commands today: `npm run gate:boundaries`, `npm run gate:banned-apis`, `npm test` and `npm run verify`, each named in `AGENTS.md`, which lists a gate only once the command that satisfies it exists. Everything else here is still a plan, and is written in the future tense where it is.
 
 ## The keystone: determinism
 
@@ -47,7 +47,14 @@ src/
   ui/         input.ts
 ```
 
-**Make this a lint rule, not a good intention.** An import-boundary rule (`eslint-plugin-boundaries` or equivalent) that fails the build when `engine/` imports from `render/`, `ui/`, or the DOM. An architecture that is only written down erodes; one that is a gate does not. Same for a rule banning `Math.random`, `Date.now` and `performance.now` anywhere outside `engine/rng.ts` — those three are how determinism dies quietly.
+**Make this a lint rule, not a good intention.** An architecture that is only written down erodes; one that is a gate does not. Both rules exist now, and both read the TypeScript AST rather than grepping, because `rng.ts` and `measure.ts` name the banned APIs in comments in order to say they are never called and a grep gate is red on a clean tree.
+
+`npm run gate:boundaries` fails when anything under `src/engine/` imports from `src/content/`, `src/render/`, `src/ui/` or `tools/`, or references a global that only `lib.dom` declares.
+
+`npm run gate:banned-apis` bans the hidden inputs a replay does not carry, and it covers **four** of them rather than the three this document first named:
+
+- `Math.random`, `Date.now` and `performance.now`, anywhere under `src/`, `test/` or `tools/`, with `src/engine/rng.ts` the one file allowed to name them.
+- A wall-clock read through `new Date()` or a bare `Date()`, anywhere under `src/` or `test/`, with no file exempt. It was an omission rather than a decision that this document listed only three: a fight seeded off `new Date()` is exactly as unreproducible as one seeded off `Date.now()`. `new Date(x)` with an argument is a pure function of `x` and is not banned, and `tools/` is out of the clock rule's scope because the boundaries gate already makes `tools/` unreachable from the engine.
 
 ## The resolution graph
 
@@ -68,11 +75,12 @@ while queue is not empty:
             queue.push(trigger.effect)
 ```
 
-Four properties this buys, each of which is a bug class it forecloses:
+Five properties this buys, each of which is a bug class it forecloses:
 
 - **One mutation site.** `apply` is the only function that writes state. A card that reaches around it is a lint failure, not a debugging session six months later.
 - **Deaths are batched.** Health is checked at defined checkpoints, not the instant damage lands. This is what stops "A kills B, B's death trigger kills A, but A already acted" from depending on evaluation order.
-- **Trigger order is board order.** Two units triggering on the same event resolve left to right. Deterministic, and explainable to a player in one sentence.
+- **Trigger order is board order, and board order means board *index*.** Two units triggering on the same event resolve left to right — the player's line first, then the enemy's. Left to right is where a unit stands, never its `uid`, which records only when the unit was made; insert a unit between two others and it triggers between them. Deterministic, and explainable to a player in one sentence.
+- **Inside one unit, traits fire in the source order of the `if` blocks in `triggersFor`.** A unit carrying both Relay and Ward grants the power first and the ward second, because Relay's block is written first. There is no priority number on a trait, so moving a block moves the rule. No shipped card carries two triggering traits, so today this decides nothing — it decides everything the day one does. Both this and board index are gated by `test/resolver-order.test.ts`, and neither can be reached with the shipped pool at all: every shipped trigger is keyed to one `uid`, so no event matches two units, and the tests hand `drain` a trigger rule of their own to make the loops observable.
 - **It is a queue, not a stack.** Effects resolve in the order they were created. A stack gives you Magic's last-in-first-out semantics, which are powerful and famously incomprehensible.
 
 **Guard the loop.** A cap of some thousands of iterations that throws with the full queue trace. A hang is strictly worse than a crash: a crash names its cause, a hang produces a bug report saying "it froze."
@@ -196,7 +204,14 @@ The design asserts that **placement is a decision**. That is falsifiable, and it
 
 > Run the same decks with a bot that places optimally and a bot that places randomly. **If their win rates are the same, placement is not a decision and the central claim of the design is false.**
 
-The gap between those two numbers is the game's reason to exist, expressed as a number that can go red in CI. It is also the fastest way to answer the design's top open questions without arguing about them — including whether the unlimited board and the AoE-only counter actually work.
+The gap between those two numbers is the game's reason to exist, and it is now a number that does go red rather than one that only could. `npm run verify` runs the measurement over 400 seeds at the `even` encounter and exits non-zero unless **both** of these hold:
+
+1. **The paired 95% interval's lower bound is above zero.** This is what makes the gate sound at small seed counts — a 20-seed run cannot pass on luck.
+2. **The gap reaches `MIN_GAP_PP`, which is 5.00 percentage points.** This is what makes it mean something at large seed counts, where condition 1 degenerates: over 20,000 seeds an interval excluding zero needs a gap of only about 0.74 pp, which is the size of a collapse rather than the size of a decision.
+
+The floor is set from the measurement's own null arms, not as a fraction of the headline. The two-identical-random-bots noise floor sits within half a point of zero, and the cascade-stripped negative control runs between 0.00 and 2.56 pp across the four encounters, so a real collapse lands far below 5 pp. At the gate's 400 seeds the paired standard error is about 2.7 pp, so 5.00 pp is roughly one 95% half-width above zero — below that a 400-seed run cannot tell the gap from zero anyway, and above it seed choice alone starts tripping the gate. What the gate catches is collapse, not drift; drift is what the printed table and the difficulty sweep are for. The threshold states that bound in its own header in `src/sim/measure.ts`.
+
+The measurement is also the fastest way to answer the design's top open questions without arguing about them — including whether the unlimited board and the AoE-only counter actually work.
 
 Extend it into a **skill gradient**: random < greedy < one-turn lookahead < deeper lookahead should be monotonic and well separated. Two adjacent tiers with equal win rates mean that layer of thinking is not being rewarded.
 

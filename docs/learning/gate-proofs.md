@@ -158,6 +158,8 @@ The defect was live at `26e55a8`: `lookaheadPlacer` carried a `salt` counter acr
 
 The tests live beside `bots.ts` rather than in `test/` because `test/` was being edited by another worker in the same wave; `node --test` discovers `**/*.test.ts` and the file is inside `tsconfig.json`'s `include`, so both `npm test` and `npm run typecheck` cover it.
 
+**Correction, 2026-09-06.** That seam is gone and the file moved to `test/bots.test.ts`. The proof above was run at the old path and is left as it was recorded; re-running it today reads `node --test test/bots.test.ts`. Coverage at the new path was re-checked rather than assumed: `node --test` still reports 47 tests and `node --test test/bots.test.ts` runs 3 of them, and `npm run typecheck` was made to go red on a deliberate type error inserted in the moved file (`test/bots.test.ts(125,7): error TS2322`) before it was reverted.
+
 ### Red — the base revision's stateful policies
 
 Mutation: `src/sim/bots.ts` restored to its `26e55a8` content, i.e. the `salt` counter and the hoisted generator put back.
