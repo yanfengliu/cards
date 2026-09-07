@@ -6,7 +6,7 @@
 // 50% so the A/B measurement is not compressed against a floor or a ceiling.
 // They are not balance claims.
 
-import type { HeroSpec, Trait, UnitCard } from '../engine/state.ts';
+import type { CardPool, HeroSpec, Trait, UnitCard } from '../engine/state.ts';
 
 export const PLAYER_CARDS: readonly UnitCard[] = [
   { id: 'u_squire', name: 'Human Squire', cost: 1, power: 1, health: 2, armour: 0, tribe: 'human', traits: ['relay'] },
@@ -166,3 +166,16 @@ export function encounterById(id: string): Encounter {
 export const ENERGY_PER_TURN = 3;
 export const HAND_SIZE = 5;
 export const MAX_ROUNDS = 12;
+
+/**
+ * This module's whole contribution to a fight, in the shape the engine takes.
+ *
+ * The engine imports nothing from here: a caller hands this to `setupFight`.
+ * The type comes from `engine/state.ts`, which is the allowed direction -
+ * content depends on engine, never the reverse.
+ */
+export const CARD_POOL: CardPool = {
+  card: cardById,
+  energyPerTurn: ENERGY_PER_TURN,
+  handSize: HAND_SIZE,
+};

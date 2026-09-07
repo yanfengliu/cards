@@ -1,11 +1,16 @@
 /**
- * Gate: `src/engine/` imports nothing from `src/render/`, `src/ui/` or
- * `tools/`, and touches no DOM global.
+ * Gate: `src/engine/` imports nothing from `src/content/`, `src/render/`,
+ * `src/ui/` or `tools/`, and touches no DOM global.
  *
  * ARCHITECTURE.md: "`engine` depends on nothing, and everything depends on
  * `engine`", and "make this a lint rule, not a good intention." The engine is
  * the thing a seed and an action list replay through; anything it reaches for
  * that lives above it is a second input the replay does not carry.
+ *
+ * `src/content/` is on that list for the same reason and was the one the
+ * diagram already forbade and the code did anyway: content imports engine
+ * types, and engine imported content's cards back, so the one-way arrow was a
+ * cycle. A cycle is not a boundary. A fight is handed a `CardPool`.
  *
  * Bound of this gate -- what a green run does and does not prove:
  *
@@ -28,8 +33,9 @@
  *   Depends on `lib.dom` being loadable. If it is not, the DOM half of this
  *           gate would pass vacuously, so the gate refuses to run instead.
  *
- * Both halves are proved live on every run against a probe file that violates
- * each of them, so a green result means the detector fired when it should.
+ * Every forbidden prefix and the DOM half are proved live on every run against
+ * a probe file that violates each of them, so a green result means the detector
+ * fired for each one and not merely that it found nothing.
  *
  * Exit 0 clean, 1 on a violation, 2 if the gate could not run.
  */
@@ -38,13 +44,28 @@ import * as path from 'node:path';
 import ts from 'typescript';
 import { ROOT, nonEmpty, rel, tsFilesUnder, tsconfigOptions } from './scan.ts';
 
-/** Repo-relative prefixes `src/engine/` may not reach into. */
-const FORBIDDEN = ['src/render/', 'src/ui/', 'tools/'];
+/**
+ * Repo-relative prefixes `src/engine/` may not reach into, each paired with a
+ * specifier that lands inside it when written in a file in `src/engine/`. That
+ * specifier is the prefix's own probe: every prefix is made to fire on every
+ * run, so a prefix that has quietly stopped matching says so instead of
+ * passing. A probe specifier does not have to resolve to a file - the import
+ * half of this rule is path arithmetic, and `src/ui/` does not exist yet - but
+ * two of the four do, which is what keeps the arithmetic honest.
+ */
+const FORBIDDEN: readonly { readonly prefix: string; readonly probe: string }[] = [
+  { prefix: 'src/content/', probe: '../content/cards.ts' },
+  { prefix: 'src/render/', probe: '../render/heraldry/card.ts' },
+  { prefix: 'src/ui/', probe: '../ui/input.ts' },
+  { prefix: 'tools/', probe: '../../tools/gates/__probe__.ts' },
+];
 
-/** A virtual file, never written to disk, that breaks both halves of the rule. */
+const PREFIXES: readonly string[] = FORBIDDEN.map((f) => f.prefix);
+
+/** A virtual file, never written to disk, that breaks every half of the rule. */
 const PROBE = path.join(ROOT, 'src', 'engine', '__gate_probe__.ts');
 const PROBE_SOURCE = [
-  "import '../render/heraldry/card.ts';",
+  ...FORBIDDEN.map((f) => `import ${JSON.stringify(f.probe)};`),
   'export const probeTitle: string = document.title;',
   '',
 ].join('\n');
@@ -53,6 +74,8 @@ const LIB_DOM = /[\\/]lib\.dom(\.[a-z]+)*\.d\.ts$/;
 
 interface Violation {
   readonly kind: 'import' | 'dom';
+  /** Which forbidden prefix an import landed under; null for a DOM reference. */
+  readonly under: string | null;
   readonly file: string;
   readonly line: number;
   readonly column: number;
@@ -128,10 +151,11 @@ function analyse(
     if (specifier !== undefined) {
       const target = landsAt(source.fileName, specifier.text);
       if (target !== undefined) {
-        const hit = FORBIDDEN.find((prefix) => `${target}/`.startsWith(prefix));
+        const hit = PREFIXES.find((prefix) => `${target}/`.startsWith(prefix));
         if (hit !== undefined) {
           found.push({
             kind: 'import',
+            under: hit,
             file: displayName,
             ...at(source, specifier),
             detail: `imports ${JSON.stringify(specifier.text)}, which is ${target} under ${hit}`,
@@ -150,6 +174,7 @@ function analyse(
       ) {
         found.push({
           kind: 'dom',
+          under: null,
           file: displayName,
           ...at(source, node),
           detail: `references the DOM global \`${node.text}\``,
@@ -207,13 +232,16 @@ function main(): void {
     process.exit(2);
   }
   const probeHits = analyse(probeSource, checker, 'src/engine/__gate_probe__.ts');
-  const probeImports = probeHits.filter((v) => v.kind === 'import').length;
+  const probeImports = probeHits.filter((v) => v.kind === 'import');
   const probeDom = probeHits.filter((v) => v.kind === 'dom').length;
-  if (probeImports !== 1 || probeDom !== 1) {
+  const firedFor = new Set(probeImports.map((v) => v.under));
+  const silent = PREFIXES.filter((p) => !firedFor.has(p));
+  if (probeImports.length !== FORBIDDEN.length || probeDom !== 1 || silent.length > 0) {
     console.error(
-      `GATE BROKEN: the probe should trip exactly one import violation and one DOM ` +
-        `violation; it tripped ${probeImports} and ${probeDom}. The detector cannot be ` +
-        `trusted to report an absence.`,
+      `GATE BROKEN: the probe should trip one import violation per forbidden prefix ` +
+        `(${FORBIDDEN.length}) and one DOM violation; it tripped ${probeImports.length} and ` +
+        `${probeDom}${silent.length > 0 ? `, and stayed silent on ${silent.join(', ')}` : ''}. ` +
+        `The detector cannot be trusted to report an absence.`,
     );
     process.exit(2);
   }
@@ -231,7 +259,7 @@ function main(): void {
   if (violations.length > 0) {
     console.error(
       `Import boundary gate FAILED: ${violations.length} violation(s) of the rule that ` +
-        `src/engine/ imports nothing from ${FORBIDDEN.join(', ')} and touches no DOM global.`,
+        `src/engine/ imports nothing from ${PREFIXES.join(', ')} and touches no DOM global.`,
     );
     console.error('');
     for (const v of violations) {
@@ -240,16 +268,17 @@ function main(): void {
     console.error('');
     console.error(
       'The engine is replayed from a seed and an action list. Anything it reaches for above ' +
-        'itself is a second input the replay does not carry. Move the code that needs render, ' +
-        'ui, tools or the DOM out of the engine, and let it import the engine instead.',
+        'itself is a second input the replay does not carry. Move the code that needs content, ' +
+        'render, ui, tools or the DOM out of the engine, and let it import the engine instead. ' +
+        'Cards are handed to a fight as a CardPool; the engine does not reach for them.',
     );
     process.exit(1);
   }
 
   console.log(
     `Import boundary gate OK: ${engineFiles.length} file(s) under src/engine/ import nothing ` +
-      `from ${FORBIDDEN.join(', ')} and reference no DOM-only global. ` +
-      `Probe check: detector fired on both halves.`,
+      `from ${PREFIXES.join(', ')} and reference no DOM-only global. ` +
+      `Probe check: detector fired for every prefix and for the DOM half.`,
   );
 }
 

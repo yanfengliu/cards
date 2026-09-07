@@ -3,7 +3,9 @@
 //   - an explicit effect queue, never recursion
 //   - `apply` is the only place state mutates
 //   - deaths are batched at a state-based checkpoint after every effect
-//   - trigger order is board order
+//   - trigger order is board order, and board order means board *index*
+//   - inside one unit, trait order is the source order of the blocks in
+//     `triggersFor`
 //   - a loop iteration cap that throws with the queue trace
 //
 // The queue is drained once per acting entity, which is what "resolves left to
@@ -36,6 +38,17 @@ export type GameEvent =
   | { kind: 'powerGained'; uid: number; amount: number }
   | { kind: 'warded'; uid: number }
   | { kind: 'died'; uid: number; side: Side; leftUid: number | null; rightUid: number | null };
+
+/**
+ * One extra trigger rule, asked of every living entity in board order after the
+ * shipped traits have had their say. It exists for tests and production passes
+ * nothing; `triggersFor` says why it has to exist at all.
+ */
+export type TriggerRule = (
+  state: GameState,
+  event: GameEvent,
+  entity: Entity,
+) => readonly Effect[];
 
 export const RELAY_POWER = 2;
 export const WAKE_POWER = 2;
@@ -174,9 +187,26 @@ function checkStateBased(state: GameState): GameEvent[] {
 /**
  * Every trigger that responds to `event`, in board order: the player's line
  * left to right, then the enemy's. Board order is the documented tie-break for
- * two units triggering on the same event.
+ * two units triggering on the same event, and board order means board *index* -
+ * where a unit stands - never uid, which only records when the unit was made.
+ *
+ * The tie-break *inside* one unit is the source order of the `if` blocks
+ * below, and this is the only place it is written down. A unit carrying both
+ * Relay and Ward grants the power first and the ward second, because Relay's
+ * block is written first. There is no priority number on a trait; moving a
+ * block moves the rule. No shipped card carries two triggering traits, so today
+ * this decides nothing - it decides everything the day one does.
+ *
+ * `extra` is a seam for tests, and the reason it is here is worth stating.
+ * Every shipped trigger is keyed to a single uid - `event.uid === e.uid`, or
+ * `event.rightUid === e.uid` - so no event can ever match two units, and the
+ * two loops below decide nothing that a fixture built from the shipped traits
+ * can observe. Reversing them, or ordering by uid, leaves the whole suite
+ * green. A rule that fires for more than one unit is the only way to make those
+ * two properties fail when they are broken, and a gate nobody can make go red
+ * is not a gate. See `test/resolver-order.test.ts`.
  */
-function triggersFor(state: GameState, event: GameEvent): Effect[] {
+function triggersFor(state: GameState, event: GameEvent, extra: TriggerRule | null): Effect[] {
   const out: Effect[] = [];
   for (const side of ['player', 'enemy'] as const) {
     for (const e of state.board[side]) {
@@ -202,6 +232,10 @@ function triggersFor(state: GameState, event: GameEvent): Effect[] {
       // Wake - when the unit to my left dies this turn, gain +2 Power.
       if (event.kind === 'died' && event.rightUid === e.uid && e.traits.includes('wake')) {
         out.push({ kind: 'gainPower', uid: e.uid, amount: WAKE_POWER, sourceUid: event.uid });
+      }
+
+      if (extra !== null) {
+        for (const t of extra(state, event, e)) out.push(t);
       }
     }
   }
@@ -234,6 +268,7 @@ export function drain(
   queue: Effect[],
   rng: Rng,
   maxIterations: number = DEFAULT_MAX_ITERATIONS,
+  extraTriggers: TriggerRule | null = null,
 ): DrainResult {
   const trace: Effect[] = [];
   const events: GameEvent[] = [];
@@ -260,10 +295,12 @@ export function drain(
     for (const e of produced) events.push(e);
     for (const d of deaths) events.push(d);
 
-    // Direct continuations first, then reactions.
+    // Direct continuations first, then reactions. An effect's own continuation
+    // is part of the thing that is happening; a trigger is a response to it
+    // having happened, and responses queue behind it.
     for (const s of spawned) queue.push(s);
-    for (const e of produced) for (const t of triggersFor(state, e)) queue.push(t);
-    for (const d of deaths) for (const t of triggersFor(state, d)) queue.push(t);
+    for (const e of produced) for (const t of triggersFor(state, e, extraTriggers)) queue.push(t);
+    for (const d of deaths) for (const t of triggersFor(state, d, extraTriggers)) queue.push(t);
   }
 
   return { events, trace, iterations };
@@ -281,13 +318,14 @@ export function resolvePhase(
   side: Side,
   rng: Rng,
   maxIterations: number = DEFAULT_MAX_ITERATIONS,
+  extraTriggers: TriggerRule | null = null,
 ): GameEvent[] {
   const order = state.board[side].map((e) => e.uid);
   const events: GameEvent[] = [];
   for (const uid of order) {
     const e = state.board[side].find((x) => x.uid === uid);
     if (e === undefined || !e.alive) continue;
-    const result = drain(state, [{ kind: 'act', uid }], rng, maxIterations);
+    const result = drain(state, [{ kind: 'act', uid }], rng, maxIterations, extraTriggers);
     for (const ev of result.events) events.push(ev);
     // A dead hero ends the fight; stop resolving the line around it.
     if (!state.board.player[state.board.player.length - 1]!.alive) break;
