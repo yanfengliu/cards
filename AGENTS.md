@@ -117,7 +117,7 @@ Do not declare the result fully verified while material findings or required che
 - **`npm run audit`** (`npm audit --audit-level=high`) is the dependency-audit gate canon requires; re-run it on any dependency change. It sits outside `npm run gates` deliberately, because it reaches the registry and an unreachable network would turn the per-commit gate red for a reason that has nothing to do with the code.
 - **There is no lint gate and no format gate, because this repo has no linter and no formatter.** Do not write either line here until the tool is installed and has been run once. A Gate written ahead of its command is the specific failure this section exists to prevent.
 - A change to `docs/design/` restates the affected rule as a concrete play example — the exact sequence, the numbers, the resulting board — because a mechanic that cannot be walked through by hand is not yet specified. `npm run sync-canon` from `../fleet` must stay green when this file changes.
-- Simulation is this repo's instrument, and it now has a runner: `npm run measure`. It is the first probe for any balance or rules question, and a scratch script that re-implements combat instead of calling it is not evidence.
+- Simulation is this repo's instrument, and it has three runners: `npm run measure` (is placement a decision, at four preset encounters), `npm run measure:run` (how far a whole run gets), and `npm run measure:ablate` (what each cascade trait is worth, at a baseline matched by reading the enemy hero's Health as a continuous dial). One of them is the first probe for any balance or rules question, and a scratch script that re-implements combat instead of calling it is not evidence.
 
 ## Invariants & boundaries
 

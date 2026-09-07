@@ -35,9 +35,9 @@ import type { Beat } from './view.ts';
 const BASE_MS: Readonly<Record<Beat['kind'], number>> = {
   act: 170,
   attack: 400,
+  retaliate: 300,
   fizzle: 260,
   buff: 440,
-  ward: 380,
   death: 320,
 };
 

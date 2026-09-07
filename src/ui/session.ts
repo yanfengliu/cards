@@ -81,7 +81,7 @@ function settle(f: Fight): void {
  * animation still has to show a body arriving.
  */
 function enemyPlays(f: Fight): number[] {
-  drawTo(f.enemy, f.pool.handSize);
+  drawTo(f.enemy, f.pool.handSize, f.rngDeck);
   const chosen = selectPlays(f.enemy.hand, f.pool.energyPerTurn, f.pool);
   const ids = chosen.map((i) => f.enemy.hand[i]!);
   const uids: number[] = [];
@@ -103,7 +103,7 @@ export function beginRound(f: Fight): boolean {
   if (f.result !== 'ongoing') return false;
   f.round++;
   startTurn(f.state, 'player');
-  drawTo(f.player, f.pool.handSize);
+  drawTo(f.player, f.pool.handSize, f.rngDeck);
   return true;
 }
 

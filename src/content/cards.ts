@@ -1,14 +1,19 @@
-// Data only, no logic. Twenty-three hand-authored cards across the design's
-// three types: eleven units the player can place, four the enemy fields, five
+// Data only, no logic. Twenty-two hand-authored cards across the design's
+// three types: ten units the player can place, four the enemy fields, five
 // spells and three pieces of equipment. Enough traits and verbs to make
 // placement and spending mean something and no more - this is a vocabulary, not
 // the card pool.
 //
 // Numbers are starting guesses tuned once, to land the baseline win rate near
 // 50% so the A/B measurement is not compressed against a floor or a ceiling.
-// They are not balance claims. The spells and equipment are not tuned at all:
-// they are absent from `PLAYER_DECK`, so no measured number depends on them
-// yet, and what they cost is the balance node's question.
+// They are not balance claims, and **that tuning is now stale**: combat became
+// mutual and decks began to reshuffle, which moved the primary encounter to
+// 66.5% against 57.4% and put both `easy` and `trivial` within a point of the
+// ceiling. Nothing here was re-tuned in the round that changed the rules, so
+// the rules change could be measured against an unmoved content set; see
+// `docs/work/6_trade-and-thin/plan.md`. The spells and equipment are not tuned
+// at all: they are absent from `PLAYER_DECK`, so no measured number depends on
+// them yet, and what they cost is the balance node's question.
 
 import type {
   CardPool,
@@ -26,7 +31,6 @@ export const PLAYER_CARDS: readonly UnitCard[] = [
   { id: 'u_pikeman', name: 'Dwarf Pikeman', cost: 1, power: 2, health: 2, armour: 0, tribe: 'dwarf', traits: [] },
   { id: 'u_hornblower', name: 'Human Hornblower', cost: 2, power: 1, health: 4, armour: 0, tribe: 'human', traits: ['relay'] },
   { id: 'u_ironguard', name: 'Dwarf Ironguard', cost: 2, power: 2, health: 4, armour: 1, tribe: 'dwarf', traits: ['guard'] },
-  { id: 'u_warden', name: 'Elf Warden', cost: 2, power: 1, health: 3, armour: 0, tribe: 'elf', traits: ['ward'] },
   { id: 'u_avenger', name: 'Dwarf Avenger', cost: 2, power: 2, health: 3, armour: 0, tribe: 'dwarf', traits: ['wake'] },
   { id: 'u_berserker', name: 'Human Berserker', cost: 2, power: 4, health: 2, armour: 0, tribe: 'human', traits: [] },
   { id: 'u_captain', name: 'Human Captain', cost: 3, power: 3, health: 4, armour: 1, tribe: 'human', traits: ['relay'] },
@@ -44,14 +48,19 @@ export const ENEMY_CARDS: readonly UnitCard[] = [
 /**
  * The negative control for the whole measurement.
  *
- * The same eleven cards with every trait that reads a neighbour - Relay, Ward,
- * Wake - removed. Guard stays, because Guard does not care where it stands.
+ * The same ten cards with every trait that reads a neighbour - Relay and Wake -
+ * removed. Guard stays, because Guard does not care where it stands.
  *
  * If the optimal-placement bot still beats the random one by as much on this
  * set, the measurement is picking up something other than the cascade and the
  * headline number should not be trusted.
+ *
+ * Ward used to be the third name here. It was removed from the game by the
+ * owner: "the unit to my right cannot be struck this turn" applied to a side's
+ * only Guard emptied `legalTargets` and made that whole side untargetable, for
+ * two cheap cards on turn one.
  */
-const POSITIONAL: readonly Trait[] = ['relay', 'ward', 'wake'];
+const POSITIONAL: readonly Trait[] = ['relay', 'wake'];
 
 export const PLAYER_CARDS_NO_CASCADE: readonly UnitCard[] = PLAYER_CARDS.map((c) => ({
   ...c,
@@ -119,11 +128,11 @@ export const SPELL_CARDS: readonly SpellCard[] = [
  * `docs/design/game.md`'s walk-through can now be run with the card it is
  * written with instead of a hero given +3 base Power to stand in for it.
  *
- * Nothing here grants a trait. Relay and Ward both read the unit to the right
- * and the hero has none; Guard on a hero would force attacks onto it; Wake's
- * rule is an open question with the owner. Two numbers and a slot is the whole
- * card type, which is also what "equipment amplifies an attack that already
- * exists" asks for.
+ * Nothing here grants a trait. Relay reads the unit to the right and the hero
+ * has none; Guard on a hero would force attacks onto it; Wake reads the unit to
+ * the left, which for a hero is the last body in the line. Two numbers and a
+ * slot is the whole card type, which is also what "equipment amplifies an
+ * attack that already exists" asks for.
  */
 export const EQUIPMENT_CARDS: readonly EquipmentCard[] = [
   {
@@ -207,8 +216,10 @@ export function castableById(id: string): CastableCard | null {
  * Knight: 30 Health, swings for 2. No equipment in this probe.
  *
  * Hero health persists across a whole run in the design, so the player's bar is
- * larger than any single encounter's. The enemy hero's health is this probe's
- * difficulty dial - see `ENCOUNTERS`.
+ * larger than any single encounter's - `src/run/content.ts` runs 200. The enemy
+ * hero's health is this probe's difficulty dial; see `ENCOUNTERS`, and note
+ * that a hero now retaliates when it is struck, so its Power is a live number
+ * here in a way it was not.
  */
 export const PLAYER_HERO: HeroSpec = { name: 'Knight', health: 30, power: 2, armour: 0 };
 
@@ -216,14 +227,22 @@ function repeat(id: string, n: number): string[] {
   return new Array<string>(n).fill(id);
 }
 
-/** Twenty cards, roughly the mid-run deck size the design assumes. */
+/**
+ * Eighteen cards, roughly the mid-run deck size the design assumes.
+ *
+ * It was twenty, and the two that left were the Elf Wardens - the only card
+ * carrying Ward, which the owner removed. Nothing was minted to replace them:
+ * inventing a card to hold a deck slot is a balance decision, and this deck is
+ * the one every measured number is taken against. The two-card difference is a
+ * confound in any comparison across that removal and it is recorded rather than
+ * papered over; see `docs/work/6_trade-and-thin/plan.md`.
+ */
 export const PLAYER_DECK: readonly string[] = [
   ...repeat('u_squire', 3),
   ...repeat('u_shieldbearer', 2),
   ...repeat('u_pikeman', 2),
   ...repeat('u_hornblower', 2),
   ...repeat('u_ironguard', 2),
-  ...repeat('u_warden', 2),
   ...repeat('u_avenger', 2),
   ...repeat('u_berserker', 2),
   ...repeat('u_captain', 1),
@@ -231,12 +250,12 @@ export const PLAYER_DECK: readonly string[] = [
   ...repeat('u_champion', 1),
 ];
 
-/** The same twenty cards with the cascade traits stripped. */
+/** The same eighteen cards with the cascade traits stripped. */
 export const PLAYER_DECK_NO_CASCADE: readonly string[] = PLAYER_DECK.map((id) => `${id}_nc`);
 
 /**
- * Twenty cards of all three types: fourteen bodies, four spells, two pieces of
- * equipment.
+ * Nineteen cards of all three types: thirteen bodies, four spells, two pieces
+ * of equipment.
  *
  * It is deliberately not the deck the measurement runs. `npm run verify`'s
  * numbers are a claim about placement, and changing the deck changes every one
@@ -252,7 +271,6 @@ export const PLAYER_DECK_MIXED: readonly string[] = [
   ...repeat('u_pikeman', 2),
   ...repeat('u_hornblower', 1),
   ...repeat('u_ironguard', 2),
-  ...repeat('u_warden', 1),
   ...repeat('u_avenger', 1),
   ...repeat('u_berserker', 1),
   ...repeat('u_captain', 1),
@@ -289,6 +307,15 @@ export type Encounter = {
  * measurement so that both arms straddle a 50% win rate, where a win-rate gap
  * is least compressed by the floor and the ceiling. `hard` and `easy` exist to
  * show how much of the gap is an artifact of that choice.
+ *
+ * **All four need re-centring and none of them was moved.** Mutual damage and
+ * the mid-fight reshuffle are both a bigger gain for the side with more bodies,
+ * which is usually the player's, so every point on the ladder went up: `even`
+ * now runs 66.35% against 57.40%, `easy` 96.90% against 95.08%, and `trivial`
+ * 99.72% against 99.58%. The bottom two rows of the sweep therefore measure
+ * nothing and should be read as "no information" rather than "the gap is small
+ * there". Re-centring is a balance decision and doing it in the same round as
+ * the rules change would have left neither measurable.
  */
 export const ENCOUNTERS: readonly Encounter[] = [
   {

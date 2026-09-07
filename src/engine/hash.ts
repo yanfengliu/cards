@@ -43,7 +43,6 @@ function entityToCanonical(e: Entity): string {
     e.armour,
     e.traits.join('+'),
     e.alive ? 1 : 0,
-    e.warded ? 1 : 0,
   ].join(':');
   const eq = e.equipment;
   if (eq === null || (eq.weapon === null && eq.armour === null && eq.trinket === null)) {

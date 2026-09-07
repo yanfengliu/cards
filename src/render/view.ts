@@ -40,7 +40,6 @@ export type EntityView = {
   readonly traits: readonly Trait[];
   readonly cost: number;
   alive: boolean;
-  warded: boolean;
   /** Presentation only. Never round-trips into `GameState`. */
   acting: boolean;
 };
@@ -71,6 +70,20 @@ export type Beat =
       /** True when a Guard on the defending side took a hit meant for the pool. */
       readonly guardForced: boolean;
     }
+  /**
+   * The defender hitting back, drawn as its own blow immediately after the
+   * attack it answers. `uid` deals, `targetUid` takes - the same way round as
+   * `attack`, so one drawing routine serves both.
+   */
+  | {
+      readonly kind: 'retaliate';
+      readonly uid: number;
+      readonly targetUid: number;
+      readonly raw: number;
+      readonly dealt: number;
+      readonly absorbed: number;
+      readonly wasted: number;
+    }
   | { readonly kind: 'fizzle'; readonly uid: number }
   | {
       readonly kind: 'buff';
@@ -78,7 +91,6 @@ export type Beat =
       readonly amount: number;
       readonly source: BuffSource;
     }
-  | { readonly kind: 'ward'; readonly uid: number; readonly sourceUid: number | null }
   | { readonly kind: 'death'; readonly uid: number; readonly side: Side };
 
 function viewOf(e: Entity, pool: CardPool): EntityView {
@@ -100,7 +112,6 @@ function viewOf(e: Entity, pool: CardPool): EntityView {
       traits: e.traits.slice(),
       cost: 0,
       alive: e.alive,
-      warded: e.warded,
       acting: false,
     };
   }
@@ -120,7 +131,6 @@ function viewOf(e: Entity, pool: CardPool): EntityView {
     traits: e.traits.slice(),
     cost: card.cost,
     alive: e.alive,
-    warded: e.warded,
     acting: false,
   };
 }
@@ -185,22 +195,27 @@ export function leftOf(view: BoardView, e: EntityView): EntityView | null {
  *
  *   Relay fires on `afterActed{X}` and targets `rightNeighbour(X)`, on X's own
  *   side. Wake fires on `died{D, rightUid: T}` and targets T, on the *dying*
- *   side. An attack only ever reaches the other side, so the unit that just
- *   acted and the unit that just died are never on the same side, and the two
- *   cases cannot both claim one event.
+ *   side.
+ *
+ * **Deaths are plural and that is what mutual damage changed here.** One attack
+ * can now put both entities at zero at one checkpoint, so a single effect
+ * produces two `died` events and then the Wake triggers answering them, in that
+ * order. Keeping only the most recent death made the first one's Wake
+ * unattributable - the buff arrived after both deaths and matched neither, and
+ * the arrow was simply not drawn. So every death in the phase is kept and the
+ * newest matching one wins.
  *
  * That argument holds for the shipped trait set and is exactly as strong as
  * that set. `via: 'unknown'` is the honest answer for anything else, and the
  * arrow is simply not drawn. **The clean fix is one field**: put `sourceUid` on
- * the `powerGained` and `warded` events, which costs the engine nothing and no
- * `GameState` field. That is an engine change, so it is reported rather than
- * made here.
+ * the `powerGained` event, which costs the engine nothing and no `GameState`
+ * field. That is an engine change, so it is reported rather than made here.
  */
 function attributeBuff(
   view: BoardView,
   targetUid: number,
   lastActed: number | null,
-  lastDeath: { uid: number; rightUid: number | null } | null,
+  deaths: readonly { uid: number; rightUid: number | null }[],
 ): BuffSource {
   if (lastActed !== null) {
     const actor = findView(view, lastActed);
@@ -211,10 +226,11 @@ function attributeBuff(
       }
     }
   }
-  if (lastDeath !== null && lastDeath.rightUid === targetUid) {
-    const target = findView(view, targetUid);
-    if (target !== null && target.traits.includes('wake')) {
-      return { sourceUid: lastDeath.uid, via: 'wake' };
+  const target = findView(view, targetUid);
+  if (target !== null && target.traits.includes('wake')) {
+    for (let i = deaths.length - 1; i >= 0; i--) {
+      const d = deaths[i]!;
+      if (d.rightUid === targetUid) return { sourceUid: d.uid, via: 'wake' };
     }
   }
   return { sourceUid: null, via: 'unknown' };
@@ -224,10 +240,8 @@ function attributeBuff(
 function guardForced(view: BoardView, target: EntityView): boolean {
   if (!target.traits.includes('guard')) return false;
   // Forced only means something when the Guard was shielding somebody: a lone
-  // Guard is the only legal target either way and the label would be noise. A
-  // warded neighbour was not in the pool to begin with, so it is not somebody
-  // this Guard protected.
-  return view[target.side].some((e) => e.alive && !e.warded && !e.traits.includes('guard'));
+  // Guard is the only legal target either way and the label would be noise.
+  return view[target.side].some((e) => e.alive && !e.traits.includes('guard'));
 }
 
 /**
@@ -244,7 +258,7 @@ function guardForced(view: BoardView, target: EntityView): boolean {
 export function buildBeats(view: BoardView, events: readonly GameEvent[]): Beat[] {
   const beats: Beat[] = [];
   let lastActed: number | null = null;
-  let lastDeath: { uid: number; rightUid: number | null } | null = null;
+  const deaths: { uid: number; rightUid: number | null }[] = [];
 
   for (const ev of events) {
     switch (ev.kind) {
@@ -286,28 +300,30 @@ export function buildBeats(view: BoardView, events: readonly GameEvent[]): Beat[
           kind: 'buff',
           uid: ev.uid,
           amount: ev.amount,
-          source: attributeBuff(view, ev.uid, lastActed, lastDeath),
+          source: attributeBuff(view, ev.uid, lastActed, deaths),
         };
         beats.push(beat);
         applyBeat(view, beat);
         break;
       }
-      case 'warded': {
-        // Ward is granted by the unit on the target's left, and only ever by
-        // one that has just acted, so the source is unambiguous from position.
-        const target = findView(view, ev.uid);
-        let sourceUid: number | null = null;
-        if (target !== null) {
-          const left = leftOf(view, target);
-          if (left !== null && left.traits.includes('ward')) sourceUid = left.uid;
-        }
-        const beat: Beat = { kind: 'ward', uid: ev.uid, sourceUid };
+      case 'retaliated': {
+        const target = findView(view, ev.targetUid);
+        const before = target?.health ?? 0;
+        const beat: Beat = {
+          kind: 'retaliate',
+          uid: ev.uid,
+          targetUid: ev.targetUid,
+          raw: ev.raw,
+          dealt: ev.dealt,
+          absorbed: ev.raw - ev.dealt,
+          wasted: Math.max(0, ev.dealt - before),
+        };
         beats.push(beat);
         applyBeat(view, beat);
         break;
       }
       case 'died': {
-        lastDeath = { uid: ev.uid, rightUid: ev.rightUid };
+        deaths.push({ uid: ev.uid, rightUid: ev.rightUid });
         const beat: Beat = { kind: 'death', uid: ev.uid, side: ev.side };
         beats.push(beat);
         applyBeat(view, beat);
@@ -335,7 +351,8 @@ export function applyBeat(view: BoardView, beat: Beat): void {
       if (actor !== null) actor.acting = true;
       break;
     }
-    case 'attack': {
+    case 'attack':
+    case 'retaliate': {
       const target = findView(view, beat.targetUid);
       if (target !== null) target.health -= beat.dealt;
       break;
@@ -345,11 +362,6 @@ export function applyBeat(view: BoardView, beat: Beat): void {
     case 'buff': {
       const target = findView(view, beat.uid);
       if (target !== null) target.bonusPower += beat.amount;
-      break;
-    }
-    case 'ward': {
-      const target = findView(view, beat.uid);
-      if (target !== null) target.warded = true;
       break;
     }
     case 'death': {
@@ -387,9 +399,6 @@ export function viewDrift(view: BoardView, state: GameState): string[] {
       }
       if (v.alive !== e.alive) {
         problems.push(`uid ${e.uid} alive: view ${v.alive}, engine ${e.alive}`);
-      }
-      if (v.warded !== e.warded) {
-        problems.push(`uid ${e.uid} warded: view ${v.warded}, engine ${e.warded}`);
       }
     }
   }

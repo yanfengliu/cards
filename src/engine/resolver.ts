@@ -27,6 +27,13 @@
 //     emits one event per entity in that order
 //   - all of that damage lands before any of it is checked, so the deaths it
 //     causes are announced together at one checkpoint rather than interleaved
+//
+// Combat is mutual, and that is the third thing in this file that depends on
+// deaths being batched. `attack` applies BOTH hits inside one `apply` call -
+// the attacker's, then the defender's retaliation - and the single checkpoint
+// afterwards announces whichever of them died. Neither hit can cancel the
+// other, because neither is checked until both have landed, and both are
+// computed from Power read before either lands.
 
 import { type Rng, pick } from './rng.ts';
 import {
@@ -48,7 +55,6 @@ export type Effect =
   | { kind: 'attack'; uid: number }
   | { kind: 'afterAct'; uid: number }
   | { kind: 'gainPower'; uid: number; amount: number; sourceUid: number }
-  | { kind: 'grantWard'; uid: number; sourceUid: number }
   // The spell and equipment verbs. `uid` is the caster throughout, matching
   // `attack`, so every effect in the union still names the entity that is doing
   // something and the loop trace stays one shape.
@@ -61,9 +67,20 @@ export type GameEvent =
   | { kind: 'acted'; uid: number }
   | { kind: 'afterActed'; uid: number }
   | { kind: 'attacked'; uid: number; targetUid: number; raw: number; dealt: number }
+  /**
+   * The defender hitting back, emitted immediately after the `attacked` it
+   * answers. Same four fields, read the same way round: `uid` is the entity
+   * dealing the damage - here the defender - and `targetUid` is the attacker
+   * taking it.
+   *
+   * It is a separate event rather than two more fields on `attacked` because
+   * the animation layer draws it as its own blow, and because no trigger keys
+   * on it: retaliation is not an action, so nothing answers it the way Relay
+   * answers `afterActed`.
+   */
+  | { kind: 'retaliated'; uid: number; targetUid: number; raw: number; dealt: number }
   | { kind: 'fizzled'; uid: number }
   | { kind: 'powerGained'; uid: number; amount: number }
-  | { kind: 'warded'; uid: number }
   | { kind: 'died'; uid: number; side: Side; leftUid: number | null; rightUid: number | null }
   /** Damage that did not come from an attack. Same four fields as `attacked`. */
   | { kind: 'damaged'; uid: number; targetUid: number; raw: number; dealt: number }
@@ -98,11 +115,15 @@ export const DEFAULT_MAX_ITERATIONS = 4096;
  * Design rules, in this order:
  *   - the pool is every living entity on the defending side, hero included
  *   - Guard: if any Guard lives on that side, the pool narrows to the Guards
- *   - Ward: a warded entity is removed from the pool
  *
- * Ward is applied after Guard, so warding every living Guard leaves no legal
- * target and the attack fizzles. That combination is not covered by the design
- * document; see `docs/work/1_turn-prototype/plan.md`.
+ * There is no second narrowing rule. Ward - "the unit to my right cannot be
+ * struck this turn" - was removed by the owner: a Ward on your only Guard
+ * emptied this pool entirely and made your whole side untargetable for the rest
+ * of the fight, which two cheap cards could buy on turn one.
+ *
+ * An empty pool is still reachable and still fizzles, because a side can have
+ * no living entity at all in the instant between a lethal hit and the next
+ * checkpoint.
  */
 export function legalTargets(state: GameState, attacker: Entity): Entity[] {
   const defenders = state.board[otherSide(attacker.side)];
@@ -113,8 +134,7 @@ export function legalTargets(state: GameState, attacker: Entity): Entity[] {
     living.push(e);
     if (e.traits.includes('guard')) anyGuard = true;
   }
-  const gated = anyGuard ? living.filter((e) => e.traits.includes('guard')) : living;
-  return gated.filter((e) => !e.warded);
+  return anyGuard ? living.filter((e) => e.traits.includes('guard')) : living;
 }
 
 /**
@@ -161,6 +181,42 @@ function apply(
       };
     }
 
+    /**
+     * An attack, and the trade that comes back with it.
+     *
+     * `docs/design/game.md`: "Combat is mutual. When a unit attacks, the
+     * defender simultaneously deals its own Power back to the attacker."
+     * Simultaneous is a claim about this function's shape, not a comment:
+     *
+     *   - Both numbers are read from `power()` BEFORE either hit lands. Nothing
+     *     here changes Power, so that is free today; it is written this way so
+     *     that the day a trait reads Health to set Power, the two hits still
+     *     cross rather than one arriving after the other has bitten.
+     *   - Both hits are applied inside this one `apply` call, so `drain` runs
+     *     `checkStateBased` exactly once afterwards and whichever of the two
+     *     died is announced at that one checkpoint. The first death cannot
+     *     cancel the second blow, which is `ARCHITECTURE.md`'s reason for
+     *     batching deaths in the first place: "A kills B, B's death trigger
+     *     kills A" must not depend on evaluation order.
+     *   - Armour applies to retaliation exactly as it applies to any other hit,
+     *     through `armourOf`, so a worn shield covers the trade too.
+     *
+     * Two rules the mutual version needs that the one-way version did not:
+     *
+     *   - **Retaliation lands only on units.** A hero deals it and never takes
+     *     it. The hero cannot be ordered to hold back - "units never take
+     *     orders" - so retaliation on the hero's own swing would be unavoidable
+     *     chip damage with no decision attached, against the bar that carries a
+     *     whole run.
+     *   - **Retaliation is not an action.** It emits `retaliated`, never
+     *     `acted` or `afterActed`, so a defender does not fire its
+     *     after-acting trait for having been hit.
+     *
+     * Spell damage does not trade: `damageOne` and `damageAll` below deal their
+     * number and take nothing back. A spell is cast from behind the line, and
+     * that is what keeps AoE the answer to a wide board rather than a way to
+     * feed one.
+     */
     case 'attack': {
       const e = findEntity(state, effect.uid);
       if (e === null || !e.alive) return { events: [], spawned: [] };
@@ -170,14 +226,30 @@ function apply(
       }
       const target = pick(rng, targets);
       const raw = power(e);
+      const back = power(target);
       // Armour is flat per attack, to a minimum of zero. Damage does not carry:
       // the whole hit lands on one target and any excess is wasted.
       const dealt = Math.max(0, raw - armourOf(target));
+      const dealtBack = e.isHero ? 0 : Math.max(0, back - armourOf(e));
       target.health -= dealt;
-      return {
-        events: [{ kind: 'attacked', uid: e.uid, targetUid: target.uid, raw, dealt }],
-        spawned: [],
-      };
+      e.health -= dealtBack;
+      const events: GameEvent[] = [
+        { kind: 'attacked', uid: e.uid, targetUid: target.uid, raw, dealt },
+      ];
+      // A hero's attacker takes nothing back, and the event is left out rather
+      // than emitted at zero: a unit with 0 Power DOES retaliate, for 0, and
+      // the animation shows that as a blow that bounced. The two cases are
+      // different things and the event stream distinguishes them.
+      if (!e.isHero) {
+        events.push({
+          kind: 'retaliated',
+          uid: target.uid,
+          targetUid: e.uid,
+          raw: back,
+          dealt: dealtBack,
+        });
+      }
+      return { events, spawned: [] };
     }
 
     case 'afterAct': {
@@ -196,18 +268,13 @@ function apply(
       };
     }
 
-    case 'grantWard': {
-      const e = findEntity(state, effect.uid);
-      if (e === null || !e.alive) return { events: [], spawned: [] };
-      e.warded = true;
-      return { events: [{ kind: 'warded', uid: e.uid }], spawned: [] };
-    }
-
     /**
      * A spell's single-target damage. It picks the way an attack does - same
-     * `legalTargets`, so Guard narrows the pool and a warded entity is out of
-     * it - and it lands a number from the card instead of the caster's Power.
-     * With no legal target it fizzles rather than throwing, as an attack does.
+     * `legalTargets`, so Guard narrows the pool - and it lands a number from
+     * the card instead of the caster's Power. With no legal target it fizzles
+     * rather than throwing, as an attack does.
+     *
+     * It does not trade. Only an attack does; see the `attack` case.
      */
     case 'damageOne': {
       const e = findEntity(state, effect.uid);
@@ -237,9 +304,9 @@ function apply(
      *     queue in that same order. Splitting it into one effect per target
      *     would interleave the deaths with the damage and change that order.
      *   - It consults no target-selection rule. `legalTargets` is where Guard
-     *     and Ward live, and it is asked which single entity to strike; an AoE
-     *     picks nobody, so it never asks. A wide board of Guards is exactly the
-     *     board `docs/design/game.md` names AoE as the counter to.
+     *     lives, and it is asked which single entity to strike; an AoE picks
+     *     nobody, so it never asks. A wide board of Guards is exactly the board
+     *     `docs/design/game.md` names AoE as the counter to.
      *   - It hits units and not heroes. AoE is the answer to a wide board, not
      *     a way to burn a hero down; a hero is reached by attacking it.
      *
@@ -373,11 +440,13 @@ function checkStateBased(state: GameState): GameEvent[] {
  * where a unit stands - never uid, which only records when the unit was made.
  *
  * The tie-break *inside* one unit is the source order of the `if` blocks
- * below, and this is the only place it is written down. A unit carrying both
- * Relay and Ward grants the power first and the ward second, because Relay's
- * block is written first. There is no priority number on a trait; moving a
- * block moves the rule. No shipped card carries two triggering traits, so today
- * this decides nothing - it decides everything the day one does.
+ * below, and this is the only place it is written down. A unit carrying two
+ * traits that answer one event fires them in the order their blocks are
+ * written. There is no priority number on a trait; moving a block moves the
+ * rule. No shipped card carries two triggering traits, so today this decides
+ * nothing - it decides everything the day one does. With Ward removed the only
+ * two shipped triggers key on different events, so this tie-break is now
+ * reachable only through the `extra` seam.
  *
  * `extra` is a seam for tests, and the reason it is here is worth stating.
  * Every shipped trigger is keyed to a single uid - `event.uid === e.uid`, or
@@ -411,22 +480,29 @@ function triggersFor(state: GameState, event: GameEvent, extra: TriggerRule | nu
 
       if (event.kind === 'afterActed' && event.uid === e.uid) {
         // Relay - after acting, the unit to my right gains +2 Power this turn.
+        //
+        // Note what mutual damage does to this without touching it: a unit that
+        // dies to the retaliation its own attack drew never reaches `afterAct`,
+        // because `apply` skips an effect naming a dead entity. It acted; it
+        // did not finish acting. That is the existing "no unit acts after
+        // dying" rule meeting the new trade, and it is a real cost on a fragile
+        // Relay body rather than a special case written for it.
         if (e.traits.includes('relay')) {
           const r = rightNeighbour(state, e);
           if (r !== null && r.alive) {
             out.push({ kind: 'gainPower', uid: r.uid, amount: RELAY_POWER, sourceUid: e.uid });
           }
         }
-        // Ward - the unit to my right cannot be struck this turn.
-        if (e.traits.includes('ward')) {
-          const r = rightNeighbour(state, e);
-          if (r !== null && r.alive) {
-            out.push({ kind: 'grantWard', uid: r.uid, sourceUid: e.uid });
-          }
-        }
       }
 
       // Wake - when the unit to my left dies this turn, gain +2 Power.
+      //
+      // Mutual damage is what makes this reachable. Before it, a unit could
+      // only die during the OPPONENT's phase, and `startTurn` cleared the +2
+      // before the woken unit next swung. Now a unit can die to retaliation
+      // during its own side's phase - and the unit that dies is by construction
+      // to the LEFT of the one that has not acted yet, which is exactly the
+      // neighbour Wake reads.
       if (event.kind === 'died' && event.rightUid === e.uid && e.traits.includes('wake')) {
         out.push({ kind: 'gainPower', uid: e.uid, amount: WAKE_POWER, sourceUid: event.uid });
       }
@@ -544,16 +620,21 @@ export function resolvePhase(
 }
 
 /**
- * Start of a side's turn: this-turn buffs and Ward marks expire.
+ * Start of a side's turn: this-turn buffs expire.
  *
  * "Buffs granted during resolution last until end of turn" - clearing them at
- * the start of the owner's next turn is the same window, and it lets a Ward
- * granted in the player's phase still be up during the enemy's attacks.
+ * the start of the owner's next turn is the same window, and it is what lets a
+ * buff granted during the player's phase still be on the board while the enemy
+ * attacks into it.
+ *
+ * This is the line that used to make Wake inert, and it is unchanged. What
+ * changed is when a unit can die: with combat mutual, a unit dies during its
+ * own side's phase, so the +2 Wake grants is spent by a unit standing to its
+ * right that has not acted yet - inside the same phase, before this ever runs.
  */
 export function startTurn(state: GameState, side: Side): void {
   for (const e of state.board[side]) {
     e.bonusPower = 0;
-    e.warded = false;
   }
 }
 

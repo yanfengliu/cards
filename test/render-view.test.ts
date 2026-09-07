@@ -178,18 +178,25 @@ test('target odds are exactly the engine’s uniform pick', () => {
   }
 });
 
-test('the Wards and Relays shown before commit are the ones that land', () => {
-  // The odds on screen are computed against a *projection* of the player's own
-  // phase, because a Ward granted during that phase changes who can be targeted
-  // afterwards - and in the worst case removes every legal target, turning a
-  // displayed "100% onto your Guard" into an actual "nothing can be hit". The
-  // projection has to be exactly right or it has replaced one wrong number with
-  // another.
+test('the Relays shown before commit are the ones that land, on a phase nothing died in', () => {
+  // The odds and the pips on screen are computed against a *projection* of the
+  // player's own phase: `projectOwnPhase` walks the line left to right and adds
+  // the +2 each Relay will hand its right-hand neighbour. The projection has to
+  // be exactly right or it has replaced one wrong number with another.
   //
-  // Made to go red: dropping the `right.warded = true` line makes the very
-  // first fight that plays an Elf Warden fail with a missing uid.
+  // Made to go red: dropping the `right.bonusPower += RELAY` line drops every
+  // predicted buff and the first fight that plays a Squire fails.
+  //
+  // **The bound moved when combat became mutual, and this is the honest form of
+  // it.** A unit can now die during its own side's phase, to the retaliation its
+  // own attack drew, and that breaks the exactness argument in two directions: a
+  // Relay unit that dies mid-swing never reaches `afterAct`, so its +2 never
+  // lands, and a Wake unit answering that death gains +2 the projection does not
+  // model at all. So the exact comparison runs only over phases in which nothing
+  // of the player's died - and both counts are asserted, so a version of this
+  // test that skips everything cannot pass.
   let phases = 0;
-  let wardedSeen = 0;
+  let skippedForDeaths = 0;
   let relayedSeen = 0;
   for (let seed = 1; seed <= 60; seed++) {
     const f = setupFight(setup(seed, 'even'));
@@ -201,26 +208,17 @@ test('the Wards and Relays shown before commit are the ones that land', () => {
 
       // The one case the projection deliberately does not model: `resolvePhase`
       // stops the moment a hero dies, so units to the right of the killing blow
-      // never act and never grant their Ward. The projection is for deciding
+      // never act and never grant their Relay. The projection is for deciding
       // what the enemy will do to you next turn, and there is no next turn in a
       // round that ends the fight.
       if (committed.result !== 'ongoing') break;
 
+      if (playerPhase.events.some((e) => e.kind === 'died' && e.side === 'player')) {
+        skippedForDeaths++;
+        continue;
+      }
+
       const predicted = projectOwnPhase(committed.stateAtStart, 'player');
-      const predictedUids = new Set(
-        predicted.board.player.filter((e) => e.warded).map((e) => e.uid),
-      );
-      const actualUids = new Set(
-        playerPhase.stateAfter.board.player.filter((e) => e.warded).map((e) => e.uid),
-      );
-      assert.deepEqual(
-        [...predictedUids].sort((a, b) => a - b),
-        [...actualUids].sort((a, b) => a - b),
-        `seed ${seed} round ${f.round}: the Wards shown before commit are not the Wards that landed`,
-      );
-      // Relay's half of the same projection. Wake cannot contaminate this: it
-      // answers a death on your own side, and your own side cannot lose a unit
-      // during its own phase.
       const predictedPower = new Map(
         predicted.board.player.map((e) => [e.uid, e.bonusPower] as const),
       );
@@ -234,14 +232,16 @@ test('the Wards and Relays shown before commit are the ones that land', () => {
         );
         if (e.bonusPower > 0) relayedSeen++;
       }
-
-      wardedSeen += actualUids.size;
       phases++;
     }
   }
-  assert.ok(phases > 200, `expected a real corpus, checked ${phases} phases`);
-  assert.ok(wardedSeen > 40, `expected Ward to actually fire, saw ${wardedSeen} warded units`);
+  assert.ok(phases > 100, `expected a real corpus, checked ${phases} phases`);
   assert.ok(relayedSeen > 40, `expected Relay to actually fire, saw ${relayedSeen} buffed units`);
+  assert.ok(
+    skippedForDeaths > 0,
+    'expected some phase to lose a unit to retaliation; if none did, mutual damage is not ' +
+      'reaching the player line and the exclusion above is hiding nothing',
+  );
 });
 
 test('the board compresses and never needs a second row', () => {
@@ -292,7 +292,7 @@ test('every shipped card has a blazon that parses and respects the rule of tinct
         `at seventy pixels`,
     );
   }
-  assert.ok(seen.size >= 15, `expected the whole pool, saw ${seen.size} cards`);
+  assert.ok(seen.size >= 14, `expected the whole pool, saw ${seen.size} cards`);
   // An id the pool has never seen still renders, because the card pool is
   // growing under this file.
   const unknown = blazonFor('u_not_a_real_card', 'human', false);

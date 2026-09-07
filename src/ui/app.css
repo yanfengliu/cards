@@ -364,15 +364,6 @@ button.is-on {
   filter: drop-shadow(0 0 6px rgba(217, 165, 32, 0.95));
 }
 
-.card.is-warded::after {
-  content: '◇';
-  position: absolute;
-  top: -6px;
-  right: -4px;
-  font-size: 15px;
-  color: #7fd3ff;
-  text-shadow: 0 0 6px rgba(127, 211, 255, 0.9);
-}
 
 .card.is-dead {
   opacity: 0;
@@ -930,11 +921,6 @@ button.is-on {
     opacity var(--ms, 320ms) ease-in 160ms;
 }
 
-.fx--token.is-ward {
-  background: #7fd3ff;
-  color: #062430;
-  box-shadow: 0 0 16px rgba(127, 211, 255, 0.9);
-}
 
 /* ---------- inspect ---------- */
 

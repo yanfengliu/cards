@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "measure": "node src/sim/measure.ts",
     "verify": "node src/sim/measure.ts --verify --seeds 400 --sweep-seeds 400 --search-check 200",
+    "measure:ablate": "node src/sim/ablate.ts",
     "measure:run": "node src/sim/runmeasure.ts --seeds 1000",
     "verify:run": "node src/sim/runmeasure.ts --verify --seeds 200 --check-seeds 20",
     "probe:heraldry": "node tools/heraldry-probe/shoot.ts",

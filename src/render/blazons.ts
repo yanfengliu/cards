@@ -58,7 +58,6 @@ const DEVICE: Readonly<Record<string, { charge: ChargeId; on: Tincture; bordure:
   u_pikeman: { charge: 'sword', on: 'or', bordure: 'argent' },
   u_hornblower: { charge: 'crescent', on: 'or', bordure: 'or' },
   u_ironguard: { charge: 'tower', on: 'or', bordure: 'argent' },
-  u_warden: { charge: 'crescent', on: 'argent', bordure: 'or' },
   u_avenger: { charge: 'mullet', on: 'or', bordure: 'or' },
   u_berserker: { charge: 'hammer', on: 'argent', bordure: 'or' },
   u_captain: { charge: 'eagle', on: 'or', bordure: 'or' },

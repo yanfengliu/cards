@@ -30,24 +30,37 @@ import type {
  *
  * `docs/design/game.md` says hero Health "persists across the whole run" and
  * gives no number for it; the 30 in `src/content/cards.ts` is a single-fight
- * probe value. 80 is calibrated rather than guessed: a won act-1 fight costs
- * the placement bot 5-20 Health and a won act-3 fight 25-35, so 80 is about
- * three act-3 fights between rests. Flagged in the plan as a number the owner
- * should set.
+ * probe value. It is calibrated rather than guessed, by the same rule both
+ * times: about three or four act-3 fights between rests.
+ *
+ * **It moved from 80 to 200 when combat became mutual and decks began to
+ * reshuffle, and it had to.** Both rules push in the same direction. Your
+ * bodies now die to the retaliation their own attacks draw, so the line
+ * protecting the hero thins faster; and the enemy's deck no longer runs dry, so
+ * it keeps fielding bodies for the whole fight instead of stopping around round
+ * four. At 80 the run was **unwinnable - 0 of 1000** - while every individual
+ * encounter still won 87-100% of the time in isolation. Nothing was too hard;
+ * the Health economy had simply stopped adding up.
+ *
+ * The measured cost of a won fight roughly doubled, which is where the number
+ * comes from: at 200 Health a won act-3 fight costs the placement bot about
+ * 35-55 and the act-3 boss about 80. Flagged in the plan as a number the owner
+ * should set, along with the act curve it does not fix - act 1 now clears 100%
+ * of the time and every run that ends does so in act 2 or 3.
  */
-export const RUN_HERO: HeroSpec = { ...PLAYER_HERO, health: 80 };
+export const RUN_HERO: HeroSpec = { ...PLAYER_HERO, health: 200 };
 
 /**
  * Rounds a run fight may take before it is called off.
  *
  * Higher than the 12 `src/content/cards.ts` uses for the single-fight probe.
- * Neither deck reshuffles - `drawTo` in `src/engine/fight.ts` stops when a deck
- * runs out, and the design's "cycled roughly once a fight" says that is
- * intended - so once both decks are dry a fight is two heroes and the survivors
- * trading, and it needs the rounds to finish. At 12 rounds nine per cent of run
- * fights timed out; at 20 it is under one per cent, and the mean is unmoved at
- * about nine rounds because the extra rounds are only used by the fights that
- * needed them.
+ * The reason it was raised is now gone: decks used to run dry and never
+ * reshuffle, so a late fight was two heroes and the survivors trading and it
+ * needed the rounds to finish. `drawTo` now shuffles the discard back in, so
+ * both sides keep playing bodies for the whole fight. The number is left at 20
+ * rather than retuned here, because a round cap is a balance dial and this
+ * round changed three rules at once; it is flagged in
+ * `docs/work/6_trade-and-thin/plan.md` with the new timeout rate.
  */
 export const RUN_MAX_ROUNDS = 20;
 
@@ -56,17 +69,21 @@ function repeat(id: string, n: number): string[] {
 }
 
 /**
- * Sixteen cards, against the twenty of `PLAYER_DECK`, growing to roughly
- * twenty-five by the Black Gate.
+ * Fourteen cards, against the eighteen of `PLAYER_DECK`, growing to roughly
+ * twenty-three by the Black Gate.
  *
  * The design calls for "a small curated deck" that grows; a run starting at the
- * mid-run size has nothing to build. Sixteen rather than ten because **neither
- * deck reshuffles inside a fight**, so deck size is a hard cap on how many
- * cards a side can play, and a ten-card deck stops playing around round four
- * while the enemy keeps going. That is a real constraint the design already
- * states - "cycled roughly once a fight" - and it inverts the intuition about
- * deck thinning: a smaller deck is a smaller resource budget, not a more
- * consistent one. Flagged in the plan.
+ * mid-run size has nothing to build. It was sixteen, and the two that left were
+ * the Elf Wardens, removed with Ward.
+ *
+ * Sixteen had been chosen because **neither deck reshuffled inside a fight**,
+ * so deck size was a hard cap on how many cards a side could play and a
+ * ten-card deck stopped playing around round four while the enemy kept going.
+ * That inverted the design's own "deck thinning as a skill", and `drawTo` now
+ * reshuffles the discard back in, so the reason for the floor is gone: deck
+ * size is a consistency dial again rather than a budget. The count is left at
+ * what removing Ward leaves it rather than retuned, because retuning it is a
+ * balance decision and this round already moved three rules.
  *
  * The curve matters more than the count. An all-1-cost deck of Squires,
  * Shieldbearers and Pikemen tops out at 2 Power a body, and every enemy from
@@ -80,7 +97,6 @@ export const STARTING_DECK: readonly string[] = [
   ...repeat('u_shieldbearer', 3),
   ...repeat('u_pikeman', 4),
   ...repeat('u_berserker', 2),
-  ...repeat('u_warden', 2),
   ...repeat('u_ironguard', 1),
   ...repeat('u_avenger', 1),
 ];
@@ -92,7 +108,6 @@ export const REWARD_TABLE: readonly RewardEntry[] = [
   { cardId: 'u_pikeman', weight: 10 },
   { cardId: 'u_hornblower', weight: 8 },
   { cardId: 'u_ironguard', weight: 8 },
-  { cardId: 'u_warden', weight: 8 },
   { cardId: 'u_avenger', weight: 8 },
   { cardId: 'u_berserker', weight: 8 },
   { cardId: 'u_captain', weight: 4 },
@@ -104,19 +119,29 @@ export const REWARD_TABLE: readonly RewardEntry[] = [
  * Each act's enemy deck as a repeating pattern; an encounter takes the first
  * `size` cards of it.
  *
- * **Deck size is this game's real difficulty dial, and the enemy hero's Health
- * is very nearly a no-op.** That was measured across 250 seeds a cell and it
- * was a surprise: an act-1 elite runs 38.7 / 36.7 / 36.3 per cent at 16 / 18 /
- * 20 enemy Health, and an act-3 boss runs 29 / 29 / 29 at 30 / 34 / 40. Once
- * the boards have settled the hero is a formality, so what decides the fight is
- * how many bodies the enemy can field - which, with no reshuffle, is its deck.
- * Between eight and ten cards the bot's win rate falls off a cliff: at act 1,
- * 100 per cent at eight cards, 97 at ten, 87 at twelve, 70 at eighteen.
+ * **Both claims this comment used to make were measured under rules that no
+ * longer hold, and neither has been re-tested.** They are left here as history
+ * because a later balance pass needs to know they are stale rather than
+ * inherit them:
  *
- * `src/content/cards.ts` calls the enemy hero's Health "this probe's difficulty
- * dial", which is true of that probe - it has no enemy-deck axis - and is worth
- * the owner knowing is not true of the run. Enemy Health is still what a fight
- * is *won* by, so it is still the length dial.
+ *   - "Deck size is this game's real difficulty dial." It was, because with no
+ *     reshuffle a deck was a hard cap on how many bodies a side could field -
+ *     at act 1 the bot won 100 per cent against eight cards, 97 against ten, 87
+ *     against twelve and 70 against eighteen. `drawTo` now reshuffles, so an
+ *     enemy deck no longer runs out at all. Its size decides the *mix* the
+ *     enemy fields, not how long it can field anything, and that cliff is gone.
+ *   - "The enemy hero's Health is very nearly a no-op." It measured 38.7 / 36.7
+ *     / 36.3 per cent at 16 / 18 / 20 Health on an act-1 elite. A hero now
+ *     retaliates when it is struck, so its Power is live in a way it was not,
+ *     and `src/sim/ablate.ts` - which bisects on enemy Health as a continuous
+ *     dial - sees the random arm move 5 to 7 points per point of Health at the
+ *     `even` opening. Whatever the run's version of that number is, it is not
+ *     "a no-op".
+ *
+ * What is measured under the current rules is in
+ * `docs/work/6_trade-and-thin/plan.md`, and the act curve it reports is the
+ * open question: act 1 clears 100 per cent of the time and act 3 ends 71 per
+ * cent of runs, 27 per cent of those on a timeout rather than a kill.
  */
 const ENEMY_CYCLE: Record<0 | 1 | 2, readonly string[]> = {
   0: ['e_goblin', 'e_goblin', 'e_shieldwall', 'e_goblin', 'e_ogre', 'e_goblin', 'e_shieldwall'],
@@ -152,35 +177,45 @@ function encounter(
  *
  * The two numbers on each line are the placement bot's win rate and the mean
  * Health it loses in the fights it wins, at full Health against the deck the
- * run is expected to hold when it gets there - sixteen cards in act 1, twenty
- * in act 2, twenty-four in act 3. **They are reproducible**: `npm run
- * measure:run -- --encounters` prints exactly this table, and it is what these
- * numbers were tuned on. They are evidence about the bot, not about a person.
+ * run is expected to hold when it gets there - fourteen cards in act 1,
+ * eighteen in act 2, twenty-two in act 3. **They are reproducible**: `npm run
+ * measure:run -- --encounters` prints exactly this table, over 200 seeds a
+ * cell. They are evidence about the bot, not about a person.
  *
- * The shape of the curve is the content decision, and it is this: **normal
+ * The shape of the curve is the content decision, and it was this: **normal
  * fights are meant to be won and to cost Health**, and it is the Health, not
  * the losses, that ends most runs. A lost fight ends a run outright, so a 70
  * per cent normal fight would end three runs in ten on its own; a 99 per cent
  * act-3 fight that costs 20 Health ends none directly and two in ten by
- * arithmetic, three fights later. The boss is the exception and is the hardest
- * single fight of its act by design - 81.5, 66.0 and 66.0 per cent.
+ * arithmetic, three fights later.
+ *
+ * **The numbers below were re-measured after combat became mutual and decks
+ * began to reshuffle, and the curve they describe is no longer the curve that
+ * was tuned.** Every encounter but two is now won in isolation - the exceptions
+ * are the act-3 Gate Guard at 94.0 per cent and the act-3 boss at 86.5 - while
+ * the Health each one costs roughly doubled. The difficulty has moved out of
+ * "can this fight be won" and entirely into "what does winning it cost", which
+ * is why the run clears act 1 100 per cent of the time and ends 71 per cent of
+ * runs in act 3, a quarter of those on a timeout rather than a kill. Re-tuning
+ * it is the balance node's job and was deliberately not done in the round that
+ * changed the rules; see `docs/work/6_trade-and-thin/plan.md`.
  */
 export const ACTS: readonly ActContent[] = [
   {
     act: 0,
     name: 'The Marches',
     fights: [
-      // 100.0% / 4.7 Health   100.0% / 8.1   96.0% / 16.0
+      // 100.0% / 9.9 Health   100.0% / 12.3   100.0% / 14.7
       encounter(0, 'a1_raiders', 'Goblin Raiders', 12, 2, 8, []),
       encounter(0, 'a1_scouts', 'Orc Scouts', 12, 2, 9, ['e_goblin']),
       encounter(0, 'a1_wall', 'Shieldwall Patrol', 14, 2, 8, ['e_shieldwall']),
     ],
     elites: [
-      // 92.5% / 16.8 Health   90.5% / 21.1
+      // 100.0% / 26.1 Health   100.0% / 24.3
       encounter(0, 'a1e_pack', 'Goblin Pack', 18, 3, 8, ['e_goblin', 'e_goblin']),
       encounter(0, 'a1e_ogre', 'Ogre Bully', 18, 3, 8, ['e_shieldwall']),
     ],
-    // 81.5% / 27.1 Health - the hardest single fight in the act, as a boss should be
+    // 100.0% / 31.4 Health - no longer the hardest fight in its act, which is a finding
     boss: encounter(0, 'a1b_warchief', 'Warchief', 22, 3, 7, ['e_shieldwall', 'e_goblin']),
     goldPerFight: 25,
     goldPerElite: 55,
@@ -190,17 +225,17 @@ export const ACTS: readonly ActContent[] = [
     act: 1,
     name: 'The Ashen Road',
     fights: [
-      // 97.0% / 14.3 Health   97.0% / 15.1   96.5% / 13.8
+      // 99.5% / 32.6 Health   100.0% / 39.8   100.0% / 38.5
       encounter(1, 'a2_warband', 'Orc Warband', 18, 3, 7, ['e_goblin']),
       encounter(1, 'a2_line', 'Shield Line', 20, 3, 6, ['e_shieldwall']),
       encounter(1, 'a2_ogres', 'Ogre Kin', 20, 3, 6, ['e_goblin', 'e_goblin']),
     ],
     elites: [
-      // 76.0% / 21.1 Health   77.0% / 26.9
+      // 100.0% / 50.1 Health   100.0% / 57.2
       encounter(1, 'a2e_troll', 'Stone Troll', 24, 3, 6, ['e_shieldwall', 'e_goblin']),
       encounter(1, 'a2e_ogres', 'Ogre Pair', 24, 3, 6, ['e_ogre']),
     ],
-    // 66.0% / 19.8 Health
+    // 100.0% / 69.6 Health
     boss: encounter(1, 'a2b_chieftain', 'Ash Chieftain', 30, 4, 6, ['e_shieldwall', 'e_goblin']),
     goldPerFight: 35,
     goldPerElite: 70,
@@ -210,17 +245,17 @@ export const ACTS: readonly ActContent[] = [
     act: 2,
     name: 'The Black Gate',
     fights: [
-      // 99.5% / 18.4 Health   100.0% / 20.2   100.0% / 19.1
+      // 100.0% / 53.2 Health   94.0% / 31.8 (12 timeouts)   98.0% / 33.7 (4 timeouts)
       encounter(2, 'a3_host', 'Orc Host', 24, 4, 6, ['e_goblin']),
       encounter(2, 'a3_gate', 'Gate Guard', 26, 4, 5, ['e_shieldwall']),
       encounter(2, 'a3_trolls', 'Troll Kin', 26, 4, 5, ['e_goblin', 'e_goblin']),
     ],
     elites: [
-      // 88.5% / 29.3 Health   85.5% / 33.4
+      // 100.0% / 65.8 Health   100.0% / 75.5
       encounter(2, 'a3e_warlord', 'Warlord', 30, 4, 6, ['e_shieldwall', 'e_goblin']),
       encounter(2, 'a3e_trolls', 'Troll Pair', 30, 4, 6, ['e_ogre']),
     ],
-    // 66.0% / 25.9 Health
+    // 86.5% / 129.2 Health, 18 timeouts - the only fight in the run that is still hard
     boss: encounter(2, 'a3b_king', 'Gate King', 38, 4, 7, ['e_shieldwall', 'e_goblin']),
     goldPerFight: 45,
     goldPerElite: 90,
