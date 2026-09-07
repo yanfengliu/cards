@@ -201,10 +201,12 @@ const pct = (x: number): string => `${(100 * x).toFixed(2)}%`;
  *
  *   What a collapse looks like. The measurement carries two arms that already
  *   embody "placement is not a decision". The negative control - the same cards
- *   with every neighbour-reading trait removed - runs a 0.92 pp gap at `even`.
- *   The noise floor - two identical random policies separated only by their
- *   stream name - runs -0.26 pp over 20,000 seeds (95% CI -0.98..0.47). So a
- *   real collapse lands at or below about 1 pp, not at 4.
+ *   with every neighbour-reading trait removed - runs a 0.86 pp gap at `even`
+ *   and between 0.00 and 2.56 pp across the four encounters; held at the same
+ *   40% random-placement baseline as the headline it runs 1.51 pp. The noise
+ *   floor - two identical random policies separated only by their stream name -
+ *   runs -0.26 pp over 20,000 seeds (95% CI -0.98..0.47). So a real collapse
+ *   lands under about 2.5 pp, not at 4.
  *
  *   What variance looks like. At the gate's 400 seeds the paired standard error
  *   is about 2.7 pp, so one seed window's gap can sit 5 pp either side of the
@@ -587,12 +589,12 @@ function main(): void {
     //           bot placing at random by at least MIN_GAP_PP percentage points,
     //           by a margin the run's own paired interval separates from zero.
     //   Bound   to the encounter under test - `even` by default, which is tuned
-    //           so both arms straddle 50%. The same gap is 1.08 pp at `trivial`
-    //           and 17.78 pp at `hard`, so a green run says nothing about the
+    //           so both arms straddle 50%. The same gap is 1.62 pp at `trivial`
+    //           and 17.42 pp at `hard`, so a green run says nothing about the
     //           other three encounters, and `npm run measure` reports all four.
     //   Bound   to bots. Bot B places uniformly at random and no human does.
     //           Against the fixed rule "always append next to the hero" the gap
-    //           is roughly 9 pp, which is the honest figure for a person who is
+    //           is roughly 12 pp, which is the honest figure for a person who is
     //           not thinking about placement. Nothing here says the game is fun.
     //   Misses  a gap that is real but has quietly halved, anywhere above the
     //           floor. This gate catches collapse, not drift; drift is what the

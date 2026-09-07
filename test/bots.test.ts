@@ -1,14 +1,18 @@
 // A placement policy must be a pure function of the fight it is handed.
 //
-// Why this file exists, and why it lives beside `bots.ts` rather than in
-// `test/`: the earlier policies were stateful closures - `lookaheadPlacer`
-// carried a `salt` counter across calls, `randomPlacer` carried its generator -
-// so a policy's decisions depended on how many fights its instance had already
-// seen. Nothing was wrong in practice only because `measure.ts` builds a fresh
-// policy per fight, and nothing said so. Hoisting the construction out of that
-// loop - an obvious optimisation, since the policies are stateless-looking
-// factories - would have changed every placement and every final hash in the
-// measurement, silently, with every gate still green.
+// Why this file exists: the earlier policies were stateful closures -
+// `lookaheadPlacer` carried a `salt` counter across calls, `randomPlacer`
+// carried its generator - so a policy's decisions depended on how many fights
+// its instance had already seen. Nothing was wrong in practice only because
+// `measure.ts` builds a fresh policy per fight, and nothing said so. Hoisting
+// the construction out of that loop - an obvious optimisation, since the
+// policies are stateless-looking factories - would have changed every placement
+// and every final hash in the measurement, silently, with every gate still
+// green.
+//
+// It landed at `src/sim/bots.test.ts` because `test/` was being edited by
+// another worker in the same wave, and moved here on 2026-09-06. Nothing about
+// the tests changed with the path.
 //
 // Bound of these tests -- what a green run does and does not prove:
 //
@@ -26,15 +30,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { type PlacementPolicy, runFight } from '../engine/fight.ts';
-import { hashFight } from '../engine/hash.ts';
+import { type PlacementPolicy, runFight } from '../src/engine/fight.ts';
+import { hashFight } from '../src/engine/hash.ts';
 import {
   appendLeftPlacer,
   appendRightPlacer,
   lookaheadPlacer,
   randomPlacer,
-} from './bots.ts';
-import { setupFor } from './measure.ts';
+} from '../src/sim/bots.ts';
+import { setupFor } from '../src/sim/measure.ts';
 
 /** Every policy this repo ships, each as a factory that builds a new instance. */
 const POLICIES: ReadonlyArray<readonly [string, () => PlacementPolicy]> = [

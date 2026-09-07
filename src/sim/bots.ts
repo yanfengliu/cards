@@ -18,7 +18,7 @@
 //
 // So the randomness each policy needs is *derived* from `(fight seed, round,
 // and whatever else identifies the decision)` rather than carried forward.
-// `src/sim/bots.test.ts` pins this: a warmed instance and a fresh one must
+// `test/bots.test.ts` pins this: a warmed instance and a fresh one must
 // produce identical placements and identical final hashes.
 
 import {
