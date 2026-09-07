@@ -12,6 +12,18 @@
     {
       "id": 2,
       "theme": "heraldry-legibility"
+    },
+    {
+      "id": 3,
+      "theme": "playable-fight"
+    },
+    {
+      "id": 4,
+      "theme": "spells-equipment"
+    },
+    {
+      "id": 5,
+      "theme": "run-structure"
     }
   ]
 }
