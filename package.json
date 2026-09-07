@@ -11,11 +11,13 @@
     "typecheck": "tsc --noEmit",
     "measure": "node src/sim/measure.ts",
     "verify": "node src/sim/measure.ts --verify --seeds 400 --sweep-seeds 400 --search-check 200",
+    "measure:run": "node src/sim/runmeasure.ts --seeds 1000",
+    "verify:run": "node src/sim/runmeasure.ts --verify --seeds 200 --check-seeds 20",
     "probe:heraldry": "node tools/heraldry-probe/shoot.ts",
     "gate:boundaries": "node tools/gates/boundaries.ts",
     "gate:banned-apis": "node tools/gates/banned-apis.ts",
     "audit": "npm audit --audit-level=high",
-    "gates": "npm run typecheck && npm run gate:boundaries && npm run gate:banned-apis && npm test && npm run verify"
+    "gates": "npm run typecheck && npm run gate:boundaries && npm run gate:banned-apis && npm test && npm run verify && npm run verify:run"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

@@ -14,11 +14,12 @@ Three influences, three distinct jobs:
 
 ## Status
 
-Design stage, plus one throwaway prototype. There is no game to play yet — no renderer, no run structure, no cards beyond the fifteen the prototype needed.
+Design stage, plus a headless prototype. There is no renderer and nothing to play by hand yet, but a whole run — three acts, a branching map, a hero and a deck carried from the first node to the final boss — runs deterministically from a seed and a list of choices.
 
 - [Design of record](docs/design/game.md) — the full rules, a worked example with exact numbers, and the ranked open questions.
 - [Work unit 0](docs/work/0_game-design/plan.md) — how the design was settled and what remains.
 - [Work unit 1](docs/work/1_turn-prototype/plan.md) — the headless single-fight probe, and what it measured.
+- [Work unit 5](docs/work/5_run-structure/plan.md) — the run: the map, the acts, and where runs end.
 
 Every number in the design is a reasoned starting guess, not a balanced value.
 
@@ -29,8 +30,9 @@ Node 24 (see `.nvmrc`). TypeScript runs directly, so there is no build step and 
 ```
 npm install     # dev-only: typescript and @types/node, for the typecheck
 npm test        # the rules, the design's worked example, and determinism
-npm run measure # the A/B: does optimal placement beat random placement?
-npm run gates   # typecheck, tests, and the measurement's own instrument checks
+npm run measure     # the A/B: does optimal placement beat random placement?
+npm run measure:run # whole runs: win rate per act, where runs end, run length
+npm run gates       # typecheck, tests, and both measurements' instrument checks
 ```
 
-`npm run measure` takes `--seeds`, `--encounter` and a few other flags; it prints its methodology and its instrument checks alongside the numbers.
+Both measurement commands print their methodology and their instrument checks alongside the numbers. `npm run measure` takes `--seeds`, `--encounter` and a few other flags; `npm run measure:run` takes `--seeds` and `--encounters`, the second of which prints every act's encounters fought on their own.

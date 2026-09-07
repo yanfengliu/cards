@@ -201,6 +201,233 @@ The replay and determinism evidence is bound to `PLAYER_DECK_MIXED` over 25 seed
 `npm run verify` holding still is evidence that the additions are inert on the path the measurement runs, not that they are correct on the path it does not. The measurement never draws a spell, so it can say nothing about one.
 
 Three decisions inside these gates are guesses that the owner may want to reverse, and each is a data or one-line change rather than a redesign: that Armour applies to spell damage, that an AoE hits units and never heroes, and that an AoE ignores Guard and Ward. They are recorded in `docs/work/4_spells-equipment/plan.md`.
+## 2026-09-07 — the run's gates: thirteen mutations, `test/run.test.ts` and `npm run verify:run`
+
+Taken on branch `worktree-agent-a75f26c8bed784808`, cut from `06c87c7`, with unit 5's changes applied. The suite is **78 tests** here, 55 before it; `test/run.test.ts` contributes 23. Every mutation below was applied to the stated file, the stated command run, and the tree restored.
+
+Two gates are new, and they are bounded differently on purpose:
+
+- **`test/run.test.ts`** splits by what it is bound to. Structure tests run against the shipped `RUN_CONTENT` — claims about the generator and the loop that a rebalance must not move, and none of them asserts a win rate or a Health total. Behaviour tests run against a fixture: four rows, three cards, one enemy. A behaviour test built on shipped content would go red the day the owner retunes an encounter, which is how a gate gets deleted rather than fixed.
+- **`npm run verify:run`** gates structure and stream separation over 200 seeds and deliberately gates **no win rate**. A band around a run win rate is a claim about the router, and it would go red on a content change that improved the game. What it does gate is that the outcome distribution is not a fixed point — every run won, or none — which is the run's counterpart to "a constant hash would pass determinism and mean nothing".
+
+| mutation | site | red in | failed, of 78 |
+|---|---|---|---|
+| the extra right-hand edge skips its monotonicity check | `map.ts:generateAct` | `node --test` | 1 |
+| a row's types drawn with replacement (`pool.splice` removed) | `map.ts:drawDistinctTypes` | `node --test` | 1 |
+| every row one node wide | `map.ts:rowWidth` | `node --test`, `verify:run` | 2 |
+| `pathSpread`'s min branch takes `Math.max` | `map.ts:pathSpread` | `node --test` | 2 |
+| the act map regenerated lazily from the run generator | `run.ts:currentMap` | `node --test` | 8 |
+| the fight seed mixes in the run generator's draw count | `nodes.ts:fightSeedFor` | `node --test`, `verify:run` | 1 |
+| hero Health not written back out of a fight | `run.ts:visit` | `node --test` | 1 |
+| the run pool ignores a card's permanent bonuses | `deck.ts:resolveDeckCard` | `node --test` | 1 |
+| replay reads the reward choice and returns 0 | `run.ts:replayRun` | `node --test`, `verify:run` | 1 |
+| replay stops one node before the end | `run.ts:replayRun` | `node --test`, `verify:run` | 1 |
+| replay accepts a travel choice the map does not offer | `run.ts:replayRun` | `node --test` | 1 |
+| the run agent carries one generator across calls | `runbots.ts:rngFor` | `node --test` | 1 |
+| instance numbers not advanced (`run.nextInstance++` removed) | `nodes.ts:addCard` | `node --test` | 1 |
+| a won boss grants a hero sigil | `run.ts:visit` | `node --test` | 1 |
+| the act-3 boss made unwinnable (999 Health, 14-card deck) | `content.ts` | `verify:run` | — |
+
+### The map's three structural rules, each pinned separately
+
+Planarity, coverage and "no two nodes in one row share a type" are three claims in one gate, so each is made to fail on its own. Dropping the monotonicity check on the right-hand extra edge:
+
+```
+✖ every generated act map is reachable both ways, planar, and ends in one boss
+  AssertionError [ERR_ASSERTION]: seed 1 act 1: row 2: the edges from node 3 and node 4 cross
+    (1 > 0); the map is not planar and left/right stops meaning anything
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+Drawing a row's types with replacement:
+
+```
+✖ every generated act map is reachable both ways, planar, and ends in one boss
+  AssertionError [ERR_ASSERTION]: seed 1 act 1: row 2 holds two "fight" nodes; a row's nodes
+    must differ, or the row is not a choice; row 6 holds two "rest" nodes; ...
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+### "A map where every path is equivalent is not a map", and the instrument under it
+
+The branching gate is built on `pathSpread`, so `pathSpread` needs a gate of its own — a min/max DP that quietly returned the entry node's own counts would make every map look decorative, and one that returned the whole map's counts would make every map look branchy. It is checked against brute-force path enumeration on eight generated maps.
+
+Narrowing every row to one node makes the map a single path:
+
+```
+✖ a map where every path is equivalent is not a map: every act decides node types
+  AssertionError [ERR_ASSERTION]: seed 1 act 1: every path carries the same node types, so the
+    branching is decorative
+ℹ tests 78   ℹ pass 76   ℹ fail 2
+```
+
+and the same mutation against `npm run verify:run`:
+
+```
+- The map is a map: FAIL; 0.00 of 7 node types are decided by the route on an average act map,
+  and 60 map(s) had none.
+FAIL: the run measurement is not trustworthy over 200 seeds.
+  - 60 act map(s) where every path carries the same node types - a map where every path is
+    equivalent is not a map
+```
+
+Turning `pathSpread`'s min branch into a max takes both the instrument's own gate and the gate built on it:
+
+```
+✖ pathSpread agrees with brute-force path enumeration on a small map
+  AssertionError [ERR_ASSERTION]: seed 1: pathSpread disagrees with enumeration for "fight"
+✖ a map where every path is equivalent is not a map: every act decides node types
+ℹ tests 78   ℹ pass 76   ℹ fail 2
+```
+
+### The cheap version of "the map is a function of the seed" catches nothing
+
+The first version of that test perturbed `run.rng` after `startRun` and compared `hashMaps`. **It cannot fail against the defect it names.** The maps are already in `run.maps` by then, so burning draws on the generator can never move them, whatever the loop does with the map afterwards — including regenerating it lazily on every call, which is the realistic version of the bug.
+
+What catches that is comparing what two differently-routed runs actually *walked* against the map the seed produces at setup. With `currentMap` regenerating from `run.rng`:
+
+```
+✖ the map is generated once at setup, and no route changes what a node is
+✖ same seed and same agent produce an identical final run hash, over many trials
+✖ seed plus choice list replays a whole run, with no agent in the loop
+✖ run hashes vary with the seed - a constant hash would pass determinism and mean nothing
+✖ a run agent holds no state between runs: a warmed instance matches a fresh one
+✖ a node's fight is a function of the node, not of the route taken to reach it
+✖ deck instance ids are unique and are never reused within a run
+✖ sigils stay out of scope: no run this unit can generate grants one
+ℹ tests 23   ℹ pass 15   ℹ fail 8       (test/run.test.ts alone)
+```
+
+The recorded assertion under the mutation is `run: node 18 in act 1 leads nowhere and is not a boss node` — a regenerated map's node 18 is a leaf in a map the run was not walking.
+
+### Stream separation: the run generator cannot reach a fight
+
+Mixing the run generator's draw count into the fight seed is the smallest realistic form of the leak.
+
+```
+✖ a node's fight is a function of the node, not of the route taken to reach it
+  AssertionError [ERR_ASSERTION]: seed 1 act 1 node 0: the run stream moved the fight seed
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+and against `npm run verify:run`, where the second half of the check — two routes through one seed agreeing on every shared node — also drops:
+
+```
+- Stream separation: FAIL; burning 37 draws on the run generator moved 47 fight seed(s) or
+  map(s). Two differently-routed runs agreed on 49/88 shared fight seeds.
+FAIL: the run measurement is not trustworthy over 200 seeds.
+  - stream separation broke: seed 1 act 1 node 0: the fight seed moved when the run stream did,
+    so a routing choice can perturb a fight's internals
+```
+
+The two halves are both there because they fail differently: burning draws catches a fight seeded off a *derivation* of the generator's position, which the route comparison would miss on two routes that happen to consume the same number of draws; the route comparison catches a fight seeded off `run.rng` directly even if the derivation is stable.
+
+### Health carries, and the version of that test that could not see it
+
+The first version asserted that a won fight never *raised* the hero's Health. Dropping the write-back entirely leaves Health at its maximum for the whole run, which never rises, so **that assertion passes against the defect it is named for.** The test now runs a fixture with no Guard in the deck against a hero that swings for five, so the player wins and must have been hit, and it asserts that some fight in the window actually cost Health:
+
+```
+✖ what is left of the hero after a fight is what the next fight starts with
+  AssertionError [ERR_ASSERTION]: no fight in the window cost the hero any Health, so
+    "Health carries" was never observed
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+### The forge reaching the fight
+
+`docs/design/game.md`: "Forge nodes permanently upgrade one card: +1 Power, +1 Health, or −1 cost." The claim that matters is not that the bonus is stored but that it arrives at `makeUnit`. Making `resolveDeckCard` drop the bonuses:
+
+```
+✖ the forge permanently upgrades one deck card, and the next fight is fought with it
+  AssertionError [ERR_ASSERTION]: +1 Power did not reach the fight
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+The same test asserts the *other* copy of the same card id is untouched — the forge upgrades a card, not a card id — and a separate test pins the cost floor at zero.
+
+### Replay is a check, not a second opinion
+
+Three mutations, because replay can fail loudly, quietly, or by not checking. Reading the recorded reward and returning 0 instead diverges the deck, and the recorded fight action list then names a card that is not in hand:
+
+```
+✖ seed plus choice list replays a whole run, with no agent in the loop
+  Error: fight: cannot play "u_ironguard#17" - it is not in hand
+    [u_shieldbearer#17, u_berserker#10, u_warden#12, u_ironguard#14, u_pikeman#8]
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+Stopping one node early is the quiet version — no crash, just a different final state — and it is what exercises the hash comparison rather than the engine's own guard:
+
+```
+✖ seed plus choice list replays a whole run, with no agent in the loop
+  AssertionError [ERR_ASSERTION]: seed 1 did not replay
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+```
+- seed 2: replay from the choice list diverged from the live run
+FAIL: the run measurement is not trustworthy over 200 seeds.
+  - a run did not replay from its own choice list
+```
+
+And accepting any travel choice rather than the recorded one — the version where replay stops checking that the map regenerated identically:
+
+```
+✖ replay refuses a travel choice that the regenerated map does not offer
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+### The stateless-agent rule, carried over from `bots.ts`
+
+`src/sim/bots.ts` states it for placement policies: a policy that carries state makes its own decisions depend on how many fights the instance has already seen, and hoisting one out of a loop for speed silently changes every result with every gate green. The same applies to run agents, and it is gated the same way — a warmed instance against a fresh one. Replacing the derived generator with one carried across calls:
+
+```
+✖ a run agent holds no state between runs: a warmed instance matches a fresh one
+  AssertionError [ERR_ASSERTION]: seed 1: the agent carried state
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+Note which test does *not* fail: "same seed and same agent produce an identical final run hash" stays green, because it builds a fresh agent per run. Both tests are needed, and neither covers the other.
+
+### The seams that must stay inert
+
+Sigils are out of scope for this unit and `hashRun` covers the list, so the day they land the run hash notices instead of agreeing with itself. Granting one at a won boss:
+
+```
+✖ sigils stay out of scope: no run this unit can generate grants one
+  AssertionError [ERR_ASSERTION]: seed 1 granted a sigil
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+Deck instance ids are unique for the whole run, which is what lets the forge address one copy of a card. Not advancing the counter:
+
+```
+✖ deck instance ids are unique and are never reused within a run
+  AssertionError [ERR_ASSERTION]: two deck cards share an instance id
+ℹ tests 78   ℹ pass 77   ℹ fail 1
+```
+
+### The degeneracy gate: can the instrument still see a difference?
+
+A run that is never won and a run that is never lost both produce a clean, stable, perfectly deterministic report that cannot detect any change to the content. Making the act-3 boss unwinnable:
+
+```
+- The instrument can see a difference: FAIL; the strongest arm won 0/200 and runs ended after
+  3 distinct act counts. Enforced: --verify exits non-zero.
+FAIL: the run measurement is not trustworthy over 200 seeds.
+  - no run in 200 seeds was won, so this seed window cannot detect a change that makes the run
+    easier and every "win rate per act" below act 1 is a floor reading. Either the content is
+    unwinnable by this bot or the seed window is too small.
+```
+
+Note what stayed green under that mutation: determinism, replay, map structure, branching, stream separation and the sigil seam. That is the split working — the structural gates do not care whether the game is winnable, and the degeneracy gate does not care about balance beyond "not a fixed point".
+
+### Bounds these two gates carry
+
+- `test/run.test.ts` runs seed windows, not the seed space: 60 seeds x 3 acts for map structure, 25 seeds for run determinism and replay, 20 for stream separation, 8 generated maps for the `pathSpread` cross-check, 12 fixture seeds for Health carry. A property that fails one seed in ten thousand is not covered.
+- `npm run verify:run` is bound to the shipped `RUN_CONTENT` and to two bots. It says nothing about another content set, and every win rate it prints is evidence about the router and the placement bot rather than about a person. It catches a run that has become a fixed point; it does not catch balance drift that keeps the run winnable and losable, which is what the printed tables and `--encounters` are for.
+- Neither gate covers the *fight* inside a run beyond what `replayFight` already checks. `npm run verify` remains the fight's own gate, and its numbers are byte-identical before and after this unit.
 
 ## 2026-09-06 — six ordering gates that were pinned to nothing, and a latent crash closed (`test/resolver-order.test.ts`)
 
