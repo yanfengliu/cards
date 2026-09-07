@@ -14,7 +14,7 @@
 
 import { type Blazon, parseBlazon } from './blazon.ts';
 import { getCharge } from './charges.ts';
-import { hexOf } from './tinctures.ts';
+import { type Tincture, hatchOf, hexOf, luminance } from './tinctures.ts';
 
 export type Tier = 'compressed' | 'expanded';
 
@@ -27,6 +27,13 @@ export interface CardView {
   readonly health: number;
   readonly guard: boolean;
   readonly trait?: string;
+  /**
+   * Energy cost and Armour. Optional because they are not drawn - they exist so
+   * the card's `aria-label` can say everything the card says, and a caller with
+   * only the four painted channels (the heraldry probe's fixture) still builds.
+   */
+  readonly cost?: number;
+  readonly armour?: number;
   /** The blazon string that lives in the card's data. */
   readonly blazon: string;
 }
@@ -49,6 +56,17 @@ export interface RenderOptions {
    * dark line plus a pale halo gives every card an edge on any ground.
    */
   readonly mount?: boolean;
+  /**
+   * Rule the field with its Petra Sancta hatching, so the tribe channel is
+   * readable without colour vision.
+   *
+   * Off by default, and that default is load-bearing: `test/golden/heraldry/`
+   * holds seven renders whose sha256 digests are what work unit 2's review is
+   * bound to, and a hatched field would strand that review rather than inherit
+   * it. With the flag absent this function returns exactly the bytes it did
+   * before hatching existed.
+   */
+  readonly hatch?: boolean;
 }
 
 export const ASPECT = 1.4; // height / width, 5:7
@@ -178,6 +196,98 @@ function chargeLayer(
   );
 }
 
+/**
+ * The field's Petra Sancta hatching, clipped to the silhouette.
+ *
+ * Drawn as explicit lines rather than an SVG `<pattern>` for two reasons. A
+ * pattern needs an id, and several cards share one document, so ids are the
+ * exact hazard `clipId` already exists to avoid; and a pattern's tile is in user
+ * units, so the same declaration turns to mush at 44px and to stripes at 250px.
+ * Spacing derived from the card's own width scales with it instead.
+ *
+ * The ink follows the field's luminance: black engraving lines are invisible on
+ * sable, so a dark field is hatched pale. That is a departure from the printed
+ * convention, which only ever had one ink, and it is the right one - the
+ * convention's purpose is to be *seen*.
+ */
+function hatchLayer(field: Tincture, g: Geometry, clipId: string): string {
+  const pattern = hatchOf(field);
+  if (pattern === 'none') return '';
+
+  const step = Math.max(3.4, g.w * 0.105);
+  // Below the reviewed 44px floor a hairline at 42% opacity disappears into the
+  // field, which would leave the hatching present in the DOM and absent to the
+  // eye - the worst of both. Small cards get a heavier, more opaque rule.
+  const small = g.w < 56;
+  const stroke = Math.max(small ? 1 : 0.7, g.w * (small ? 0.022 : 0.016));
+  const pale = luminance(hexOf(field)) < 0.16;
+  const ink = pale ? '#f2efe6' : '#12131a';
+  const alpha = pale ? (small ? 0.62 : 0.5) : small ? 0.58 : 0.42;
+
+  const lines: string[] = [];
+  const vertical = (): void => {
+    for (let x = step; x < g.w; x += step) lines.push(`M${r2(x)} 0 V${r2(g.h)}`);
+  };
+  const horizontal = (): void => {
+    for (let y = step; y < g.h; y += step) lines.push(`M0 ${r2(y)} H${r2(g.w)}`);
+  };
+  // Slope 1 and slope -1, swept far enough left and right that the whole box is
+  // crossed rather than only the middle of it.
+  const diagonalDown = (): void => {
+    for (let c = -g.h; c < g.w; c += step) lines.push(`M${r2(c)} 0 L${r2(c + g.h)} ${r2(g.h)}`);
+  };
+  const diagonalUp = (): void => {
+    for (let c = 0; c < g.w + g.h; c += step) lines.push(`M${r2(c)} 0 L${r2(c - g.h)} ${r2(g.h)}`);
+  };
+
+  switch (pattern) {
+    case 'vertical':
+      vertical();
+      break;
+    case 'horizontal':
+      horizontal();
+      break;
+    case 'diagonal-down':
+      diagonalDown();
+      break;
+    case 'diagonal-up':
+      diagonalUp();
+      break;
+    case 'cross':
+      vertical();
+      horizontal();
+      break;
+    case 'diagonal-up-horizontal':
+      diagonalUp();
+      horizontal();
+      break;
+    case 'dots': {
+      // Staggered rows, so the dots read as a texture rather than as a grid that
+      // could be mistaken for a cross-hatch at small size.
+      const dot = Math.max(0.6, step * 0.17);
+      const cells: string[] = [];
+      let row = 0;
+      for (let y = step * 0.6; y < g.h; y += step, row++) {
+        for (let x = (row % 2 === 0 ? step * 0.5 : step); x < g.w; x += step) {
+          cells.push(
+            `M${r2(x)} ${r2(y)} m${r2(-dot)} 0 a${r2(dot)} ${r2(dot)} 0 1 0 ${r2(dot * 2)} 0` +
+              ` a${r2(dot)} ${r2(dot)} 0 1 0 ${r2(-dot * 2)} 0 Z`,
+          );
+        }
+      }
+      return (
+        `<path d="${cells.join(' ')}" fill="${ink}" fill-opacity="${alpha}"` +
+        ` clip-path="url(#${clipId})"/>`
+      );
+    }
+  }
+
+  return (
+    `<path d="${lines.join(' ')}" fill="none" stroke="${ink}" stroke-opacity="${alpha}"` +
+    ` stroke-width="${r2(stroke)}" clip-path="url(#${clipId})"/>`
+  );
+}
+
 function expandedText(card: CardView, b: Blazon, g: Geometry, clipId: string): string {
   const guard = card.guard;
   const lines: Array<{ text: string; size: number; fill: string; weight: number }> = [
@@ -249,6 +359,10 @@ export function renderCard(card: CardView, opts: RenderOptions): string {
   // 1. Field.
   body += `<path d="${path}" fill="${hexOf(b.field)}"/>`;
 
+  // 1b. The field's hatching, over the flat tincture and under everything else,
+  //     so the charge and the numerals stay unruled. Off unless asked for.
+  if (opts.hatch === true) body += hatchLayer(b.field, g, clipId);
+
   // 2. Bordure -- an inner band of exactly `bordure` px, made by stroking the
   //    silhouette at double width and clipping to it. Exact, unlike scaling.
   if (card.guard && b.bordure !== undefined) {
@@ -271,9 +385,28 @@ export function renderCard(card: CardView, opts: RenderOptions): string {
   // 6. Numerals last: nothing may occlude them.
   body += numerals(g, card.power, card.health);
 
+  /*
+   * The accessible name says everything the picture says, in the order the eye
+   * reads it: what it is, what race, what it costs, the two numerals, then the
+   * channels that are drawn as shape or colour rather than as text. Cost,
+   * Armour and the trait list are the parts a sighted player gets from the
+   * trait strip and the hover panel; without them here the card is a picture
+   * with three of its channels missing.
+   */
   const a11y = opts.label
     ? ` role="img" aria-label="${esc(
-        `${card.name}, ${card.tribe}, ${card.power} power, ${card.health} health${card.guard ? ', Guard' : ''}`,
+        [
+          card.name,
+          card.tribe,
+          ...(card.cost === undefined ? [] : [`costs ${card.cost} energy`]),
+          `${card.power} power`,
+          `${card.health} health`,
+          ...(card.armour !== undefined && card.armour > 0 ? [`${card.armour} armour`] : []),
+          // `trait` is the whole trait list when the caller passes one, Guard
+          // included, so the Guard flag only speaks for itself when it must.
+          ...(card.guard && !/guard/i.test(card.trait ?? '') ? ['Guard'] : []),
+          ...(card.trait === undefined ? [] : [card.trait]),
+        ].join(', '),
       )}"`
     : '';
 

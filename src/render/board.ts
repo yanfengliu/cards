@@ -21,6 +21,8 @@ import { renderCard, type CardView } from './heraldry/card.ts';
 import { blazonFor } from './blazons.ts';
 import { type EntityView, power } from './view.ts';
 import { pct } from './odds.ts';
+import { iconSvg } from './icons.ts';
+import { STAT_TERMS, TRAIT_TERMS } from './glossary.ts';
 
 export const MIN_CARD_W = 44;
 export const MAX_CARD_W = 92;
@@ -53,6 +55,11 @@ export type RowOptions = {
   /** Fixed card width; when absent it is fitted to `available`. */
   readonly cardWidth?: number;
   readonly mount: boolean;
+  /**
+   * Rule every field with its heraldic hatching, so tribe is carried by pattern
+   * as well as by hue. Off by default; see `RenderOptions.hatch`.
+   */
+  readonly hatch?: boolean;
   /** uid -> chance the next enemy attack lands here. Null hides the badge. */
   readonly odds: ReadonlyMap<number, number> | null;
   /**
@@ -89,6 +96,10 @@ export function cardViewOf(e: EntityView): CardView {
     power: power(e),
     health: Math.max(0, e.health),
     guard,
+    // Not painted; they are what the card's `aria-label` needs so the spoken
+    // card says everything the drawn card says.
+    cost: e.cost,
+    armour: e.armour,
     ...(e.traits.length > 0 ? { trait: e.traits.map(titleCase).join(', ') } : {}),
     blazon: blazonFor(e.cardId, e.tribe, guard),
   };
@@ -98,12 +109,43 @@ export function titleCase(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
-/** The glyph strip under a compressed card. See `TRAIT_GLYPH` for why it exists. */
-const TRAIT_GLYPH: Readonly<Record<string, { glyph: string; title: string }>> = {
-  relay: { glyph: '→', title: 'Relay - after acting, the unit to my right gains +2 Power this turn' },
-  wake: { glyph: '▲', title: 'Wake - when the unit to my left dies this turn, gain +2 Power' },
-  guard: { glyph: '◆', title: 'Guard - while I live, attacks against my side must target a Guard' },
-};
+/**
+ * The trait strip under a compressed card.
+ *
+ * Derived from `glossary.ts` rather than written here, which is the whole point:
+ * the icon a card wears and the sentence the hover panel gives for it come out
+ * of one table keyed by the engine's own `Trait` union, so a trait deleted from
+ * the engine cannot survive as a pip whose tooltip describes a rule the game no
+ * longer has.
+ *
+ * Guard is excluded because Guard is already the card's *shape* - a Guard is
+ * drawn as a shield with a heavy bordure, per `ARCHITECTURE.md`'s channel table
+ * - and a pip repeating it would spend the strip's only room on the one trait
+ * that does not need it.
+ */
+function traitPipsOf(traits: readonly string[]): { name: string; icon: string; title: string }[] {
+  const out: { name: string; icon: string; title: string }[] = [];
+  for (const t of traits) {
+    if (t === 'guard') continue;
+    const term = (TRAIT_TERMS as Readonly<Record<string, { name: string; icon: string; line: string } | undefined>>)[t];
+    if (term === undefined) continue;
+    out.push({ name: term.name, icon: term.icon, title: `${term.name} — ${term.line}` });
+  }
+  return out;
+}
+
+/**
+ * Icon size for the strip under a card `width` px wide.
+ *
+ * The floor is the constraint. At `MIN_CARD_W` the row is already at the width
+ * `ARCHITECTURE.md`'s compression rule bottoms out at, and a strip that grows
+ * past the card pushes the row into a scroll it does not need. A pip is the icon
+ * plus 4px of padding and 2px of border, so two pips and their gap must fit in
+ * the card: `2 * (icon + 6) + 3 <= width`.
+ */
+export function pipIconSize(width: number): number {
+  return Math.max(9, Math.min(13, Math.floor((width - 3) / 2) - 6));
+}
 
 function el(tag: string, cls: string): HTMLElement {
   const node = document.createElement(tag);
@@ -161,10 +203,21 @@ function keyOf(item: LineItem): string {
   }
 }
 
-function paintCard(node: HTMLElement, card: CardView, width: number, mount: boolean): void {
+function paintCard(
+  node: HTMLElement,
+  card: CardView,
+  width: number,
+  mount: boolean,
+  hatch: boolean,
+): void {
   // Re-rasterising the SVG is the expensive part of a frame, so it is only
-  // redone when something it draws has actually changed.
-  const signature = `${card.id}|${card.power}|${card.health}|${card.guard}|${width}|${mount}`;
+  // redone when something it draws *or says* has actually changed. Cost, armour
+  // and the trait list are in the signature because they are in the
+  // `aria-label`: a node recycled onto a different card would otherwise keep
+  // announcing the previous one.
+  const signature =
+    `${card.id}|${card.power}|${card.health}|${card.guard}|${card.cost ?? ''}|` +
+    `${card.armour ?? ''}|${card.trait ?? ''}|${width}|${mount}|${hatch}`;
   if (node.dataset['sig'] === signature) return;
   node.dataset['sig'] = signature;
   node.innerHTML = renderCard(card, {
@@ -173,6 +226,7 @@ function paintCard(node: HTMLElement, card: CardView, width: number, mount: bool
     showCharge: true,
     label: true,
     mount,
+    ...(hatch ? { hatch: true } : {}),
   });
 }
 
@@ -182,23 +236,34 @@ function paintTraits(
   width: number,
   pending = 0,
 ): void {
-  const shown = traits.filter((t) => t !== 'guard');
-  const signature = `${shown.join('+')}|${width}|${pending}`;
+  const pips = traitPipsOf(traits);
+  const size = pipIconSize(width);
+  const signature = `${pips.map((p) => p.name).join('+')}|${size}|${pending}`;
   if (node.dataset['sig'] === signature) return;
   node.dataset['sig'] = signature;
   node.textContent = '';
-  for (const t of shown) {
-    const def = TRAIT_GLYPH[t];
-    if (def === undefined) continue;
+  for (const p of pips) {
     const pip = el('span', 'pip');
-    pip.textContent = def.glyph;
-    pip.title = def.title;
+    // `title` for the pointer, `aria-label` for the reader, and the same words
+    // in both. The icon is never the only place the rule is written: the hover
+    // panel spells it out in full, and this is its short form.
+    pip.title = p.title;
+    pip.setAttribute('aria-label', p.title);
+    pip.setAttribute('role', 'img');
+    pip.innerHTML = iconSvg(p.icon as Parameters<typeof iconSvg>[0], {
+      size,
+      decorative: true,
+    });
     node.append(pip);
   }
   if (pending > 0) {
     const pip = el('span', 'pip pip--pending');
     pip.textContent = `+${pending}`;
-    pip.title = `A Relay on this line will give this unit +${pending} Power when the turn resolves`;
+    const title =
+      `${TRAIT_TERMS.relay.name} incoming — a Relay on this line will give this unit ` +
+      `+${pending} ${STAT_TERMS.power.name} when the turn resolves`;
+    pip.title = title;
+    pip.setAttribute('aria-label', title);
     node.append(pip);
   }
 }
@@ -324,7 +389,13 @@ function paintItems(
         node.style.setProperty('--w', `${width}px`);
         node.dataset['ghost'] = String(item.id);
         node.dataset['uid'] = String(e.uid);
-        paintCard(node.querySelector('.card__art') as HTMLElement, cardViewOf(e), width, opts.mount);
+        paintCard(
+          node.querySelector('.card__art') as HTMLElement,
+          cardViewOf(e),
+          width,
+          opts.mount,
+          opts.hatch === true,
+        );
         paintTraits(
           node.querySelector('.card__pips') as HTMLElement,
           e.traits,
@@ -343,7 +414,13 @@ function paintItems(
         node.classList.toggle('is-acting', e.acting);
         node.classList.toggle('is-dead', !e.alive);
         node.classList.toggle('is-buffed', e.bonusPower > 0);
-        paintCard(node.querySelector('.card__art') as HTMLElement, cardViewOf(e), width, opts.mount);
+        paintCard(
+          node.querySelector('.card__art') as HTMLElement,
+          cardViewOf(e),
+          width,
+          opts.mount,
+          opts.hatch === true,
+        );
         paintTraits(
           node.querySelector('.card__pips') as HTMLElement,
           e.traits,
@@ -374,9 +451,20 @@ function paintItems(
         (hero.querySelector('.hero__hp') as HTMLElement).textContent = String(Math.max(0, e.health));
         const frac = Math.max(0, e.health) / Math.max(1, e.maxHealth);
         (hero.querySelector('.hero__bar i') as HTMLElement).style.width = `${frac * 100}%`;
+        // Extended rather than replaced: the original wording is what a reader
+        // already learns this board by. Armour and the side are added because
+        // they are drawn - the plate's border colour is the only thing that
+        // says whose hero this is, and colour is not a channel a reader has.
         hero.setAttribute(
           'aria-label',
-          `${e.name}, hero, ${power(e)} power, ${Math.max(0, e.health)} of ${e.maxHealth} health`,
+          [
+            e.name,
+            e.side === 'player' ? 'your hero' : 'enemy hero',
+            `${power(e)} power`,
+            `${Math.max(0, e.health)} of ${e.maxHealth} health`,
+            ...(e.armour > 0 ? [`${e.armour} armour`] : []),
+            'acts last on its line',
+          ].join(', '),
         );
         paintOdds(hero.querySelector('.card__odds') as HTMLElement, opts.odds, e);
         break;
@@ -398,29 +486,47 @@ function paintOdds(
   node.hidden = false;
   node.textContent = pct(p);
   node.classList.toggle('is-safe', p === 0);
-  node.title =
+  const title =
     p === 0
-      ? 'Cannot be targeted while a Guard on this side lives'
-      : `Each attack against this side has a ${pct(p)} chance of landing here`;
+      ? `${STAT_TERMS.target.name}: none. Cannot be targeted while a Guard on this side lives.`
+      : `${STAT_TERMS.target.name}: each attack against this side has a ${pct(p)} chance of landing here.`;
+  node.title = title;
+  // The badge is a bare number on the board. Named here so a reader is told
+  // what the number is a number *of*.
+  node.setAttribute('aria-label', title);
 }
 
 /** The expanded tier, for hover and inspect. Returns an SVG string. */
-export function expandedCardOf(card: CardView): string {
-  return renderCard(card, { tier: 'expanded', width: EXPANDED_W, label: true });
+export function expandedCardOf(card: CardView, hatch = false): string {
+  return renderCard(card, {
+    tier: 'expanded',
+    width: EXPANDED_W,
+    label: true,
+    ...(hatch ? { hatch: true } : {}),
+  });
 }
 
 /** One compressed card on its own, for the hand. */
-export function compressedCard(e: EntityView, width: number, mount: boolean): string {
-  return renderCard(cardViewOf(e), { tier: 'compressed', width, showCharge: true, label: true, mount });
+export function compressedCard(
+  e: EntityView,
+  width: number,
+  mount: boolean,
+  hatch = false,
+): string {
+  return renderCard(cardViewOf(e), {
+    tier: 'compressed',
+    width,
+    showCharge: true,
+    label: true,
+    mount,
+    ...(hatch ? { hatch: true } : {}),
+  });
 }
 
-/** The trait glyphs a compressed card carries, for callers rendering their own. */
-export function traitPips(traits: readonly string[]): { glyph: string; title: string }[] {
-  const out: { glyph: string; title: string }[] = [];
-  for (const t of traits) {
-    if (t === 'guard') continue;
-    const def = TRAIT_GLYPH[t];
-    if (def !== undefined) out.push(def);
-  }
-  return out;
+/**
+ * The trait pips a compressed card carries, for callers rendering their own -
+ * the hand's hint line reads this so the strip and the sentence never disagree.
+ */
+export function traitPips(traits: readonly string[]): { name: string; icon: string; title: string }[] {
+  return traitPipsOf(traits);
 }

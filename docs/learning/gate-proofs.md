@@ -6,6 +6,110 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-07 — merging units 6 and 7: the trade is explained, and the paragraph that explains it has a budget (`test/explain.test.ts`)
+
+Taken on branch `worktree-agent-adcc5f0005b2166d6`, the merge of `worktree-agent-a2f9237928772992a` (unit 7) into `02b4e50` (unit 6 integrated); the suite is **156 tests** here, 155 at the merge before these three gates were added and 133 on `main` before the merge. Every mutation below was applied to the stated file, the stated command run, and the tree restored before the next one.
+
+### The compile-time half, which is the whole reason unit 7 built the table this way
+
+Two mutations, `npx tsc --noEmit`, both non-zero:
+
+| mutation | site | what tsc said |
+|---|---|---|
+| `'echo'` added to the engine's `Trait` union, undocumented | `engine/state.ts` | `glossary.ts(96,14): TS2741: Property 'echo' is missing in type ... but required in type 'Readonly<Record<Trait, Term>>'` |
+| `'retaliate'` removed from `IconName` | `render/icons.ts` | four errors, in `glossary.ts`, `icons.ts`, `inspect.ts` and `test/explain.test.ts` |
+
+The second was run while the rejected rule-row design still had a `retaliate` icon; the icon is gone with that design, so the mutation is recorded and is not reproducible at this revision. The first is, and it is the one that matters: it is the same mechanism that named `ward` when the merge removed it.
+
+**The merge itself is this gate's real red proof, and it was not staged.** Unit 7 was cut before Ward left the engine. Merging it produced exactly three type errors — `TRAIT_TERMS.ward`, `IconName`'s `'ward'` with its `ICONS` entry, and two `warded: false` fixtures in this test file — and nothing else in the tree could be wrong about Ward without failing to compile. What the compiler could not see, and what had to be found by reading, was six prose mentions: two file headers, `TRIBE_TERMS.elf` naming a card that no longer exists, and three comments. That contrast is the bound of the whole design: **a type is a gate, a sentence is not.**
+
+### The three new runtime gates, five mutations, `node --test test/explain.test.ts`
+
+| mutation | site | failed, of 23 | which test |
+|---|---|---|---|
+| the trade dropped from the summary line | `render/inspect.ts:explainCard` | 1 | "every card says that attacking costs, and a hero says it is the exception" |
+| the hero given the unit's sentence | `render/inspect.ts:explainCard` | 1 | same |
+| the `e.isHero ? 0 :` guard deleted, so a hero takes retaliation on its own swing | `engine/resolver.ts:apply` | 1 | "the trade the panel describes is the trade the resolver runs" |
+| `e.health -= dealtBack` neutered | `engine/resolver.ts:apply` | 1 | same |
+| one more sentence appended to `NUMBERS_SUMMARY` | `render/glossary.ts` | 1 | "the summary line stays inside the two lines the panel's placement can afford" |
+
+The third and fourth are also covered by `test/trade.test.ts`, deliberately. That file gates the **rule**; these gate the **claim about the rule**, and their failure messages print the sentence the panel is showing the player and say to rewrite it or restore the behaviour. A resolver change that backs out mutual damage should not merely fail a combat test — it should say which tooltip is now a lie.
+
+### The character budget, and why a proxy for a pixel is written down as one
+
+The fifth mutation is the one that would otherwise never have been caught. Unit 7's devlog says it in one line: "Adding a paragraph to `render/inspect.ts` can push it past 270px, at which point it silently starts covering a row again." That failure is silent by construction — the panel places itself in whichever free band it fits, so when none fits it simply covers the board and no test is red.
+
+The first draft of the retaliation copy was a rule row next to Position, and the probe measured what that costs:
+
+| panel | height | covers the hovered card's own row | covers the opposite row |
+|---|---|---|---|
+| unit 7 at its tip, and this merge before the copy | 266px | 2,341 px² | **0 px²** |
+| with a Trade rule row | 318px | **112,062 px²** | 0 px² |
+| shipped: the same sentence in the summary paragraph | 266px | 2,341 px² | **0 px²** |
+
+So the gate is on the paragraph, not on the pixel: `explainCard` is rendered for every shipped card and the hero, in both target-chance branches, the `xp__gloss` text is pulled back out of the HTML, and over 235 characters is red.
+
+**235 is a proxy and the test header says so.** It is where that paragraph wraps to a third line in the 532px text column at `--fs-micro`, measured in Chrome at 1440x900 through `npm run probe:ui hover 7 even light`. A font change or a width change moves it, and the probe — not the number — is what says whether the panel still fits. What the gate buys is that the *next* sentence someone adds goes red at 210+26 characters instead of going unnoticed at 318px.
+
+### Bound
+
+Everything in `test/explain.test.ts`'s header still applies. Added by these three:
+
+- The two panel gates read `PLAYER_CARDS`, `ENEMY_CARDS` and `PLAYER_HERO`, and assert on the HTML string. They say nothing about a card outside those arrays and **nothing about pixels** — 235 characters is arithmetic on text, not a measurement of the rendered panel.
+- The resolver gate is a two-unit fixture with one Guard and two heroes, one swing each. It says nothing about spells (which do not trade), about armour on retaliation, or about what happens when both die — `test/trade.test.ts` holds those.
+- The overlap numbers above are at **1440x900 only**, from `npm run probe:ui hover 7 even light|dark`. Unit 7's own note stands: below about 830px of window height no band is big enough and the panel must cover something.
+
+### What this round could not measure, and did not fake
+
+`npm run probe:ui hover` prints `08-wide-player-unit: no element for #player-row .card` and `narrow` reports "widest line reached: 3" at both `even` and `trivial`. With mutual damage the player's bodies die to the retaliation their own attacks draw, so the line never grows, and unit 7's compression-floor evidence — "19px trait strip in a 44px card, one distinct card top from 1440px down to 380px" — has no state left to be photographed in. The arithmetic gate on `pipIconSize` still holds and still goes red on its own mutation; the picture does not exist at this revision and no substitute was invented for it. It returns when the card pool is re-costed, which is open question 1 of `docs/work/6_trade-and-thin/plan.md`.
+
+### One row of unit 7's own table is stranded by this merge
+
+The entry below records `Ward removed from u_warden, the only card that carries it` failing "no explanation survives the trait it explains". Both the card and the trait are gone, so that mutation cannot be re-applied. The claim it stood for is now carried by the compile-time half — the `Record<Trait, Term>` key, whose red proof is the merge itself, above — and by the same runtime test, which still fails if any documented trait is on no shipped card. The row is left in place rather than edited, because an entry names the revision its numbers were taken at.
+
+## 2026-09-07 — a card explains all of itself, and cannot explain a rule the game no longer has (`test/explain.test.ts`)
+
+Taken at the tip of `worktree-agent-a2f9237928772992a` with this round's changes applied; the suite is **137 tests** here, 117 before it.
+
+The defect this round fixes is not a crash. Every noun in this game is invented — Ward, Wake, Relay, gules, a mullet — and the only place any of them was written down was `docs/design/game.md`, which a player never opens. The owner asking what "Ward", "Wake" and "hue" meant, about mechanics in their own game, is that defect reported.
+
+The failure mode *after* the fix is the quieter one, and it is what this gate is for: an explanation that outlives the rule behind it. A tooltip describing a deleted trait, or quoting a Power number the resolver has since re-tuned, is worse than no tooltip — the player has no way to tell it is wrong, and neither does a reviewer reading the tooltip.
+
+Four mutations were applied one at a time, `node --test test/explain.test.ts` run, and the tree restored after each.
+
+| mutation | site | failed | which test |
+|---|---|---|---|
+| every tincture's `hatch` set to `'none'` | `heraldry/tinctures.ts:TINCTURES` | 2 of 20 | "two tribe fields on one line are never told apart by hue alone", "hatching is off by default" |
+| `Ward` removed from `u_warden`, the only card that carries it | `content/cards.ts:PLAYER_CARDS` | 1 of 20 | "no explanation survives the trait it explains" |
+| Relay's sentence retyped as the literal `+2 Power` | `render/glossary.ts:TRAIT_TERMS` | 1 of 20 | "trait rules carry the resolver's own numbers, not retyped ones" |
+| `triggersFor`'s Relay branch made to read `e.tribe` | `engine/resolver.ts:triggersFor` | 1 of 20 | "the 'race carries no rule' claim is still true of the resolver" |
+
+### The two that took a second attempt, and why the first attempt was worthless
+
+**Retyping the number.** The first version of the number check asserted only that `TRAIT_TERMS.relay.line` matches `/\+2 Power/`, built from the imported `RELAY_POWER`. Both obvious mutations passed it: retyping the number as a literal passed because the literal happened to equal today's constant, and re-tuning `RELAY_POWER` to 3 passed because the sentence is interpolated and followed it. The check could not tell "derived" from "coincidentally equal" — canon's *a check built from the same symbol as the thing it checks proves only that the code agrees with itself*. The gate now also reads `glossary.ts`'s **source** and requires `${RELAY_POWER}` to appear and `/\+\d+ Power/` not to; that is the half the retype mutation goes red on.
+
+**Scanning source for a literal.** That source scan then failed on a clean tree, on `glossary.ts`'s own header comment, which explains the rule by quoting `"+2 Power"`. This repo has been here before: `gate:banned-apis` reads the TypeScript AST rather than grepping because `src/engine/rng.ts` names all three banned APIs in a comment in order to say it never calls them, and a grep gate reported sixteen violations on a clean tree. The fix here is a `codeOf()` helper that strips comments before scanning, and the same helper now feeds the resolver check.
+
+### The colour-blindness claim, measured rather than asserted
+
+Tribe is carried by field tincture and by nothing else. The distances, in sRGB bytes over 0..441, between the field colours of tribe pairs — the first of which stand **next to each other on the player's own line**:
+
+| pair | sRGB | deuteranopia | protanopia |
+|---|---|---|---|
+| dwarf (gules) vs elf (vert) | 139.3 | **33.5** | **38.2** |
+| elf (vert) vs orc (tenne) | 116.8 | 47.3 | **20.8** |
+| dwarf (gules) vs orc (tenne) | 57.0 | **25.6** | 41.0 |
+
+A dwarf and an elf are, to roughly one man in twelve, the same card. The gate's rule is that every pair must be separable by *something*: either the simulated colours stay at least 60 apart, or the two Petra Sancta hatchings differ. Every collapsed pair above differs in hatching, which is why the round added it.
+
+The simulation is an LMS projection and can only ever **fail** a design, never pass one, so the evidence is a picture: `.probe-ui/hover-even-7-light/13-deuteranopia-player-row.png` (hatching off — the dwarf and elf cards are the same olive) against `.probe-ui/hover-even-7-light-hatch/13-deuteranopia-player-row.png` (hatching on — vertical, diagonal and horizontal rules, three distinguishable tribes at the same two colours). Those files are ignored task-run evidence and `npm run probe:ui hover 7 even light [hatch]` regenerates them, which strands this review rather than letting it be inherited.
+
+`cvdMatrix` in `heraldry/tinctures.ts` exists so that the picture and the number cannot disagree: the probe feeds those nine coefficients to `feColorMatrix` in linearRGB, which is the arithmetic `simulate` does. The first version of the probe used a different, cruder approximation, and its two arms differed by more than the variable under test — dwarf and elf came out visibly different in the filtered screenshot while the number said 33.
+
+### Bound
+
+`test/explain.test.ts`'s header carries it. In short: it reads `PLAYER_CARDS` and `ENEMY_CARDS`, and the engine's `Trait` and `Tribe` unions through the glossary's typed tables. It says nothing about a card outside those two arrays, nothing about a trait in the union but on no card, and **nothing about pixels** — it asserts on HTML and SVG strings, never on what a browser draws from them. The compression-floor assertion is arithmetic on `pipIconSize`, not a measurement; the measurement is `npm run probe:ui narrow 7 even light`, which reported a **19px trait strip in a 44px card, one distinct card top at every viewport from 1440px down to 380px**.
+
 ## 2026-09-07 — combat is mutual, Ward is gone, decks reshuffle (`test/trade.test.ts` and six retargeted gates)
 
 Taken on branch `worktree-agent-a57a336d565027bad`, cut from `b79abf9`, with this round's changes applied; the suite is **133 tests** here, 117 before it. Every mutation below was applied to the stated file, `node --test` run, and the tree restored before the next one. All sixteen go red.

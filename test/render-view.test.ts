@@ -16,10 +16,10 @@
 // Bound of this gate - what a green run does and does not prove:
 //
 //   Walks 80 seeds at `even` and 40 at `hard`, every round of every fight,
-//   comparing health, bonus Power, alive and warded for every entity the engine
+//   comparing health, bonus Power and alive for every entity the engine
 //   still has. Corpses are not compared: they leave the engine's board at the
 //   state-based checkpoint and stay in the view so they can be seen dying.
-//   Covers the four shipped traits, because the shipped decks contain them. It
+//   Covers the three shipped traits, because the shipped decks contain them. It
 //   says nothing about a trait that does not exist yet, and the attribution
 //   assertion is exactly as strong as the trait set it ran against - a future
 //   power source that is neither Relay nor Wake would come back `unknown` and

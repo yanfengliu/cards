@@ -22,7 +22,7 @@
 export type FxLayer = {
   /** Attack: a beam from attacker to target. */
   beam: (from: Element, to: Element, ms: number) => void;
-  /** Buff or ward: a labelled token that crosses from source to target. */
+  /** A buff: a labelled token that crosses from source to target. */
   travel: (from: Element, to: Element, label: string, cls: string, ms: number) => void;
   /**
    * A label that rises off a card and fades. `dy` lifts it clear of the other

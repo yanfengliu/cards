@@ -22,6 +22,8 @@ Outcome: all four implemented, `npm run gates` green, and every number the desig
 
 **Out of scope and deliberately not done.** Re-tuning the four preset encounters, re-costing the card pool for a world where attacking has a price, and minting a card to replace the Elf Warden. Each is a balance decision, and doing any of them would have made the rules change unmeasurable against an unmoved content set.
 
+**Boundary crossed, and it has now been reconciled** on branch `worktree-agent-adcc5f0005b2166d6`, which merged unit 7's `src/ui/` and `src/render/` into this one; `docs/work/7_card-explains-itself/plan.md` records what each edit below became. The original note follows.
+
 **Boundary crossed, and it needs reconciling.** `src/ui/` and `src/render/` belong to another worker this round. Removing Ward *entirely* is not possible without touching them: `'ward'` is a member of the `Trait` union, `warded` is a field on `Entity`, and `warded` is a `GameEvent` kind, so `src/render/view.ts`'s `case 'warded'` is a type error the moment the union loses it. `npm run typecheck` is inside `npm run gates`, so leaving them alone would have handed over a red tree. The edits were kept mechanical and they are listed here so they can be re-applied by hand if the other worker's branch wins the merge:
 
 | file | what changed |
