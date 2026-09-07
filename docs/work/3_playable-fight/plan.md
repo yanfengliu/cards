@@ -1,6 +1,6 @@
 # A fight you can actually play
 
-Status: complete, on branch `worktree-agent-a26b45b4bb267a71a`, not merged
+Status: complete
 Owner: worker (playable fight), coordinator integrates
 Created: 2026-09-07
 Updated: 2026-09-07

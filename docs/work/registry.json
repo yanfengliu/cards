@@ -24,6 +24,14 @@
     {
       "id": 5,
       "theme": "run-structure"
+    },
+    {
+      "id": 6,
+      "theme": "trade-and-thin"
+    },
+    {
+      "id": 7,
+      "theme": "card-explains-itself"
     }
   ]
 }
