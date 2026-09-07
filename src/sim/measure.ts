@@ -15,6 +15,8 @@
 //   3. Both arms run the same seed set, so the comparison is paired.
 //   4. `--verify` re-checks all of that against the actual runs rather than
 //      trusting the argument above.
+//   5. `--verify` also fails when the gap itself collapses. See
+//      `gapVerdict` below for the threshold and what it is worth.
 
 import { pathToFileURL } from 'node:url';
 
@@ -178,6 +180,100 @@ export function wilson(wins: number, n: number): [number, number] {
 }
 
 const pct = (x: number): string => `${(100 * x).toFixed(2)}%`;
+
+// ---------------------------------------------------------------------------
+// The gate. `--verify` fails when the design's central claim stops holding.
+// ---------------------------------------------------------------------------
+
+/**
+ * The floor the optimal-vs-random gap must clear, in percentage points.
+ *
+ * ARCHITECTURE.md: "If their win rates are the same, placement is not a
+ * decision and the central claim of the design is false", and the gap is "a
+ * number that can go red in CI". Until this constant existed it could not:
+ * `--verify` checked only card identity and determinism, so a gap that fell to
+ * zero still exited 0.
+ *
+ * Why 5.0 and not something tighter, given that the measurement is stochastic
+ * and a flaky gate gets switched off:
+ *
+ *   What a collapse looks like. The measurement carries two arms that already
+ *   embody "placement is not a decision". The negative control - the same cards
+ *   with every neighbour-reading trait removed - runs a 0.92 pp gap at `even`.
+ *   The noise floor - two identical random policies separated only by their
+ *   stream name - runs -0.26 pp over 20,000 seeds (95% CI -0.98..0.47). So a
+ *   real collapse lands at or below about 1 pp, not at 4.
+ *
+ *   What variance looks like. At the gate's 400 seeds the paired standard error
+ *   is about 2.7 pp, so one seed window's gap can sit 5 pp either side of the
+ *   population value for no reason at all. 5.0 pp is one such half-width above
+ *   zero: below it a 400-seed run cannot tell the gap from zero anyway, so
+ *   there is nothing to be gained by setting the floor lower.
+ *
+ *   The headroom that buys. Measured over 20,000 seeds the gap is 18.80 pp
+ *   (95% CI 18.06..19.53). The floor sits (18.80 - 5.0) / 2.7 = 5.1 standard
+ *   errors below it, so tripping this by seed choice alone takes a 5-sigma
+ *   excursion. A balance change that genuinely halved the value of placement
+ *   would still pass; one that took it to a third would not.
+ *
+ * The floor alone is not enough, which is why `gapVerdict` also requires the
+ * interval to exclude zero - see there.
+ */
+export const MIN_GAP_PP = 5.0;
+
+/**
+ * Does this run still support the claim that placement is a decision?
+ *
+ * Two conditions, and they bind at opposite ends of the seed count:
+ *
+ *   1. The paired 95% interval must exclude zero. This is what makes the gate
+ *      sound at *any* `--seeds` value: with 20 seeds the floor below could be
+ *      cleared by luck, and this condition refuses to call that evidence.
+ *   2. The gap must reach `MIN_GAP_PP`. This is what makes the gate mean
+ *      something at large seed counts, where condition 1 degenerates - at
+ *      20,000 seeds an interval excluding zero only needs a gap of 0.74 pp,
+ *      which is the size of a collapse rather than the size of a decision.
+ *
+ * Deliberately *not* a third condition: "the gap must beat the measured noise
+ * floor". A 95% interval on a null comparison excludes zero one run in twenty
+ * by construction, so gating on the control's interval would be a 1-in-20 flake
+ * on any change to the seed set - and a flaky gate is a gate that gets disabled.
+ * The control is reported instead, for a human to read.
+ */
+export function gapVerdict(
+  g: ReturnType<typeof pairedGap>,
+  seedCount: number,
+): { ok: boolean; failures: string[] } {
+  const gapPp = 100 * g.gap;
+  const loPp = 100 * g.ci95[0];
+  const hiPp = 100 * g.ci95[1];
+  const failures: string[] = [];
+
+  if (!(loPp > 0)) {
+    failures.push(
+      `the optimal-vs-random gap is ${gapPp.toFixed(2)} pp with a 95% interval of ` +
+        `${loPp.toFixed(2)}..${hiPp.toFixed(2)} pp, whose lower bound is not above zero. ` +
+        `Over ${seedCount} ` +
+        `seeds this run cannot distinguish optimal placement from random placement, so it ` +
+        `is not evidence that placement is a decision. To satisfy this the interval's lower ` +
+        `bound must be above zero - either the gap is real and larger, or the run needs more ` +
+        `seeds (--seeds) to narrow the interval.`,
+    );
+  }
+  if (!(gapPp >= MIN_GAP_PP)) {
+    failures.push(
+      `the optimal-vs-random gap is ${gapPp.toFixed(2)} pp, below the floor of ` +
+        `${MIN_GAP_PP.toFixed(2)} pp this gate defends. ARCHITECTURE.md: "if their win rates ` +
+        `are the same, placement is not a decision and the central claim of the design is ` +
+        `false." The measured noise floor is about 0.3 pp and the cascade-stripped negative ` +
+        `control about 0.9 pp, so a gap this small is the size of no-decision rather than the ` +
+        `size of a decision. To satisfy this, the gap must reach ${MIN_GAP_PP.toFixed(2)} pp - ` +
+        `which is a content or rules change, not a test change.`,
+    );
+  }
+
+  return { ok: failures.length === 0, failures };
+}
 
 // ---------------------------------------------------------------------------
 // Instrument checks. Verify the instrument before trusting the measurement.
@@ -457,6 +553,14 @@ function main(): void {
     `- Control reproduces: two random-placement bots on different placement streams ` +
       `differ by ${pct(gapControl.gap)} (CI ${pct(gapControl.ci95[0])}..${pct(gapControl.ci95[1])}).`,
   );
+  const verdictLine = gapVerdict(gapAB, n);
+  console.log(
+    `- The claim itself: ${verdictLine.ok ? 'PASS' : 'FAIL'}. The A - B gap is ` +
+      `${(100 * gapAB.gap).toFixed(2)} pp (CI ${(100 * gapAB.ci95[0]).toFixed(2)}..` +
+      `${(100 * gapAB.ci95[1]).toFixed(2)}); it must reach ${MIN_GAP_PP.toFixed(2)} pp and its ` +
+      `interval must exclude zero. ` +
+      `${has('verify') ? 'Enforced: --verify exits non-zero.' : 'Reported only; --verify enforces it.'}`,
+  );
 
   const elapsed = Number(process.hrtime.bigint() / 1000000n) - started;
   console.log('');
@@ -469,6 +573,41 @@ function main(): void {
     }
     if (!det.stable || !det.replayStable) {
       console.error('\nFAIL: determinism check failed.');
+      process.exitCode = 1;
+    }
+
+    // The claim this whole file exists to defend, made able to go red.
+    //
+    // Bound -- what a green run here does and does not prove:
+    //
+    //   Proves  that on THIS seed window, at THIS encounter, with THESE bots
+    //           and THIS card set, a bot searching insertion positions beats a
+    //           bot placing at random by at least MIN_GAP_PP percentage points,
+    //           by a margin the run's own paired interval separates from zero.
+    //   Bound   to the encounter under test - `even` by default, which is tuned
+    //           so both arms straddle 50%. The same gap is 1.08 pp at `trivial`
+    //           and 17.78 pp at `hard`, so a green run says nothing about the
+    //           other three encounters, and `npm run measure` reports all four.
+    //   Bound   to bots. Bot B places uniformly at random and no human does.
+    //           Against the fixed rule "always append next to the hero" the gap
+    //           is roughly 9 pp, which is the honest figure for a person who is
+    //           not thinking about placement. Nothing here says the game is fun.
+    //   Misses  a gap that is real but has quietly halved, anywhere above the
+    //           floor. This gate catches collapse, not drift; drift is what the
+    //           printed table and the difficulty sweep are for.
+    const verdict = gapVerdict(gapAB, n);
+    if (!verdict.ok) {
+      console.error('');
+      console.error(
+        `FAIL: placement is no longer measurably a decision at encounter "${enc.id}" over ` +
+          `${n} seeds (${first}..${first + n - 1}).`,
+      );
+      for (const f of verdict.failures) console.error(`  - ${f}`);
+      console.error(
+        `  Arms: A optimal ${pct(armA.winRate)} (${armA.wins}/${armA.n}), ` +
+          `B random ${pct(armB.winRate)} (${armB.wins}/${armB.n}); ` +
+          `measured noise floor B - B2 ${pct(gapControl.gap)}.`,
+      );
       process.exitCode = 1;
     }
   }
