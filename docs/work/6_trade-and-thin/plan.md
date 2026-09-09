@@ -1,6 +1,6 @@
 # Mutual damage, no Ward, decks that reshuffle
 
-Status: implemented, gates green, not reviewed, not merged
+Status: complete
 Owner: worker on branch `worktree-agent-a57a336d565027bad`, cut from `b79abf9`
 Created: 2026-09-07
 Updated: 2026-09-07
@@ -84,6 +84,16 @@ Determinism holds. The reshuffle runs on the `deck` stream, which is separate fr
 - [x] `npm run verify`, the difficulty sweep, the per-trait ablation and `npm run measure:run` re-measured, before and after recorded.
 - [ ] Independent review. Not done — the resolver's ordering rules and `docs/design/` both escalate to it per `AGENTS.md`.
 
+## Implementation steps
+
+- [x] Mutual damage in `apply`'s attack case: both blows computed from pre-hit Power, both deaths announced at the one checkpoint after it, the hero taking retaliation when attacked but dealing none when it swings. Gated six ways.
+- [x] Ward removed entirely: trait, effect, event kind, `Entity.warded`, both Elf Warden cards, its tests, and every mention in `docs/design/game.md`. Six gates that used Ward incidentally retargeted to other fixtures; one ("inside one unit, traits fire in source order") recorded as lost rather than faked, since no two shipped traits key on one event any more.
+- [x] Reshuffle inside a fight: `drawTo` and `reshuffle` draw through the seeded deck stream, so whole-fight and whole-run replay stay byte-identical. Gated.
+- [x] Wake verified live, not assumed: a fixture in which the woken unit must swing at its raised Power, plus a 200-fight ablation requiring some outcome to differ.
+- [x] Re-measured everything the rulings invalidated: headline gap, difficulty sweep, per-trait ablation (now a tracked command, `npm run measure:ablate`), and the whole run. `RUN_HERO.health` 80 -> 200 after `verify:run`'s degeneracy gate caught 0 of 1000 runs won.
+- [x] Design of record updated for the four owner rulings and nothing else; the worked example rewritten around Wake because mutual damage made both original arrangements identical.
+- [x] Sixteen mutations watched going red, recorded in `docs/learning/gate-proofs.md` naming this branch and base.
+- [x] Boundary crossing into `src/ui/` and `src/render/` (eight files) forced by the `Trait` union and `typecheck`; each edit listed line-by-line so the other lane could re-apply it. Reconciled at `20210ff`.
 ## Measurements: before and after
 
 Before is `b79abf9`. After is this branch. **Every number moved, and that is expected here.**

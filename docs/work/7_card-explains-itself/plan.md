@@ -1,6 +1,6 @@
 # A card explains all of itself on hover
 
-Status: complete; merged with unit 6 and reconciled on branch `worktree-agent-adcc5f0005b2166d6` (see the last section)
+Status: complete
 Owner: worker (UI)
 Created: 2026-09-07
 Updated: 2026-09-07

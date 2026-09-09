@@ -1,6 +1,6 @@
 # Core game design: board roguelike deckbuilder
 
-Status: active
+Status: complete
 Owner: Yanfeng Liu
 Created: 2026-09-06
 Updated: 2026-09-06
