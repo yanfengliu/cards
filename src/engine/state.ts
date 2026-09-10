@@ -24,6 +24,15 @@ export type UnitCard = {
   readonly armour: number;
   readonly tribe: Tribe;
   readonly traits: readonly Trait[];
+  /**
+   * The traits in `traits` that a sigil granted rather than the card printing
+   * them. Read by nothing in the engine - a sigil's whole effect is already in
+   * `traits`, which is the `AGENTS.md` rule that card behaviour is data plus a
+   * named effect. Carried so the layers that draw and explain a card can say
+   * where a trait came from. Absent, not empty, for a card with none, so every
+   * card literal written before sigils existed is unchanged.
+   */
+  readonly sigilTraits?: readonly Trait[];
 };
 
 // ---------------------------------------------------------------------------
@@ -105,11 +114,34 @@ export function emptySlots(): EquipmentSlots {
   return { weapon: null, armour: null, trinket: null };
 }
 
+/**
+ * The rule constants a hero sigil can move for its own side.
+ *
+ * `docs/design/game.md`: "A sigil placed on the hero applies to the whole
+ * run." The run composes its hero sigils into this and hands it in on
+ * `HeroSpec`, so the hero entity carries the rules in force on its side and
+ * `resolver.ts` reads them there - a Relay on the player's line can hand +3
+ * while the enemy's, if it ever fields one, still hands the default. Each
+ * field is the *amount in force*, not a delta; absent means the engine's own
+ * constant (`RELAY_POWER`, `WAKE_POWER`), so a hero built before sigils
+ * existed fights exactly as it did.
+ *
+ * Numbers only, on purpose. A hero sigil that needed the resolver to read a
+ * different neighbour or heal on a hit would be a new verb, and a new verb is a
+ * coordinator decision (`ARCHITECTURE.md`), not a field here.
+ */
+export type SideRules = {
+  readonly relayPower?: number;
+  readonly wakePower?: number;
+};
+
 export type HeroSpec = {
   readonly name: string;
   readonly health: number;
   readonly power: number;
   readonly armour: number;
+  /** Rules bent by hero sigils. Absent for a hero with none. */
+  readonly rules?: SideRules;
 };
 
 export type Entity = {
@@ -137,6 +169,13 @@ export type Entity = {
    * existed still reproduces.
    */
   equipment: EquipmentSlots | null;
+  /**
+   * The rules in force on this entity's side, for a hero; `null` for a unit,
+   * which bends no rule. Same shape of addition as `equipment`, and for the
+   * same reason: `hashFight` appends it only when something is set, so every
+   * hash recorded before hero sigils existed still reproduces.
+   */
+  rules: SideRules | null;
 };
 
 /**
@@ -238,6 +277,7 @@ export function makeHero(state: GameState, side: Side, spec: HeroSpec): Entity {
     traits: [],
     alive: true,
     equipment: emptySlots(),
+    rules: spec.rules ?? null,
   };
 }
 
@@ -255,6 +295,7 @@ export function makeUnit(state: GameState, side: Side, card: UnitCard): Entity {
     traits: card.traits.slice(),
     alive: true,
     equipment: null,
+    rules: null,
   };
 }
 
@@ -336,6 +377,7 @@ export function cloneEntity(e: Entity): Entity {
     // clone, and the slots object is the only mutable part of an Entity that is
     // not a primitive besides `traits`. The cards inside it are immutable data.
     equipment: e.equipment === null ? null : { ...e.equipment },
+    rules: e.rules === null ? null : { ...e.rules },
   };
 }
 

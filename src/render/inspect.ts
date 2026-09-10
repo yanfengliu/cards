@@ -32,8 +32,9 @@
  * shape or a pip. This tier is where those become sentences.
  */
 
-import type { Trait } from '../engine/state.ts';
+import type { SideRules, Trait } from '../engine/state.ts';
 import { type EntityView, power } from './view.ts';
+import { CARD_SIGIL_TERMS, SIGIL_TERM, ruleOverrideLines, traitTerm } from './sigil-terms.ts';
 import { type CardView, renderCard } from './heraldry/card.ts';
 import { parseBlazon } from './heraldry/blazon.ts';
 import { hexOf } from './heraldry/tinctures.ts';
@@ -48,7 +49,6 @@ import {
   RETALIATION_UNIT,
   STAT_TERMS,
   TINCTURE_TERMS,
-  TRAIT_TERMS,
   type Term,
   chargeName,
   hatchWords,
@@ -66,6 +66,12 @@ export interface InspectContext {
   readonly hatch: boolean;
   /** Formats a probability the way the board does, so the two never disagree. */
   readonly pct: (p: number) => string;
+  /**
+   * The rules in force on this card's side - a hero sigil may have moved
+   * Relay's or Wake's amount - so a trait is explained at the number the fight
+   * will use. Absent or null means the engine's defaults.
+   */
+  readonly rules?: SideRules | null;
 }
 
 function esc(s: string): string {
@@ -115,9 +121,17 @@ function channel(icon: IconName | 'swatch', swatchHex: string, name: string, val
   );
 }
 
-function traitRule(trait: Trait): string {
-  const term = TRAIT_TERMS[trait];
-  return rule(term.icon, term.name, term.line, 'xp__rule--trait');
+/**
+ * One trait's row. At the amount in force on this side, and - when a sigil
+ * granted it rather than the card printing it - named as that sigil, with the
+ * sigil's own sentence after the rule. `TRAIT_TERMS` is still the source of
+ * the rule: `traitTerm` only moves the number when a hero sigil moved it.
+ */
+function traitRule(trait: Trait, sigil: boolean, rules: SideRules | null | undefined): string {
+  const term = traitTerm(trait, rules);
+  if (!sigil) return rule(term.icon, term.name, term.line, 'xp__rule--trait');
+  const s = CARD_SIGIL_TERMS[trait];
+  return rule(term.icon, `${term.name} · ${s.name}`, `${term.line} ${s.line}`, 'xp__rule--trait xp__rule--sigil');
 }
 
 /**
@@ -179,7 +193,15 @@ export function explainCard(e: EntityView, card: CardView, ctx: InspectContext):
       ),
     );
   }
-  for (const t of e.traits) rules.push(traitRule(t));
+  const sigilTraits = e.sigilTraits ?? [];
+  for (const t of e.traits) rules.push(traitRule(t, sigilTraits.includes(t), ctx.rules));
+  // A hero's sigils bend rules for its whole side; the hero's panel is where
+  // that is said, one sentence per bent rule and nothing at the defaults.
+  if (e.isHero) {
+    for (const line of ruleOverrideLines(ctx.rules)) {
+      rules.push(rule(SIGIL_TERM.icon, `Hero ${SIGIL_TERM.name}`, line, 'xp__rule--sigil'));
+    }
+  }
   if (e.traits.length === 0) {
     rules.push(
       rule(

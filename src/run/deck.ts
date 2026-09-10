@@ -1,4 +1,4 @@
-// The run deck, and the seam that carries a forged card into a fight.
+// The run deck, and the seam that carries a forged or sigilled card into a fight.
 //
 // A run deck is a list of *instances*, not of card ids, because the forge
 // "permanently upgrades one card" and a deck holding three Squires must be able
@@ -10,9 +10,17 @@
 // the pool seam in `src/engine/state.ts` doing exactly the job its comment
 // claims: "a fight is *given* its cards rather than reaching into
 // `src/content/` for them." No engine change was needed for the forge.
+//
+// A sigil goes through the same seam and needed no engine change either. A
+// Relay Sigil on a Pikeman is the word `relay` merged into that instance's
+// `traits` in `resolveDeckCard`, and the resolver treats it exactly as it
+// treats the Relay printed on a Squire, because both are the same word in the
+// same list. `docs/design/game.md`: "a Relay Sigil makes any unit a relay."
+// The only thing the fight is told beyond the trait is `sigilTraits`, which the
+// engine never reads and the panel uses to say where the trait came from.
 
-import type { CardPool, UnitCard } from '../engine/state.ts';
-import type { DeckCard, ForgeMode } from './types.ts';
+import type { CardPool, Trait, UnitCard } from '../engine/state.ts';
+import type { AttachedSigil, DeckCard, ForgeMode } from './types.ts';
 
 /** The separator between a card id and its instance number. */
 export const INSTANCE_SEPARATOR = '#';
@@ -30,18 +38,36 @@ export function makeDeckCard(cardId: string, instance: number): DeckCard {
     powerBonus: 0,
     healthBonus: 0,
     costDelta: 0,
+    sigils: [],
   };
 }
 
-/** The card a deck instance actually fights as, upgrades applied. */
+/**
+ * The card a deck instance actually fights as: upgrades applied, sigil traits
+ * merged in.
+ *
+ * A trait is a word in a list, so merging is a set union: a Relay Sigil on a
+ * card that already prints Relay adds nothing, and `attachSigil` refuses that
+ * attachment before it gets here. `sigilTraits` is only the traits the sigils
+ * *added*, and it is left off entirely when there are none, so a plain
+ * instance resolves to exactly the object it resolved to before sigils
+ * existed.
+ */
 export function resolveDeckCard(base: CardPool, dc: DeckCard): UnitCard {
   const card = base.card(dc.cardId);
+  const granted: Trait[] = [];
+  for (const s of dc.sigils) {
+    if (!card.traits.includes(s.trait) && !granted.includes(s.trait)) granted.push(s.trait);
+  }
   return {
     ...card,
     id: dc.instanceId,
     cost: Math.max(0, card.cost + dc.costDelta),
     power: card.power + dc.powerBonus,
     health: card.health + dc.healthBonus,
+    ...(granted.length > 0
+      ? { traits: [...card.traits, ...granted], sigilTraits: granted }
+      : {}),
   };
 }
 
@@ -50,8 +76,8 @@ export function resolveDeckCard(base: CardPool, dc: DeckCard): UnitCard {
  *
  * Instance ids resolve to the run's upgraded copies; every other id falls
  * through to the base pool, which is how the enemy's plain card ids still work.
- * Built fresh per fight from the deck as it stands, so a forge between two
- * fights is visible in the second and not the first.
+ * Built fresh per fight from the deck as it stands, so a forge or a sigil
+ * between two fights is visible in the second and not the first.
  */
 export function runPool(base: CardPool, deck: readonly DeckCard[]): CardPool {
   const byInstance = new Map<string, UnitCard>();
@@ -93,12 +119,49 @@ export function applyForge(deck: DeckCard[], index: number, mode: ForgeMode): vo
     );
   }
   deck[index] = {
-    instanceId: dc.instanceId,
-    cardId: dc.cardId,
+    ...dc,
     powerBonus: dc.powerBonus + (mode === 'power' ? 1 : 0),
     healthBonus: dc.healthBonus + (mode === 'health' ? 1 : 0),
     costDelta: dc.costDelta + (mode === 'cost' ? -1 : 0),
   };
+}
+
+/**
+ * Does this instance already have `trait`, printed or by an earlier sigil?
+ * The question the attach shelf asks of every deck card.
+ */
+export function hasTrait(base: CardPool, dc: DeckCard, trait: Trait): boolean {
+  return base.card(dc.cardId).traits.includes(trait) || dc.sigils.some((s) => s.trait === trait);
+}
+
+/**
+ * Attach one sigil to one deck card, permanently.
+ *
+ * Refuses a card that already has the trait, printed or from an earlier sigil,
+ * because the attachment would change nothing and a sigil spent on nothing is
+ * not a decision the shelf should have offered - `attachOffers` in `nodes.ts`
+ * never lists such a card, and this is the check behind it.
+ */
+export function attachSigil(
+  base: CardPool,
+  deck: DeckCard[],
+  index: number,
+  sigil: AttachedSigil,
+): void {
+  const dc = deck[index];
+  if (dc === undefined) {
+    throw new Error(
+      `sigil: deck index ${index} is not a card; the deck holds ${deck.length} card(s) and ` +
+        `accepts 0..${deck.length - 1}`,
+    );
+  }
+  if (hasTrait(base, dc, sigil.trait)) {
+    throw new Error(
+      `sigil: "${sigil.id}" grants ${sigil.trait} and ${dc.instanceId} already has it, so ` +
+        `attaching it would change nothing. Attach it to a card without ${sigil.trait}.`,
+    );
+  }
+  deck[index] = { ...dc, sigils: [...dc.sigils, { id: sigil.id, trait: sigil.trait }] };
 }
 
 export function cloneDeck(deck: readonly DeckCard[]): DeckCard[] {
@@ -108,5 +171,6 @@ export function cloneDeck(deck: readonly DeckCard[]): DeckCard[] {
     powerBonus: d.powerBonus,
     healthBonus: d.healthBonus,
     costDelta: d.costDelta,
+    sigils: d.sigils.map((s) => ({ id: s.id, trait: s.trait })),
   }));
 }

@@ -23,6 +23,7 @@ import { type EntityView, power } from './view.ts';
 import { pct } from './odds.ts';
 import { iconSvg } from './icons.ts';
 import { STAT_TERMS, TRAIT_TERMS } from './glossary.ts';
+import { CARD_SIGIL_TERMS } from './sigil-terms.ts';
 
 export const MIN_CARD_W = 44;
 export const MAX_CARD_W = 92;
@@ -121,15 +122,34 @@ export function titleCase(s: string): string {
  * Guard is excluded because Guard is already the card's *shape* - a Guard is
  * drawn as a shield with a heavy bordure, per `ARCHITECTURE.md`'s channel table
  * - and a pip repeating it would spend the strip's only room on the one trait
- * that does not need it.
+ * that does not need it. A sigil-granted Guard is the same shape, and the
+ * sigil is named on the card's panel instead.
+ *
+ * A trait a sigil granted keeps the trait's own icon - the pip's idea is "this
+ * unit has Relay", and one idea is one shape - and is marked as a sigil by its
+ * frame (`pip--sigil`) and its words, which name the sigil before the rule.
  */
-function traitPipsOf(traits: readonly string[]): { name: string; icon: string; title: string }[] {
-  const out: { name: string; icon: string; title: string }[] = [];
+export type TraitPip = { name: string; icon: string; title: string; sigil: boolean };
+
+function traitPipsOf(traits: readonly string[], sigilTraits: readonly string[]): TraitPip[] {
+  const out: TraitPip[] = [];
   for (const t of traits) {
     if (t === 'guard') continue;
     const term = (TRAIT_TERMS as Readonly<Record<string, { name: string; icon: string; line: string } | undefined>>)[t];
     if (term === undefined) continue;
-    out.push({ name: term.name, icon: term.icon, title: `${term.name} — ${term.line}` });
+    const sigil = sigilTraits.includes(t);
+    const sigilTerm = sigil
+      ? (CARD_SIGIL_TERMS as Readonly<Record<string, { name: string; line: string } | undefined>>)[t]
+      : undefined;
+    out.push({
+      name: term.name,
+      icon: term.icon,
+      title:
+        sigilTerm === undefined
+          ? `${term.name} — ${term.line}`
+          : `${sigilTerm.name} — ${term.name}: ${term.line} ${sigilTerm.line}`,
+      sigil: sigilTerm !== undefined,
+    });
   }
   return out;
 }
@@ -235,15 +255,16 @@ function paintTraits(
   traits: readonly string[],
   width: number,
   pending = 0,
+  sigilTraits: readonly string[] = [],
 ): void {
-  const pips = traitPipsOf(traits);
+  const pips = traitPipsOf(traits, sigilTraits);
   const size = pipIconSize(width);
-  const signature = `${pips.map((p) => p.name).join('+')}|${size}|${pending}`;
+  const signature = `${pips.map((p) => `${p.name}${p.sigil ? '*' : ''}`).join('+')}|${size}|${pending}`;
   if (node.dataset['sig'] === signature) return;
   node.dataset['sig'] = signature;
   node.textContent = '';
   for (const p of pips) {
-    const pip = el('span', 'pip');
+    const pip = el('span', p.sigil ? 'pip pip--sigil' : 'pip');
     // `title` for the pointer, `aria-label` for the reader, and the same words
     // in both. The icon is never the only place the rule is written: the hover
     // panel spells it out in full, and this is its short form.
@@ -401,6 +422,7 @@ function paintItems(
           e.traits,
           width,
           opts.pendingPower?.get(e.uid) ?? 0,
+          e.sigilTraits ?? [],
         );
         paintOdds(node.querySelector('.card__odds') as HTMLElement, opts.odds, e);
         break;
@@ -426,6 +448,7 @@ function paintItems(
           e.traits,
           width,
           opts.pendingPower?.get(e.uid) ?? 0,
+          e.sigilTraits ?? [],
         );
         paintOdds(node.querySelector('.card__odds') as HTMLElement, opts.odds, e);
         break;
@@ -527,6 +550,6 @@ export function compressedCard(
  * The trait pips a compressed card carries, for callers rendering their own -
  * the hand's hint line reads this so the strip and the sentence never disagree.
  */
-export function traitPips(traits: readonly string[]): { name: string; icon: string; title: string }[] {
-  return traitPipsOf(traits);
+export function traitPips(traits: readonly string[], sigilTraits: readonly string[] = []): TraitPip[] {
+  return traitPipsOf(traits, sigilTraits);
 }

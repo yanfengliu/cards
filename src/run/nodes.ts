@@ -9,9 +9,9 @@
 // the run's determinism story:
 //
 //   - **The run stream.** One `Rng` on `RunState`, threaded through every
-//     reward offer, shop shelf and event draw. Consuming a different number of
-//     draws - by taking a shop instead of a forge - shifts everything after it,
-//     which is what makes a route a route.
+//     reward offer, shop shelf, event draw and sigil offer. Consuming a
+//     different number of draws - by taking a shop instead of a forge - shifts
+//     everything after it, which is what makes a route a route.
 //
 //   - **Node-keyed derivation.** A fight's seed and its encounter are
 //     `mixSeeds(runSeed, act, nodeId, tag)`: a pure function of *which node it
@@ -22,18 +22,31 @@
 //     arithmetic rather than as a convention, and it is gated by
 //     "a node's fight is a function of the node, not of the route" in
 //     `test/run.test.ts`.
+//
+// Sigils draw from the run stream and only the run stream. A sigil offer is a
+// draw like a reward card is a draw, so taking one route rather than another
+// changes which sigils come up later, and no sigil can ever reach into a
+// fight's own streams - `checkStreamSeparation` in `src/sim/runmeasure.ts`
+// burns run-stream draws and requires every fight seed to hold still.
 
+import { RELAY_POWER, WAKE_POWER } from '../engine/resolver.ts';
 import { type Rng, mixSeeds, nextFloat, nextInt } from '../engine/rng.ts';
-import { makeDeckCard } from './deck.ts';
+import type { SideRules } from '../engine/state.ts';
+import { attachSigil, hasTrait, makeDeckCard } from './deck.ts';
 import type {
+  CardSigilDef,
   EventEffect,
   ForgeOffer,
+  HeroSigilDef,
   MapNode,
   RewardEntry,
+  RewardOption,
+  RunContent,
   RunEncounter,
   RunEventDef,
   RunState,
   ShopItem,
+  SigilDef,
 } from './types.ts';
 import { FORGE_MODES } from './types.ts';
 
@@ -43,15 +56,17 @@ const TAG_ENCOUNTER = 0x0e11;
 
 /**
  * Weighted draw of `k` distinct entries. Draws are taken one at a time from the
- * run stream, so `k` offers cost exactly `k` draws.
+ * run stream, so `k` offers cost exactly `k` draws. Shared by the card shelf,
+ * the shop and both sigil offers, so they cannot disagree about what a
+ * weighted draw is.
  */
-export function drawDistinctCards(
+export function drawDistinct<T extends { readonly weight: number }>(
   rng: Rng,
-  table: readonly RewardEntry[],
+  table: readonly T[],
   k: number,
-): string[] {
-  const pool = table.map((e) => ({ cardId: e.cardId, weight: e.weight }));
-  const out: string[] = [];
+): T[] {
+  const pool = table.slice();
+  const out: T[] = [];
   const want = Math.min(k, pool.length);
   for (let i = 0; i < want; i++) {
     let total = 0;
@@ -66,15 +81,130 @@ export function drawDistinctCards(
         break;
       }
     }
-    out.push(pool[chosen]!.cardId);
+    out.push(pool[chosen]!);
     pool.splice(chosen, 1);
   }
   return out;
 }
 
-/** The cards a fight, elite or boss reward offers. Costs `rewardOffers` draws. */
-export function rewardOffer(run: RunState): string[] {
-  return drawDistinctCards(run.rng, run.content.rewards, run.content.rewardOffers);
+/** `k` distinct card ids from a reward table. Exactly `k` draws. */
+export function drawDistinctCards(
+  rng: Rng,
+  table: readonly RewardEntry[],
+  k: number,
+): string[] {
+  return drawDistinct(rng, table, k).map((e) => e.cardId);
+}
+
+// ---------------------------------------------------------------------------
+// Sigils: what the content has, what the run holds, what is on offer
+// ---------------------------------------------------------------------------
+
+export function cardSigils(content: RunContent): CardSigilDef[] {
+  return content.sigils.filter((s): s is CardSigilDef => s.kind === 'card');
+}
+
+export function heroSigils(content: RunContent): HeroSigilDef[] {
+  return content.sigils.filter((s): s is HeroSigilDef => s.kind === 'hero');
+}
+
+/** A sigil by id. Throws for an id the content does not define; names what it does. */
+export function sigilById(content: RunContent, id: string): SigilDef {
+  const s = content.sigils.find((x) => x.id === id);
+  if (s === undefined) {
+    throw new Error(
+      `run: no sigil "${id}" in this run's content. It defines ` +
+        `${content.sigils.length === 0 ? 'none' : content.sigils.map((x) => x.id).join(', ')}.`,
+    );
+  }
+  return s;
+}
+
+/** The hero sigils this run holds, in the order they were taken. */
+export function heldHeroSigils(run: RunState): HeroSigilDef[] {
+  const out: HeroSigilDef[] = [];
+  for (const g of run.sigils) {
+    if (g.target !== 'hero') continue;
+    const def = sigilById(run.content, g.sigilId);
+    if (def.kind === 'hero') out.push(def);
+  }
+  return out;
+}
+
+/**
+ * The rules the run's hero sigils have bent, as the engine's `SideRules`: an
+ * amount in force per rule, present only when some sigil moved it. Deltas add,
+ * so two sigils on one rule stack; the shipped content offers each hero sigil
+ * once, and `heroSigilOffer` never re-offers a held one.
+ */
+export function heroRules(run: RunState): SideRules {
+  let relay = 0;
+  let wake = 0;
+  for (const s of heldHeroSigils(run)) {
+    if (s.effect.kind === 'relayPower') relay += s.effect.amount;
+    else if (s.effect.kind === 'wakePower') wake += s.effect.amount;
+  }
+  return {
+    ...(relay !== 0 ? { relayPower: RELAY_POWER + relay } : {}),
+    ...(wake !== 0 ? { wakePower: WAKE_POWER + wake } : {}),
+  };
+}
+
+/** The hand size the run's fights draw to: the pool's, plus every held hand sigil. */
+export function handSizeFor(run: RunState): number {
+  let extra = 0;
+  for (const s of heldHeroSigils(run)) if (s.effect.kind === 'handSize') extra += s.effect.amount;
+  return run.content.pool.handSize + extra;
+}
+
+/**
+ * The hero sigils a won elite or boss puts on offer: `heroSigilOffers` distinct
+ * ones the run does not already hold, weighted. Costs one draw per sigil
+ * offered, and nothing when there is nothing left to offer - in which case the
+ * node asks no `sigil` choice at all, the same way an empty deck asks no forge.
+ */
+export function heroSigilOffer(run: RunState): HeroSigilDef[] {
+  const held = new Set(run.sigils.filter((g) => g.target === 'hero').map((g) => g.sigilId));
+  const available = heroSigils(run.content).filter((s) => !held.has(s.id));
+  return drawDistinct(run.rng, available, run.content.heroSigilOffers);
+}
+
+/**
+ * The deck indices a card sigil could go on: every card that does not already
+ * have the trait, printed or from an earlier sigil. The order is deck order,
+ * so a replayed `attach` choice names a deck index and finds it here.
+ */
+export function attachOffers(run: RunState, sigil: CardSigilDef): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < run.deck.length; i++) {
+    if (!hasTrait(run.content.pool, run.deck[i]!, sigil.trait)) out.push(i);
+  }
+  return out;
+}
+
+/**
+ * What a won fight puts on the shelf. `rewardOffers` cards, drawn as before,
+ * then - at an ordinary fight only - one roll on `cardSigilChance` and, when it
+ * hits, one weighted draw among the card sigils that have somewhere to go.
+ *
+ * The cards are drawn first so that the card half of the shelf consumes the
+ * run stream exactly as it did before sigils existed. A sigil that no deck card
+ * can take is never offered: an offer the player cannot use is not a decision,
+ * and the `attach` choice that follows a sigil pick must always have a target.
+ */
+export function rewardOffer(run: RunState, node: MapNode): RewardOption[] {
+  const out: RewardOption[] = drawDistinctCards(
+    run.rng,
+    run.content.rewards,
+    run.content.rewardOffers,
+  ).map((cardId) => ({ kind: 'card', cardId }));
+  if (node.type !== 'fight') return out;
+  const eligible = cardSigils(run.content).filter((s) => attachOffers(run, s).length > 0);
+  if (eligible.length === 0 || run.content.cardSigilChance <= 0) return out;
+  if (nextFloat(run.rng) >= run.content.cardSigilChance) return out;
+  const drawn = drawDistinct(run.rng, eligible, 1)[0];
+  if (drawn !== undefined) out.push({ kind: 'sigil', sigil: drawn });
+  return out;
 }
 
 /** A shop's shelf. Price is a function of the card's printed cost. */
@@ -191,4 +321,39 @@ export function addCard(run: RunState, cardId: string): void {
   run.deck.push(makeDeckCard(cardId, run.nextInstance));
   run.nextInstance++;
   run.cardsGained++;
+}
+
+/**
+ * Take a hero sigil. It goes in the ledger, and the one effect that is a state
+ * change rather than a rule - `maxHealth` - is applied here and now: the bar
+ * grows and the hero heals by the same amount, because a bigger bar with the
+ * same hole in it would be a reward the player cannot feel at the boss they
+ * just beat. The rule effects are read off the ledger by `heroRules` and
+ * `handSizeFor` whenever a fight is set up, so they need no state of their own.
+ *
+ * Refuses a sigil the run already holds: `heroSigilOffer` never offers one,
+ * and a ledger with the same hero sigil twice would stack a rule the shelf
+ * said could not stack.
+ */
+export function grantHeroSigil(run: RunState, sigil: HeroSigilDef): void {
+  if (run.sigils.some((g) => g.target === 'hero' && g.sigilId === sigil.id)) {
+    throw new Error(
+      `run: the hero already holds "${sigil.id}"; a hero sigil is taken at most once a run`,
+    );
+  }
+  run.sigils.push({ target: 'hero', sigilId: sigil.id });
+  if (sigil.effect.kind === 'maxHealth') {
+    run.hero.maxHealth += sigil.effect.amount;
+    run.hero.health = Math.min(run.hero.maxHealth, run.hero.health + sigil.effect.amount);
+  }
+}
+
+/**
+ * Attach a card sigil to the deck card at `deckIndex`: the trait goes on the
+ * instance through `attachSigil`, and the grant goes in the ledger keyed by
+ * the instance id, so the two can be held to each other.
+ */
+export function attachCardSigil(run: RunState, deckIndex: number, sigil: CardSigilDef): void {
+  attachSigil(run.content.pool, run.deck, deckIndex, { id: sigil.id, trait: sigil.trait });
+  run.sigils.push({ target: { instanceId: run.deck[deckIndex]!.instanceId }, sigilId: sigil.id });
 }

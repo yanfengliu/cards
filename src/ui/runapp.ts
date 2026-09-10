@@ -33,7 +33,7 @@ import type { UnitCard } from '../engine/state.ts';
 import { RUN_CONTENT } from '../run/content.ts';
 import { resolveDeckCard, runPool } from '../run/deck.ts';
 import { pathSpread } from '../run/map.ts';
-import { encounterFor, goldFor, restAmount } from '../run/nodes.ts';
+import { encounterFor, goldFor, heroRules, restAmount } from '../run/nodes.ts';
 import { currentMap, travelOptions } from '../run/run.ts';
 import type { DeckCard, EventEffect, ForgeMode, RunEventDef } from '../run/types.ts';
 import { compressedCard } from '../render/board.ts';
@@ -52,6 +52,7 @@ import { cardEntityView } from '../render/view.ts';
 import type { RunLog } from '../run/types.ts';
 import { type FightOutcome, createFightScreen, initialTheme, need } from './app.ts';
 import { type NodeOutcome, type RunController, createRunController } from './run.ts';
+import { attachHtml, heroSigilChips, heroSigilOfferHtml, sigilMarks, sigilOutcomeWords, sigilShelfButton } from './sigils.ts';
 
 /**
  * Where a run in progress is kept between page loads: its log, which is the
@@ -175,6 +176,7 @@ export function startRunApp(): void {
         return null;
       }
     },
+    playerRules: () => heroRules(ctl.state),
   });
 
   // ------------------------------------------------------------- helpers
@@ -254,8 +256,9 @@ export function startRunApp(): void {
         const f = o.fight;
         const name = f === null ? 'the enemy' : esc(f.encounter.name);
         const rounds = f === null ? '' : ` in ${f.outcome.fight.round} rounds`;
-        const took = o.gained.length === 0 ? ' You took no card.' : gained;
-        return `${name} beaten${rounds}.${health}${gold}${took}`;
+        const sigils = sigilOutcomeWords(o, RUN_CONTENT, (id) => cardOf(id).name);
+        const took = o.gained.length === 0 ? (sigils.length === 0 ? ' You took no card.' : '') : gained;
+        return `${name} beaten${rounds}.${health}${gold}${took}${sigils}`;
       }
     }
   }
@@ -291,13 +294,17 @@ export function startRunApp(): void {
     if (p.kind !== 'fight') {
       dom.subtitle.textContent = `Act ${act + 1} of ${RUN_CONTENT.acts.length} — ${actName(act)} · ${where}`;
     }
-    const health = p.kind === 'reward' ? p.healthAfter : s.hero.health;
-    const gold = p.kind === 'reward' ? p.goldAfter : s.gold;
-    const frac = health / Math.max(1, s.hero.maxHealth);
+    // A won fight's screens promise the numbers the replay will set, hero
+    // sigil included, so the HUD reads them off the phase until the commit.
+    const won = p.kind === 'reward' || p.kind === 'sigil' || p.kind === 'attach' ? p : null;
+    const health = won === null ? s.hero.health : won.healthAfter;
+    const maxHealth = won === null ? s.hero.maxHealth : won.maxHealthAfter;
+    const gold = won === null ? s.gold : won.goldAfter;
+    const frac = health / Math.max(1, maxHealth);
     dom.status.innerHTML =
-      `<span class="hud__stat hud__stat--health" title="${esc(`Your hero's Health. It persists across the whole run and is only healed at a rest or by an event.`)}">` +
+      `<span class="hud__stat hud__stat--health" title="${esc(`Your hero's Health. It persists across the whole run and is only healed at a rest, by an event, or by a hero sigil.`)}">` +
       iconSvg('health', { size: 13, label: STAT_TERMS.health.name }) +
-      `<b>${health}</b>/${s.hero.maxHealth}` +
+      `<b>${health}</b>/${maxHealth}` +
       `<i class="hud__bar" aria-hidden="true"><i style="width:${Math.round(frac * 100)}%"></i></i></span>` +
       `<span class="hud__stat" title="Gold. Fights pay it and only a shop takes it.">` +
       iconSvg('gold', { size: 13, label: 'gold' }) +
@@ -305,6 +312,7 @@ export function startRunApp(): void {
       `<span class="hud__stat" title="Cards in your deck. Rewards, shops and events add to it; nothing removes from it.">` +
       iconSvg('deck', { size: 13, label: 'cards in deck' }) +
       `<b>${s.deck.length}</b></span>` +
+      heroSigilChips(s) +
       `<span class="hud__stat hud__stat--seed" title="The run's seed. The same seed and the same choices replay the same run.">seed ${s.seed}</span>` +
       `<button type="button" data-run="restart" title="Abandon this run and start seed ${s.seed} again from the first node">Restart</button>`;
   }
@@ -426,10 +434,12 @@ export function startRunApp(): void {
         .map((dc) => {
           const card = resolveDeckCard(CARD_POOL, dc);
           const marks = bonusMarks(dc);
+          const sigils = sigilMarks(dc, RUN_CONTENT);
           return (
             `<span class="runcard runcard--mini" data-card-id="${esc(dc.instanceId)}" tabindex="0" ` +
-            `aria-label="${esc(`${card.name}, ${card.power} ${STAT_TERMS.power.name}, ${card.health} ${STAT_TERMS.health.name}, ${card.cost} ${STAT_TERMS.cost.name}${marks.length > 0 ? `, forged ${marks}` : ''}`)}">` +
+            `aria-label="${esc(`${card.name}, ${card.power} ${STAT_TERMS.power.name}, ${card.health} ${STAT_TERMS.health.name}, ${card.cost} ${STAT_TERMS.cost.name}${marks.length > 0 ? `, forged ${marks}` : ''}${sigils.length > 0 ? `, ${sigils}` : ''}`)}">` +
             `<span class="card__art">${compressedCard(cardEntityView(card), 52, screen.mount(), screen.hatch())}</span>` +
+            (sigils.length > 0 ? `<span class="runcard__sigil runcard__sigil--mini" aria-hidden="true">${iconSvg('sigil', { size: 11, decorative: true })}</span>` : '') +
             (marks.length > 0 ? `<span class="runcard__forged" aria-hidden="true">${esc(marks.replace(/ (Power|Health|Energy)/g, (_m, w: string) => w[0]!))}</span>` : '') +
             '</span>'
           );
@@ -461,21 +471,27 @@ export function startRunApp(): void {
         `<h2 class="run__title">${iconSvg(NODE_ICON[p.node.type], { size: 22, decorative: true })} ${esc(p.encounter.name)} beaten</h2>` +
         `<p class="run__lead">Won in ${f.round} round${f.round === 1 ? '' : 's'}. Your hero stands at <b>${p.healthAfter}</b> of ${s.hero.maxHealth} ${STAT_TERMS.health.name}.` +
         ` <b>+${p.goldAfter - s.gold} gold</b> — you now have ${p.goldAfter}.</p>` +
-        `<p>Take one card into your deck, or none:</p>` +
+        `<p>Take one ${p.offer.some((o) => o.kind === 'sigil') ? 'card into your deck, or the sigil for a card you already hold,' : 'card into your deck,'} or none:</p>` +
         `<div class="run__offer">${p.offer
-          .map((id, i) => cardButton(CARD_POOL.card(id), `data-run="reward" data-pick="${i}"`))
+          .map((o, i) => (o.kind === 'card' ? cardButton(CARD_POOL.card(o.cardId), `data-run="reward" data-pick="${i}"`) : sigilShelfButton(o.sigil, i)))
           .join('')}</div>` +
         `<p><button type="button" data-run="reward" data-pick="-1">Take nothing</button></p>`;
+    } else if (p.kind === 'sigil') {
+      html = heroSigilOfferHtml(p, s);
+    } else if (p.kind === 'attach') {
+      html = attachHtml(p, s, cardButton, (dc) => resolveDeckCard(CARD_POOL, dc));
     } else if (p.kind === 'forge') {
       const chosen = forgeIndex === null ? null : s.deck[forgeIndex] ?? null;
       const cards = s.deck
         .map((dc, i) => {
           const card = resolveDeckCard(CARD_POOL, dc);
           const marks = bonusMarks(dc);
+          const sigils = sigilMarks(dc, RUN_CONTENT);
           return cardButton(
             card,
             `data-run="forge-card" data-index="${i}"${i === forgeIndex ? ' aria-pressed="true"' : ' aria-pressed="false"'}`,
-            marks.length > 0 ? `<span class="runcard__forged">${esc(marks)}</span>` : '',
+            (sigils.length > 0 ? `<span class="runcard__sigil">${esc(sigils)}</span>` : '') +
+              (marks.length > 0 ? `<span class="runcard__forged">${esc(marks)}</span>` : ''),
           );
         })
         .join('');
@@ -671,6 +687,14 @@ export function startRunApp(): void {
     switch (act.dataset['run']) {
       case 'reward':
         ctl.pickReward(int('pick'));
+        afterChoice();
+        break;
+      case 'sigil':
+        ctl.pickSigil(int('pick'));
+        afterChoice();
+        break;
+      case 'attach':
+        ctl.attach(int('index'));
         afterChoice();
         break;
       case 'forge-card':

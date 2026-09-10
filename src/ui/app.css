@@ -350,6 +350,23 @@ button.is-on {
   color: #201a06;
 }
 
+/*
+ * A trait a sigil granted keeps the trait's icon - one idea, one shape - and
+ * wears a double frame in the sigil's own colour instead of the gold hairline,
+ * so a Relay that was attached reads apart from one that was printed at the
+ * same 11px. The words on the pip name the sigil first.
+ */
+.card__pips .pip--sigil {
+  border: 3px double var(--azure);
+  color: var(--azure);
+  background: rgba(38, 80, 143, 0.14);
+}
+
+[data-theme='dark'] .card__pips .pip--sigil {
+  border-color: #7fa8e8;
+  color: #7fa8e8;
+}
+
 .card__odds {
   position: absolute;
   left: 50%;
@@ -1310,6 +1327,15 @@ button.is-on {
   color: var(--ink-3);
 }
 
+/* The hero's sigils, one chip each, the seal in the sigil colour. */
+.hud__stat--sigil svg {
+  color: var(--azure);
+}
+
+[data-theme='dark'] .hud__stat--sigil svg {
+  color: #7fa8e8;
+}
+
 /* ---------- the run: layout ---------- */
 
 .run__body {
@@ -1749,6 +1775,94 @@ button.is-on {
 [data-theme='dark'] .runcard__forged {
   color: #7fa8e8;
   border-color: #7fa8e8;
+}
+
+/* ---------- sigils: the shelf, the attach screen, the deck badges ---------- */
+
+/* A card sigil on the shelf: card-shaped, a seal for art, the trait set in it. */
+.runcard--sigil {
+  border-style: double;
+  border-width: 3px;
+  border-color: var(--azure);
+}
+
+.runcard__seal {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 60px;
+  color: var(--azure);
+}
+
+.runcard__seal svg {
+  grid-area: 1 / 1;
+}
+
+.runcard__seal .runcard__seal-trait {
+  color: var(--gold);
+}
+
+[data-theme='light'] .runcard__seal .runcard__seal-trait {
+  color: #8a6707;
+}
+
+[data-theme='dark'] .runcard--sigil,
+[data-theme='dark'] .runcard__seal {
+  border-color: #7fa8e8;
+  color: #7fa8e8;
+}
+
+/* The sigil a deck card carries, named under it on the forge and attach screens. */
+.runcard__sigil {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 2px double var(--azure);
+  color: var(--azure);
+  font-size: var(--fs-micro);
+  font-weight: 800;
+}
+
+[data-theme='dark'] .runcard__sigil {
+  color: #7fa8e8;
+  border-color: #7fa8e8;
+}
+
+/* On the map's mini deck there is no room for a name: the seal alone, top right. */
+.runcard__sigil--mini {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.run__option--sigil b {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--azure);
+}
+
+[data-theme='dark'] .run__option--sigil b {
+  color: #7fa8e8;
+}
+
+.xp__rule--sigil svg,
+.xp__rule--sigil b {
+  color: var(--azure);
+}
+
+[data-theme='dark'] .xp__rule--sigil svg,
+[data-theme='dark'] .xp__rule--sigil b {
+  color: #7fa8e8;
 }
 
 /* The deck beside the map: every card at a glance, forged ones marked. */
