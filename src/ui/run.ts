@@ -52,7 +52,14 @@ import {
   restAmount,
   shopStock,
 } from '../run/nodes.ts';
-import { cloneRunState, fightSetupFor, replayRun, travelOptions } from '../run/run.ts';
+import {
+  DEFAULT_CLASS_ID,
+  classOf,
+  cloneRunState,
+  fightSetupFor,
+  replayRun,
+  travelOptions,
+} from '../run/run.ts';
 import {
   FORGE_MODES,
   type DeckCard,
@@ -138,6 +145,8 @@ export type NodeOutcome = {
 export type RunController = {
   readonly content: RunContent;
   readonly seed: number;
+  /** The class the run was started as. Fixed for the life of the run. */
+  readonly classId: string;
   /** The canonical state: `replayRun(content, log)`. Read it, never write it. */
   readonly state: RunState;
   /** The log so far. Complete records only; the node in progress is not in it. */
@@ -202,29 +211,55 @@ function diverged(what: string, promised: unknown, replayed: unknown): Error {
   );
 }
 
+export type RunControllerOptions = {
+  /** The class to start as. Ignored when resuming: the log carries its own. */
+  readonly classId?: string;
+  /** A saved run's log, replayed from the seed. */
+  readonly resume?: RunLog;
+};
+
 /**
- * Start a run, or resume one from its log.
+ * Start a run as a class, or resume one from its log.
  *
  * A resumed run is replayed from the seed through the same `replayRun` a
  * fresh one starts with, so a saved run is nothing but its choice list. What
  * a log cannot hold is the node in progress - a fight half fought is not in
  * it - so a resumed run stands on its last completed node, between nodes.
  * A log whose seed is not `seed`, or that does not replay, is refused with the
- * reason rather than half-applied.
+ * reason rather than half-applied. A log's class is the log's: a log written
+ * before classes existed has none and is the default class, as `replayRun`
+ * reads it, and `classId` is only for a fresh run - a saved run cannot be
+ * resumed as a class it was not started as, and asking is refused.
  */
-export function createRunController(content: RunContent, seed: number, resume?: RunLog): RunController {
+export function createRunController(
+  content: RunContent,
+  seed: number,
+  options: RunControllerOptions = {},
+): RunController {
   const nodes: NodeRecord[] = [];
+  const resume = options.resume;
+  let classId = options.classId ?? DEFAULT_CLASS_ID;
   if (resume !== undefined) {
     if (resume.seed !== seed) {
       throw new Error(
         `run: cannot resume a run seeded ${resume.seed} as seed ${seed}. A log replays only on its own seed.`,
       );
     }
+    const logged = resume.classId ?? DEFAULT_CLASS_ID;
+    if (options.classId !== undefined && options.classId !== logged) {
+      throw new Error(
+        `run: cannot resume a run started as the ${logged} as the ${options.classId}. A log replays ` +
+          'only as the class it was started as.',
+      );
+    }
+    classId = logged;
     for (const record of resume.nodes) nodes.push(record);
   }
+  // Refuse an unknown class here, by name, rather than three frames down.
+  classOf(content, classId);
   // The one path. Even the empty log goes through it, so the starting state is
   // the replay of nothing rather than a second construction of the same thing.
-  let state: RunState = replayRun(content, { seed, nodes });
+  let state: RunState = replayRun(content, { seed, classId, nodes });
   let phase: RunPhase = state.result === 'ongoing' ? { kind: 'travel' } : { kind: 'over' };
   let last: NodeOutcome | null = null;
 
@@ -255,7 +290,7 @@ export function createRunController(content: RunContent, seed: number, resume?: 
   ): void {
     const before = snapshotOf(state);
     const node = provisional;
-    const next = replayRun(content, { seed, nodes: [...nodes, provisional] });
+    const next = replayRun(content, { seed, classId, nodes: [...nodes, provisional] });
     verify(next);
 
     const record: NodeRecord = {
@@ -510,11 +545,12 @@ export function createRunController(content: RunContent, seed: number, resume?: 
   return {
     content,
     seed,
+    classId,
     get state() {
       return state;
     },
     get log(): RunLog {
-      return { seed, nodes: nodes.slice() };
+      return { seed, classId, nodes: nodes.slice() };
     },
     get phase() {
       return phase;

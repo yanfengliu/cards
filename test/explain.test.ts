@@ -48,6 +48,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { ENEMY_CARDS, PLAYER_CARDS, PLAYER_HERO } from '../src/content/cards.ts';
+import { CLASSES } from '../src/content/classes.ts';
 import { RELAY_POWER, WAKE_POWER, drain } from '../src/engine/resolver.ts';
 import { makeRng } from '../src/engine/rng.ts';
 import {
@@ -175,14 +176,18 @@ test('no explanation survives the trait it explains', () => {
   // trait from the engine's union makes `glossary.ts` stop compiling. This is
   // the runtime half - a trait still in the union but on no card in the pool is
   // a rule no player can meet, and a tooltip for it is a rule that does not
-  // exist as far as the game is concerned.
-  const used = new Set<string>(ALL_CARDS.flatMap((c) => [...c.traits]));
+  // exist as far as the game is concerned. A class hero's trait counts: a Mage
+  // player meets Scorch every turn, and no card carries it.
+  const used = new Set<string>([
+    ...ALL_CARDS.flatMap((c) => [...c.traits]),
+    ...CLASSES.flatMap((c) => [...(c.hero.traits ?? [])]),
+  ]);
   for (const trait of Object.keys(TRAIT_TERMS)) {
     assert.ok(
       used.has(trait),
-      `TRAIT_TERMS explains "${trait}", but no card in PLAYER_CARDS or ENEMY_CARDS has it. ` +
-        `Either the trait was removed and its explanation was left behind, or a card that ` +
-        `carries it is missing. Delete the entry or add the card.`,
+      `TRAIT_TERMS explains "${trait}", but no card in PLAYER_CARDS or ENEMY_CARDS and no class ` +
+        `hero has it. Either the trait was removed and its explanation was left behind, or a ` +
+        `card that carries it is missing. Delete the entry or add the card.`,
     );
   }
 });

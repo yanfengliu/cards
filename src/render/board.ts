@@ -23,6 +23,7 @@ import { type EntityView, power } from './view.ts';
 import { pct } from './odds.ts';
 import { iconSvg } from './icons.ts';
 import { STAT_TERMS, TRAIT_TERMS } from './glossary.ts';
+import { classTermFor } from './class-terms.ts';
 
 export const MIN_CARD_W = 44;
 export const MAX_CARD_W = 92;
@@ -283,7 +284,9 @@ function buildHero(): HTMLElement {
   stats.append(el('span', 'hero__pw'), el('span', 'hero__hp'));
   const bar = el('div', 'hero__bar');
   bar.append(el('i', ''));
-  node.append(crest, name, stats, bar, el('div', 'card__odds'));
+  // The class's trait, as the same pip strip a unit wears: a Ranger's Volley
+  // and a Mage's Scorch are rules the plate has to show, not only the panel.
+  node.append(crest, name, stats, bar, el('div', 'card__pips hero__pips'), el('div', 'card__odds'));
   node.tabIndex = 0;
   return node;
 }
@@ -445,8 +448,19 @@ function paintItems(
         hero.classList.toggle('is-dead', !e.alive);
         hero.classList.toggle('is-buffed', e.bonusPower > 0);
         hero.classList.toggle('hero--enemy', e.side === 'enemy');
-        (hero.querySelector('.hero__crest') as HTMLElement).textContent = '♗';
+        // The crest is the class's icon when the hero is a class - the name
+        // under it is the class's name, so the plate says its class twice, in
+        // shape and in text - and the old bishop for any hero that is not one.
+        const cls = classTermFor(e.name);
+        const crest = hero.querySelector('.hero__crest') as HTMLElement;
+        const crestSig = cls === null ? 'bishop' : cls.id;
+        if (crest.dataset['sig'] !== crestSig) {
+          crest.dataset['sig'] = crestSig;
+          if (cls === null) crest.textContent = '♗';
+          else crest.innerHTML = iconSvg(cls.icon, { size: 18, decorative: true });
+        }
         (hero.querySelector('.hero__name') as HTMLElement).textContent = e.name;
+        paintTraits(hero.querySelector('.hero__pips') as HTMLElement, e.traits, 76);
         (hero.querySelector('.hero__pw') as HTMLElement).textContent = String(power(e));
         (hero.querySelector('.hero__hp') as HTMLElement).textContent = String(Math.max(0, e.health));
         const frac = Math.max(0, e.health) / Math.max(1, e.maxHealth);
@@ -460,9 +474,11 @@ function paintItems(
           [
             e.name,
             e.side === 'player' ? 'your hero' : 'enemy hero',
+            ...(cls === null ? [] : [`the ${cls.name} class`]),
             `${power(e)} power`,
             `${Math.max(0, e.health)} of ${e.maxHealth} health`,
             ...(e.armour > 0 ? [`${e.armour} armour`] : []),
+            ...traitPipsOf(e.traits).map((p) => p.name),
             'acts last on its line',
           ].join(', '),
         );

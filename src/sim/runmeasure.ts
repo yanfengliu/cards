@@ -22,6 +22,16 @@
 // content, and it ends in a spread of places", which is what makes the run
 // measurable at all. They do not say the run is fun, well paced, or thirty
 // minutes long.
+//
+// **Every table is per class.** A run is started as a class - Knight, Ranger
+// or Mage - and the class sets the hero, the starting deck and the pool, so a
+// number pooled across classes would be a number about a mixture nobody
+// plays. The same seeds are run for every class, and the maps and fight seeds
+// are the seed's alone, so the three classes on one seed walk the same acts:
+// a difference between two classes' rows is a difference in what they brought.
+// The owner's ruling of 2026-09-09 stands over the numbers: three classes
+// that play differently is the goal, three that win equally often is not, and
+// nothing here is a target. `--class <id>` restricts the report to one.
 
 import { pathToFileURL } from 'node:url';
 
@@ -33,7 +43,7 @@ import { makeDeckCard, runPool } from '../run/deck.ts';
 import { hashMaps, hashRun } from '../run/hash.ts';
 import { branchingTypes, mapProblems } from '../run/map.ts';
 import { drawDistinctCards, fightSeedFor } from '../run/nodes.ts';
-import { replayRun, runRun, startRun } from '../run/run.ts';
+import { DEFAULT_CLASS_ID, classOf, contentForClass, replayRun, runRun, startRun } from '../run/run.ts';
 import type {
   NodeType,
   RunContent,
@@ -81,6 +91,7 @@ export function pairedWinGap(
 
 export type RunOutcome = {
   readonly seed: number;
+  readonly classId: string;
   readonly result: RunResult;
   readonly ending: RunEnding | null;
   /** Bosses beaten. 3 is a won run. */
@@ -100,6 +111,7 @@ export type RunOutcome = {
 
 export type RunArm = {
   readonly name: string;
+  readonly classId: string;
   readonly route: RouteStyle;
   readonly placement: PlacementStyle;
   readonly outcomes: RunOutcome[];
@@ -108,6 +120,7 @@ export type RunArm = {
 function outcomeOf(content: RunContent, seed: number, run: RunState, log: RunLog): RunOutcome {
   return {
     seed,
+    classId: run.classId,
     result: run.result,
     ending: run.ending,
     actsCleared: Math.min(run.act, content.acts.length),
@@ -130,14 +143,15 @@ export function runArm(
   placement: PlacementStyle,
   seeds: readonly number[],
   content: RunContent = RUN_CONTENT,
+  classId: string = DEFAULT_CLASS_ID,
 ): RunArm {
   const outcomes: RunOutcome[] = [];
   for (const seed of seeds) {
     const agent = makeRunAgent({ route, placement, seed });
-    const { run, log } = runRun(content, seed, agent);
+    const { run, log } = runRun(content, seed, agent, classId);
     outcomes.push(outcomeOf(content, seed, run, log));
   }
-  return { name, route, placement, outcomes };
+  return { name, classId, route, placement, outcomes };
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +303,7 @@ export function checkRuns(
   route: RouteStyle,
   placement: PlacementStyle,
   content: RunContent = RUN_CONTENT,
+  classId: string = DEFAULT_CLASS_ID,
 ): RunInstrument {
   const detail: string[] = [];
   const hashes = new Set<string>();
@@ -301,23 +316,30 @@ export function checkRuns(
   let sigilsGranted = 0;
 
   for (const seed of seeds) {
-    const first = runRun(content, seed, makeRunAgent({ route, placement, seed }));
+    const first = runRun(content, seed, makeRunAgent({ route, placement, seed }), classId);
     const firstHash = hashRun(first.run);
     hashes.add(firstHash);
     sigilsGranted += first.run.sigils.length;
 
     for (let t = 1; t < trials; t++) {
-      const again = runRun(content, seed, makeRunAgent({ route, placement, seed }));
+      const again = runRun(content, seed, makeRunAgent({ route, placement, seed }), classId);
       if (hashRun(again.run) !== firstHash) {
         determinismStable = false;
-        detail.push(`seed ${seed}: rerun ${t} produced a different final run hash`);
+        detail.push(`${classId} seed ${seed}: rerun ${t} produced a different final run hash`);
       }
     }
 
     const replayed = replayRun(content, first.log);
     if (hashRun(replayed) !== firstHash) {
       replayStable = false;
-      detail.push(`seed ${seed}: replay from the choice list diverged from the live run`);
+      detail.push(`${classId} seed ${seed}: replay from the choice list diverged from the live run`);
+    }
+    if (replayed.classId !== classId || first.log.classId !== classId) {
+      replayStable = false;
+      detail.push(
+        `${classId} seed ${seed}: the log recorded class "${first.log.classId}" and the replay ` +
+          `came back as "${replayed.classId}"`,
+      );
     }
 
     for (const map of first.run.maps) {
@@ -410,12 +432,13 @@ export function checkStreamSeparation(
 export function checkRouteAgreement(
   seeds: readonly number[],
   content: RunContent = RUN_CONTENT,
+  classId: string = DEFAULT_CLASS_ID,
 ): { shared: number; disagreed: number } {
   let shared = 0;
   let disagreed = 0;
   for (const seed of seeds) {
-    const a = runRun(content, seed, makeRunAgent({ route: 'greedy', placement: 'right', seed }));
-    const b = runRun(content, seed, makeRunAgent({ route: 'random', placement: 'right', seed }));
+    const a = runRun(content, seed, makeRunAgent({ route: 'greedy', placement: 'right', seed }), classId);
+    const b = runRun(content, seed, makeRunAgent({ route: 'random', placement: 'right', seed }), classId);
     const seen = new Map<string, number>();
     for (const rec of a.log.nodes) {
       if (rec.fightSeed !== null) seen.set(`${rec.act}:${rec.nodeId}`, rec.fightSeed);
@@ -457,10 +480,15 @@ export type EncounterReport = {
  * script that no longer exists. It is the instrument the act curve was tuned
  * on, and it is where to look first when a content change moves the run.
  *
+ * It reads `content.hero`, `content.startingDeck` and `content.rewards`, so it
+ * is per class by construction: hand it `contentForClass(content, id)` and it
+ * calibrates that class's hero and deck. The numbers in `content.ts`'s
+ * comments are the Knight's.
+ *
  * The bound: an encounter in isolation is not an encounter in a run. A run
  * arrives hurt, and with whatever deck its own rewards gave it, so these are
- * upper bounds on the same fight in context. `deckSizeFor` is a stand-in for
- * the real distribution and is stated rather than hidden.
+ * upper bounds on the same fight in context. `calibrationDeck` is a stand-in
+ * for the real distribution and is stated rather than hidden.
  */
 export function calibrateEncounters(
   seeds: readonly number[],
@@ -597,38 +625,52 @@ function has(name: string): boolean {
 
 const pct = (x: number): string => `${(100 * x).toFixed(2)}%`;
 
-function main(): void {
-  const n = Number.parseInt(arg('seeds', '400'), 10);
-  const first = Number.parseInt(arg('first-seed', '1'), 10);
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new Error(`--seeds must be a positive integer, got "${arg('seeds', '400')}"`);
+/** The classes the report covers: `--class <id>`, or every class the content lists. */
+function classesToReport(content: RunContent): string[] {
+  const wanted = process.argv.includes('--class') ? arg('class', '') : '';
+  if (wanted.length > 0) {
+    classOf(content, wanted);
+    return [wanted];
   }
-  const seeds: number[] = [];
-  for (let i = 0; i < n; i++) seeds.push(first + i);
+  const listed = content.classes;
+  return listed === undefined || listed.length === 0 ? [DEFAULT_CLASS_ID] : listed.map((c) => c.id);
+}
 
-  // Wall clock only for the elapsed line. Nothing in the run reads a clock.
-  const started = Number(process.hrtime.bigint() / 1000000n);
-  const content = RUN_CONTENT;
+type ClassReport = {
+  readonly classId: string;
+  readonly name: string;
+  readonly arms: RunArm[];
+  readonly strongest: RunArm;
+  readonly instrument: RunInstrument;
+  readonly agreement: { shared: number; disagreed: number };
+  readonly degenerate: string[];
+};
+
+function reportClass(
+  content: RunContent,
+  classId: string,
+  seeds: readonly number[],
+  checkSeeds: readonly number[],
+  showEncounters: boolean,
+): ClassReport {
+  const cls = classOf(content, classId);
+  const active = contentForClass(content, classId);
   const acts = content.acts.length;
+  const n = seeds.length;
 
-  console.log('# How far does a run get, and where does it stop?');
+  console.log(`# ${cls.name}`);
   console.log('');
-  console.log(`Seeds: ${n}, contiguous, ${first}..${first + n - 1}. Every arm ran every seed.`);
   console.log(
-    `Content: ${acts} acts, ${content.mapShape.rows.length} rows an act, ` +
-      `hero ${content.hero.health} Health, ${content.startingDeck.length}-card starting deck, ` +
-      `max ${content.maxRounds} rounds a fight.`,
-  );
-  console.log(
-    'A route style and a placement style are separate dials; the routing comparison holds ' +
-      'placement fixed.',
+    `Hero ${cls.hero.health} Health, ${cls.hero.power} Power` +
+      `${(cls.hero.traits ?? []).length > 0 ? ` with ${(cls.hero.traits ?? []).join(', ')}` : ''}; ` +
+      `${cls.startingDeck.length}-card starting deck; ${cls.rewards.length}-card pool.`,
   );
   console.log('');
 
-  const armGL = runArm('greedy route / search placement', 'greedy', 'lookahead', seeds, content);
-  const armRL = runArm('random route / search placement', 'random', 'lookahead', seeds, content);
-  const armGR = runArm('greedy route / right placement', 'greedy', 'right', seeds, content);
-  const armRR = runArm('random route / right placement', 'random', 'right', seeds, content);
+  const armGL = runArm('greedy route / search placement', 'greedy', 'lookahead', seeds, content, classId);
+  const armRL = runArm('random route / search placement', 'random', 'lookahead', seeds, content, classId);
+  const armGR = runArm('greedy route / right placement', 'greedy', 'right', seeds, content, classId);
+  const armRR = runArm('random route / right placement', 'random', 'right', seeds, content, classId);
   const arms = [armGL, armRL, armGR, armRR];
 
   console.log('| arm | runs won | win rate | 95% CI | mean acts cleared | mean fights | mean rounds/fight | mean end deck |');
@@ -652,7 +694,7 @@ function main(): void {
   }
   console.log('');
 
-  console.log('## Win rate per act');
+  console.log(`## ${cls.name}: win rate per act`);
   console.log('');
   console.log('Conditioned on entering the act, so a spike is visible against the population that met it.');
   console.log('');
@@ -673,7 +715,7 @@ function main(): void {
   }
   console.log('');
 
-  console.log('## Where runs end');
+  console.log(`## ${cls.name}: where runs end`);
   console.log('');
   console.log(`Arm: ${armGL.name}. One row per (act, cause, node type).`);
   console.log('');
@@ -686,7 +728,7 @@ function main(): void {
   }
   console.log('');
 
-  console.log('## Run length in fights');
+  console.log(`## ${cls.name}: run length in fights`);
   console.log('');
   console.log('| arm | mean fights | median | p10 | p90 | mean nodes | mean rounds/fight | mean fights in a won run |');
   console.log('|---|---|---|---|---|---|---|---|');
@@ -701,14 +743,14 @@ function main(): void {
   console.log('');
   const wonLen = lengthReport(armGL, true);
   console.log(
-    `A won run at the strongest arm is ${wonLen.meanFightsWon.toFixed(1)} fights of ` +
+    `A won ${cls.name} run at the strongest arm is ${wonLen.meanFightsWon.toFixed(1)} fights of ` +
       `${wonLen.meanRoundsPerFight.toFixed(1)} rounds across ` +
       `${(acts * content.mapShape.rows.length).toFixed(0)} nodes. Minutes are not measurable ` +
       `headlessly; this is the fight count the 30-minute target has to fit into.`,
   );
   console.log('');
 
-  console.log('## Does the route matter?');
+  console.log(`## ${cls.name}: does the route matter?`);
   console.log('');
   console.log('Paired, same seeds, placement held fixed. A bot comparison, so it bounds itself.');
   console.log('');
@@ -729,18 +771,18 @@ function main(): void {
   );
   console.log('');
 
-  if (has('encounters')) {
+  if (showEncounters) {
     const encSeeds = seeds.slice(0, Math.min(200, n));
-    console.log(`## Every shipped encounter on its own (${encSeeds.length} seeds each)`);
+    console.log(`## ${cls.name}: every shipped encounter on its own (${encSeeds.length} seeds each)`);
     console.log('');
     console.log(
-      'The placement bot at full Health, against the deck an act is expected to hold. An ' +
-        'encounter in isolation is an upper bound on the same fight in a run, which arrives hurt.',
+      `The placement bot at full Health as the ${cls.name}, against the deck an act is expected to ` +
+        'hold. An encounter in isolation is an upper bound on the same fight in a run, which arrives hurt.',
     );
     console.log('');
     console.log('| act | kind | encounter | deck | win rate | timeouts | mean rounds | Health lost on a win |');
     console.log('|---|---|---|---|---|---|---|---|');
-    for (const r of calibrateEncounters(encSeeds, content)) {
+    for (const r of calibrateEncounters(encSeeds, active)) {
       console.log(
         `| ${r.act + 1} | ${r.kind} | ${r.name} | ${r.deckSize} | ${pct(r.winRate)} | ` +
           `${r.timeouts} | ${r.meanRounds.toFixed(1)} | ${r.healthLostOnWin.toFixed(1)} |`,
@@ -749,49 +791,125 @@ function main(): void {
     console.log('');
   }
 
+  return {
+    classId,
+    name: cls.name,
+    arms,
+    strongest: armGL,
+    instrument: checkRuns(checkSeeds, 3, 'greedy', 'lookahead', content, classId),
+    agreement: checkRouteAgreement(checkSeeds, content, classId),
+    degenerate: degeneracy(armGL),
+  };
+}
+
+function main(): void {
+  const n = Number.parseInt(arg('seeds', '400'), 10);
+  const first = Number.parseInt(arg('first-seed', '1'), 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`--seeds must be a positive integer, got "${arg('seeds', '400')}"`);
+  }
+  const seeds: number[] = [];
+  for (let i = 0; i < n; i++) seeds.push(first + i);
+
+  // Wall clock only for the elapsed line. Nothing in the run reads a clock.
+  const started = Number(process.hrtime.bigint() / 1000000n);
+  const content = RUN_CONTENT;
+  const acts = content.acts.length;
+  const classIds = classesToReport(content);
   const checkSeeds = seeds.slice(0, Math.min(Number.parseInt(arg('check-seeds', '30'), 10), n));
-  const inst = checkRuns(checkSeeds, 3, 'greedy', 'lookahead', content);
-  const agree = checkRouteAgreement(checkSeeds, content);
+
+  console.log('# How far does a run get, and where does it stop?');
+  console.log('');
+  console.log(`Seeds: ${n}, contiguous, ${first}..${first + n - 1}. Every arm of every class ran every seed.`);
+  console.log(
+    `Content: ${acts} acts, ${content.mapShape.rows.length} rows an act, max ${content.maxRounds} ` +
+      `rounds a fight, ${classIds.length} class${classIds.length === 1 ? '' : 'es'}: ${classIds.join(', ')}.`,
+  );
+  console.log(
+    'A route style and a placement style are separate dials; the routing comparison holds ' +
+      'placement fixed. The maps and the fight seeds are the seed\'s alone, so every class on one ' +
+      'seed walks the same acts and meets the same fights: a difference between two classes is a ' +
+      'difference in what they brought. The numbers are claims about the bot, not about a person, ' +
+      'and none of them is a target.',
+  );
+  console.log('');
+
+  const reports = classIds.map((id) => reportClass(content, id, seeds, checkSeeds, has('encounters')));
+
+  if (reports.length > 1) {
+    console.log('# The three side by side');
+    console.log('');
+    console.log('Strongest arm (greedy route / search placement), same seeds for every class.');
+    console.log('');
+    console.log('| class | runs won | win rate | 95% CI | act 1 | act 2 | act 3 | commonest end |');
+    console.log('|---|---|---|---|---|---|---|---|');
+    for (const r of reports) {
+      const a = r.strongest;
+      const wins = a.outcomes.filter((o) => o.result === 'won').length;
+      const [lo, hi] = wilson(wins, a.outcomes.length);
+      const prog = actProgress(a, acts);
+      const ends = endings(a).sort((x, y) => y.count - x.count);
+      const top = ends[0];
+      console.log(
+        `| ${r.name} | ${wins}/${n} | ${pct(wins / n)} | ${pct(lo)}..${pct(hi)} | ` +
+          prog.map((p) => pct(p.rate)).join(' | ') +
+          ` | ${top === undefined ? '-' : `act ${top.act + 1} ${top.cause} at a ${top.nodeType} (${pct(top.count / n)})`} |`,
+      );
+    }
+    console.log('');
+  }
+
+  // The checks that do not depend on the class: the map is the seed's alone.
+  const shared = reports[0]!.instrument;
+  const streamSeparation = checkStreamSeparation(checkSeeds, content);
+  let sigilsGranted = 0;
+  for (const r of reports) sigilsGranted += r.instrument.sigilsGranted;
 
   console.log('## Instrument checks');
   console.log('');
-  console.log(`- Seed population: ${n} contiguous seeds ${first}..${first + n - 1}, every arm.`);
+  console.log(`- Seed population: ${n} contiguous seeds ${first}..${first + n - 1}, every arm, every class.`);
+  for (const r of reports) {
+    const inst = r.instrument;
+    console.log(
+      `- ${r.name} run determinism: ${inst.determinismStable ? 'PASS' : 'FAIL'} over ${checkSeeds.length} ` +
+        `seeds x 3 runs; replay from the choice list, class included, ${inst.replayStable ? 'PASS' : 'FAIL'}; ` +
+        `${inst.distinctHashes} distinct final run hashes across those seeds (a constant hash ` +
+        `would pass determinism and mean nothing). Two differently-routed runs agreed on ` +
+        `${r.agreement.shared - r.agreement.disagreed}/${r.agreement.shared} shared fight seeds.`,
+    );
+  }
   console.log(
-    `- Run determinism: ${inst.determinismStable ? 'PASS' : 'FAIL'} over ${checkSeeds.length} ` +
-      `seeds x 3 runs; replay from the choice list ${inst.replayStable ? 'PASS' : 'FAIL'}; ` +
-      `${inst.distinctHashes} distinct final run hashes across those seeds (a constant hash ` +
-      `would pass determinism and mean nothing).`,
-  );
-  console.log(
-    `- Map structure: ${inst.mapProblems.length === 0 ? 'PASS' : 'FAIL'} over ${inst.mapsChecked} ` +
+    `- Map structure: ${shared.mapProblems.length === 0 ? 'PASS' : 'FAIL'} over ${shared.mapsChecked} ` +
       `act maps - reachable both ways, planar, one type per node per row, one boss last.`,
   );
   console.log(
-    `- The map is a map: ${inst.actsWithNoBranching === 0 ? 'PASS' : 'FAIL'}; ` +
-      `${inst.meanBranchingTypes.toFixed(2)} of 7 node types are decided by the route on an ` +
-      `average act map, and ${inst.actsWithNoBranching} map(s) had none.`,
+    `- The map is a map: ${shared.actsWithNoBranching === 0 ? 'PASS' : 'FAIL'}; ` +
+      `${shared.meanBranchingTypes.toFixed(2)} of 7 node types are decided by the route on an ` +
+      `average act map, and ${shared.actsWithNoBranching} map(s) had none.`,
   );
   console.log(
-    `- Stream separation: ${inst.streamSeparation.length === 0 ? 'PASS' : 'FAIL'}; burning 37 ` +
+    `- Stream separation: ${streamSeparation.length === 0 ? 'PASS' : 'FAIL'}; burning 37 ` +
       `draws on the run generator moved ` +
-      `${inst.streamSeparation.length === 0 ? 'no fight seed and no map' : `${inst.streamSeparation.length} fight seed(s) or map(s)`}` +
-      `. Two differently-routed runs agreed on ` +
-      `${agree.shared - agree.disagreed}/${agree.shared} shared fight seeds.`,
+      `${streamSeparation.length === 0 ? 'no fight seed and no map' : `${streamSeparation.length} fight seed(s) or map(s)`}.`,
   );
   console.log(
-    `- Sigils stay out of scope: ${inst.sigilsGranted === 0 ? 'PASS' : 'FAIL'}; ` +
-      `${inst.sigilsGranted} granted across ${checkSeeds.length} runs.`,
+    `- Sigils stay out of scope: ${sigilsGranted === 0 ? 'PASS' : 'FAIL'}; ` +
+      `${sigilsGranted} granted across ${checkSeeds.length * reports.length} runs.`,
   );
-  const degen = degeneracy(armGL);
-  console.log(
-    `- The instrument can see a difference: ${degen.length === 0 ? 'PASS' : 'FAIL'}; the ` +
-      `strongest arm won ${armGL.outcomes.filter((o) => o.result === 'won').length}/${n} and ` +
-      `runs ended after ${new Set(armGL.outcomes.map((o) => o.actsCleared)).size} distinct act ` +
-      `counts. ${has('verify') ? 'Enforced: --verify exits non-zero.' : 'Reported only; --verify enforces it.'}`,
-  );
-  for (const d of inst.detail.slice(0, 5)) console.log(`  - ${d}`);
-  for (const p of inst.mapProblems.slice(0, 5)) console.log(`  - ${p}`);
-  for (const p of inst.streamSeparation.slice(0, 5)) console.log(`  - ${p}`);
+  for (const r of reports) {
+    const a = r.strongest;
+    console.log(
+      `- The instrument can see a difference for the ${r.name}: ${r.degenerate.length === 0 ? 'PASS' : 'FAIL'}; the ` +
+        `strongest arm won ${a.outcomes.filter((o) => o.result === 'won').length}/${n} and ` +
+        `runs ended after ${new Set(a.outcomes.map((o) => o.actsCleared)).size} distinct act ` +
+        `counts. ${has('verify') ? 'Enforced: --verify exits non-zero.' : 'Reported only; --verify enforces it.'}`,
+    );
+  }
+  for (const r of reports) {
+    for (const d of r.instrument.detail.slice(0, 5)) console.log(`  - ${d}`);
+  }
+  for (const p of shared.mapProblems.slice(0, 5)) console.log(`  - ${p}`);
+  for (const p of streamSeparation.slice(0, 5)) console.log(`  - ${p}`);
 
   const elapsed = Number(process.hrtime.bigint() / 1000000n) - started;
   console.log('');
@@ -801,59 +919,68 @@ function main(): void {
     // Bound -- what a green run here does and does not prove:
     //
     //   Proves  that over THIS seed window, with THESE agents and THIS content,
-    //           a whole run is a pure function of its seed and its choice list;
-    //           that the run generator cannot reach a fight; that every act map
-    //           is structurally sound and offers routing choices that change
-    //           what a path contains; and that the outcome distribution is not
-    //           a fixed point.
-    //   Bound   to the shipped `RUN_CONTENT`. Nothing here says another content
-    //           set generates sound maps, only that this one does.
+    //           a whole run of EACH class is a pure function of its seed, its
+    //           class and its choice list, and that its log carries the class
+    //           it was started as; that the run generator cannot reach a
+    //           fight; that every act map is structurally sound and offers
+    //           routing choices that change what a path contains; and that
+    //           each class's outcome distribution is not a fixed point.
+    //   Bound   to the shipped `RUN_CONTENT` and its listed classes. Nothing
+    //           here says another content set generates sound maps, only that
+    //           this one does.
     //   Bound   to bots. Every win rate printed above is evidence about the
     //           router and the placement bot, not about a person, and none of
-    //           them is gated for that reason.
-    //   Misses  a balance drift that keeps the run winnable and losable. This
-    //           gate catches a run that has become a fixed point, not one that
-    //           has quietly got harder; the printed tables are for that.
+    //           them is gated for that reason - including any difference
+    //           between two classes, which is deliberately not a band either:
+    //           three classes that win equally often is not the goal.
+    //   Misses  a balance drift that keeps a class winnable and losable. This
+    //           gate catches a class that has become a fixed point, not one
+    //           that has quietly got harder; the printed tables are for that.
     const failures: string[] = [];
-    if (!inst.determinismStable) failures.push('run determinism broke');
-    if (!inst.replayStable) failures.push('a run did not replay from its own choice list');
-    if (inst.distinctHashes <= 1) {
-      failures.push(
-        `only ${inst.distinctHashes} distinct run hash across ${checkSeeds.length} seeds; a ` +
-          `constant hash passes determinism and measures nothing`,
-      );
+    for (const r of reports) {
+      const inst = r.instrument;
+      if (!inst.determinismStable) failures.push(`${r.name}: run determinism broke`);
+      if (!inst.replayStable) {
+        failures.push(`${r.name}: a run did not replay from its own choice list and class`);
+      }
+      if (inst.distinctHashes <= 1) {
+        failures.push(
+          `${r.name}: only ${inst.distinctHashes} distinct run hash across ${checkSeeds.length} seeds; a ` +
+            `constant hash passes determinism and measures nothing`,
+        );
+      }
+      if (r.agreement.shared === 0) {
+        failures.push(
+          `${r.name}: no two differently-routed runs shared a fight node, so the route-agreement ` +
+            'check was vacuous and cannot be reported as a pass',
+        );
+      }
+      if (r.agreement.disagreed > 0) {
+        failures.push(
+          `${r.name}: ${r.agreement.disagreed}/${r.agreement.shared} shared fight nodes were seeded ` +
+            'differently by two routes through the same seed',
+        );
+      }
+      for (const d of r.degenerate) failures.push(`${r.name}: ${d}`);
     }
-    if (inst.mapProblems.length > 0) {
-      failures.push(`${inst.mapProblems.length} map structure problem(s): ${inst.mapProblems[0]}`);
+    if (shared.mapProblems.length > 0) {
+      failures.push(`${shared.mapProblems.length} map structure problem(s): ${shared.mapProblems[0]}`);
     }
-    if (inst.actsWithNoBranching > 0) {
+    if (shared.actsWithNoBranching > 0) {
       failures.push(
-        `${inst.actsWithNoBranching} act map(s) where every path carries the same node types - ` +
+        `${shared.actsWithNoBranching} act map(s) where every path carries the same node types - ` +
           `a map where every path is equivalent is not a map`,
       );
     }
-    if (inst.streamSeparation.length > 0) {
-      failures.push(`stream separation broke: ${inst.streamSeparation[0]}`);
+    if (streamSeparation.length > 0) {
+      failures.push(`stream separation broke: ${streamSeparation[0]}`);
     }
-    if (agree.shared === 0) {
+    if (sigilsGranted > 0) {
       failures.push(
-        'no two differently-routed runs shared a fight node, so the route-agreement check was ' +
-          'vacuous and cannot be reported as a pass',
-      );
-    }
-    if (agree.disagreed > 0) {
-      failures.push(
-        `${agree.disagreed}/${agree.shared} shared fight nodes were seeded differently by two ` +
-          `routes through the same seed`,
-      );
-    }
-    if (inst.sigilsGranted > 0) {
-      failures.push(
-        `${inst.sigilsGranted} sigil(s) were granted; sigils are out of scope for this unit and ` +
+        `${sigilsGranted} sigil(s) were granted; sigils are out of scope for this unit and ` +
           `the seam must stay inert until the unit that owns them lands`,
       );
     }
-    for (const d of degen) failures.push(d);
 
     if (failures.length > 0) {
       console.error('');

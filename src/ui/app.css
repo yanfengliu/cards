@@ -596,6 +596,22 @@ button.is-on {
   filter: grayscale(1);
 }
 
+/* The crest is the class's icon, drawn in code like every other icon. */
+.hero__crest svg {
+  display: block;
+}
+
+/* The class's trait, as the pip strip a unit wears. Absent when there is none,
+   so a Knight's plate is exactly the plate it was. */
+.hero__pips {
+  height: auto;
+  min-height: 0;
+}
+
+.hero__pips:empty {
+  display: none;
+}
+
 .hero .card__odds {
   bottom: -9px;
 }
@@ -903,6 +919,12 @@ button.is-on {
   background: var(--azure);
   border-radius: 999px;
   padding: 2px 7px;
+}
+
+/* Spell damage - a Scorch - lands on every unit at once, in the flame's colour. */
+.fx--float.is-spell {
+  color: #f2a53a;
+  text-shadow: 0 0 6px rgba(242, 165, 58, 0.55);
 }
 
 .fx--float.is-death {
@@ -1816,6 +1838,101 @@ button.is-on {
 .run__mode:hover:not(:disabled),
 .run__option:hover:not(:disabled) {
   border-color: var(--gold);
+}
+
+/* ---------- the run: the class pick ---------- */
+
+.classpick {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--sp-3);
+  margin: 6px 0 4px;
+}
+
+.classcard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sp-3);
+  background: var(--panel-2);
+  border: 2px solid var(--rule);
+  border-radius: var(--radius);
+  transition: border-color 130ms ease, box-shadow 130ms ease;
+}
+
+.classcard:hover,
+.classcard:focus-within {
+  border-color: var(--gold);
+  box-shadow: var(--shadow-lift);
+}
+
+.classcard__head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.classcard__crest {
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  border: 2px solid var(--gold);
+  color: var(--gold);
+  background: var(--panel);
+}
+
+[data-theme='light'] .classcard__crest {
+  color: #8a6707;
+}
+
+.classcard__name {
+  font-size: var(--fs-title);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.classcard__hero {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+
+.classcard__swing,
+.classcard__pool {
+  margin: 0 0 6px;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+
+.classcard .run__h {
+  margin-top: 4px;
+}
+
+.classcard__deck {
+  margin-bottom: 8px;
+}
+
+.classcard__count {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+
+.classcard__poollist {
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
+.classcard__act {
+  margin: auto 0 0;
 }
 
 /* ---------- the run: the end ---------- */

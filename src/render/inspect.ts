@@ -33,6 +33,7 @@
  */
 
 import type { Trait } from '../engine/state.ts';
+import { classTermFor } from './class-terms.ts';
 import { type EntityView, power } from './view.ts';
 import { type CardView, renderCard } from './heraldry/card.ts';
 import { parseBlazon } from './heraldry/blazon.ts';
@@ -179,14 +180,24 @@ export function explainCard(e: EntityView, card: CardView, ctx: InspectContext):
       ),
     );
   }
-  for (const t of e.traits) rules.push(traitRule(t));
-  if (e.traits.length === 0) {
+  // A hero that is a class gets its class as the one rule row, in place of the
+  // trait rows: the class sentence already says what the hero's trait does,
+  // written from the hero's own printed Power, and a second row saying it
+  // again would cost 54px the panel does not have. Everything else - a unit,
+  // or a hero that is not a class - lists its traits as before.
+  const cls = e.isHero ? classTermFor(e.name) : null;
+  if (cls !== null) {
+    rules.push(rule(cls.icon, cls.name, cls.swing(e.basePower), 'xp__rule--class'));
+  } else {
+    for (const t of e.traits) rules.push(traitRule(t));
+  }
+  if (cls === null && e.traits.length === 0) {
     rules.push(
       rule(
         'blank',
         'No trait',
         e.isHero
-          ? 'Heroes carry no trait. Yours acts after every unit on your line.'
+          ? 'This hero carries no trait. It acts after every unit on its line.'
           : 'Nothing triggers off this one. Where it stands still matters — it changes who the enemy can hit.',
       ),
     );
@@ -232,7 +243,11 @@ export function explainCard(e: EntityView, card: CardView, ctx: InspectContext):
     `<span class="xp__name">${esc(e.name)}</span>` +
     `<span class="xp__kind" title="${esc(`${tribe.name}. ${tribe.line}`)}">` +
     iconSvg(tribe.icon, { size: 12, decorative: true }) +
-    `${esc(e.isHero ? (e.side === 'player' ? 'Your hero' : 'Enemy hero') : `${tribe.name} unit`)}</span>` +
+    `${esc(
+      e.isHero
+        ? `${e.side === 'player' ? 'Your hero' : 'Enemy hero'}${cls === null ? '' : ` · ${cls.name}`}`
+        : `${tribe.name} unit`,
+    )}</span>` +
     '</div>';
 
   return (

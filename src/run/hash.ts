@@ -5,9 +5,15 @@
 // while disagreeing on the run generator's position has not reproduced the run,
 // it has coincided with it. So the digest carries the generator state and draw
 // count, the deck instance by instance with its permanent upgrades, the map
-// every act was routed through, and the sigil list - which is empty in every
-// run this unit can produce, and is in the digest so that stops being true
-// loudly rather than quietly the day sigils land.
+// every act was routed through, the class the run was started as, and the
+// sigil list - which is empty in every run this unit can produce, and is in
+// the digest so that stops being true loudly rather than quietly the day
+// sigils land.
+//
+// The class line means no run hash recorded before classes existed
+// reproduces, and that is deliberate: a run's class is never absent, so there
+// is no "nothing worn" case to leave the line off for, as `engine/hash.ts`
+// does for equipment.
 //
 // `hashString` is the engine's. Sharing it is the point: two digests produced
 // by the same function are comparable, and a run digest that quoted a fight
@@ -37,6 +43,7 @@ export function mapToCanonical(map: ActMap): string {
 export function runToCanonical(run: RunState): string {
   return [
     `seed=${run.seed}`,
+    `class=${run.classId}`,
     `act=${run.act}`,
     `row=${run.row}`,
     `node=${run.nodeId}`,
