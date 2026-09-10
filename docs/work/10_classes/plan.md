@@ -51,7 +51,7 @@ This document, the red proofs in `docs/learning/gate-proofs.md` and the per-clas
 - [x] A run started as a class is that class from its first node to its hash, and three classes on one seed are three different runs sharing one map - `test/classes.test.ts`.
 - [x] A log written before classes existed still replays to the hash it always did - `test/classes.test.ts`, against a fixture of the old `{ seed, nodes }` shape.
 - [x] Volley and Scorch are gated on the event stream and the effect trace, not only on final state - `test/hero-attacks.test.ts`.
-- [x] Every load-bearing claim above has been made to go red by reintroducing its defect - 15 mutations in `docs/learning/gate-proofs.md`, entry of 2026-09-10.
+- [x] Every load-bearing claim above has been made to go red by reintroducing its defect - 19 mutations in `docs/learning/gate-proofs.md`, entry of 2026-09-10, covering every mutation the two files name for themselves and eight more.
 - [x] Each class measured on its own and reported - `npm run measure:run -- --class <id>`, 1000 seeds each, in Outcome below.
 - [x] `npm run gates` passes and `npm run verify` is unchanged.
 - [ ] Independent review of the resolver's ordering changes, which `AGENTS.md` makes high-risk. Commissioned by the coordinator against `8b4177c`; not part of this session.
@@ -72,7 +72,7 @@ The code is done and gated; this session added the record of it and changed no b
 
 **Verified at** `8b4177c` plus this session's documentation commit. `npm run gates` passes: 189 tests, 189 pass, 0 fail. `npm run verify` reports a 9.75 pp optimal-vs-random gap (CI 5.61..13.89) against a 5.00 pp floor, byte-identical before and after this session apart from its `Elapsed` line. `npm run verify:run` passes all eight checks. Node v24.18.1.
 
-**Red proofs.** Fifteen mutations, each applied to the shipped source, run against the shipped test command, and reverted; all fifteen went red. `docs/learning/gate-proofs.md` carries each mutation, its site and the test's own failure text. Nothing in these two files was found to be a gate that cannot fail.
+**Red proofs.** Nineteen mutations, each applied to the shipped source, run against the shipped test command, and reverted; all nineteen went red. That covers the eleven the two test files name in their own comments plus eight more. `docs/learning/gate-proofs.md` carries each mutation, its site and the test's own failure text. Nothing in these two files was found to be a gate that cannot fail.
 
 **Per class, `npm run measure:run -- --class <id>`, 1000 contiguous seeds each, strongest arm (greedy route, search placement).**
 

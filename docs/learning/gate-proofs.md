@@ -10,13 +10,13 @@ Every entry names the revision its numbers were taken at, and a suite total insi
 
 Taken on branch `worktree-agent-aa48bc3f62599eab6`, cut from `8b4177c`; the suite is **189 tests** here, 164 at the base before the two files were added. `test/hero-attacks.test.ts` is 13 of them and `test/classes.test.ts` is 12.
 
-Both files were written by a worker that died to a rate limit before it could make any of them go red, and both carry `Mutation watched going red:` comments naming a mutation. **Those comments were claims, not evidence.** Every one of the fifteen below was applied to the shipped source at this revision, the shipped test command was run, and the tree was restored and its digest compared before the next mutation. All fifteen went red. `src/engine/resolver.ts` hashes `6ca08197…` before the first mutation and after the last.
+Both files were written by a worker that died to a rate limit before it could make any of them go red, and both carry `Mutation watched going red:` comments naming a mutation. **Those comments were claims, not evidence.** Every one of the nineteen below was applied to the shipped source at this revision, the shipped test command was run, and the tree was restored and its digest compared before the next mutation. All nineteen went red — the eleven the comments name, and eight more. `src/engine/resolver.ts` hashes `6ca08197…` and `src/engine/state.ts` hashes `72bd14fa…` before the first mutation and after the last.
 
 The commands were `node --test test/hero-attacks.test.ts` and `node --test test/classes.test.ts`. Failure text below is the `node:test` spec reporter's own, trimmed of stack frames.
 
 ### The instrument was wrong first, and said so
 
-The runner writes each mutation by replacing an anchor string. Every source file in this repo is CRLF, and the anchors were written with `\n`, so **eight of the fifteen multi-line mutations matched nothing on the first pass** — the single-line ones matched and the multi-line ones did not. The runner asserts each anchor occurs exactly once before writing, so those eight were reported as `BROKEN-MUTATION` rather than run; without that assertion they would have written nothing, run a clean tree, and come back green, and eight gates would have been recorded as unprovable. A no-op edit and a gate that cannot fail produce the same green.
+The runner writes each mutation by replacing an anchor string. Every source file in this repo is CRLF, and the anchors were written with `\n`, so **eight of the first fifteen matched nothing on the first pass** — the single-line ones matched and the multi-line ones did not. The runner asserts each anchor occurs exactly once before writing, so those eight were reported as `BROKEN-MUTATION` rather than run; without that assertion they would have written nothing, run a clean tree, and come back green, and eight gates would have been recorded as unprovable. A no-op edit and a gate that cannot fail produce the same green.
 
 The same guard caught a real ambiguity: `const cls = classOf(content, classId);` appears in both `startRun` and `contentForClass`, so M15's first anchor matched twice and was refused.
 
@@ -65,9 +65,22 @@ The race gate reads the races off `PLAYER_CARDS` rather than listing them, so it
 
 The `replayRun` mutation is the one the coordinator named as load-bearing, and it is worth recording *how* it fails. It does not reach the hash comparison at all: replaying a Ranger's log as a Knight asks the Knight's deck for a card the Ranger drafted, and the deck says so by name. That is a better failure than a hash mismatch, and it is the run pool's error message doing the work rather than the test's.
 
+### The four the comments name that the coordinator's list did not
+
+Run after the first fifteen, to close out every mutation the two files claim for themselves.
+
+| mutation | site | of 12 or 13 | the failure |
+|---|---|---|---|
+| `CLASSES` reordered to list the Ranger first | `classes.ts:CLASSES` | 5 of 12 | "a log written before classes existed has no class and replays as the Knight": `'ranger' !== 'knight'` |
+| the Mage's hero renamed "Wizard" | `classes.ts:MAGE.hero` | 1 of 12 | `the Mage's hero "Wizard" has no class term` |
+| `traits: spec.traits` in `makeHero`, aliasing the spec's array | `state.ts:makeHero` | 1 of 13 | `the spec is untouched by a write to the entity`: actual `[volley, scorch]` against expected `[volley]` |
+| the class check on resume dropped | `ui/run.ts:createRunController` | 1 of 12 | `Missing expected exception.` |
+
+The first is the one worth knowing about. `defaultClassId` is the first class listed, so the Knight's place at the head of `CLASSES` is what makes every log written before classes existed still replay to the hash it always did — the save-compatibility contract rests on a list's ordering, and reordering that list breaks five tests including the refusal message, which starts naming `ranger, knight, mage`.
+
 ### Bound
 
-- Fifteen mutations against two test files at one revision. A gate proven to fail on one defect is not proven to fail on a different one, and nothing here says the two files are complete — only that no claim checked below is held by a gate that cannot go red.
+- Nineteen mutations against two test files at one revision. A gate proven to fail on one defect is not proven to fail on a different one, and nothing here says the two files are complete — only that no claim checked below is held by a gate that cannot go red.
 - The engine gates are fixtures, not shipped cards. No id in `test/hero-attacks.test.ts` exists in `src/content`; Volley is pinned at `VOLLEY_SWINGS` (2) and Scorch at `SCORCH_DAMAGE` (1). A shipped card whose Volley interacts with a trait no fixture carries is outside this.
 - The class gates are the shipped content, deliberately, and walk seeds 1..6 per class. A property that fails one seed in ten thousand is not covered; `npm run verify:run` covers 200 seeds of the Knight alone.
 - The class-pick screen is checked as HTML, not as pixels.
