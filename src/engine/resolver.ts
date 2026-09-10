@@ -34,6 +34,66 @@
 // afterwards announces whichever of them died. Neither hit can cancel the
 // other, because neither is checked until both have landed, and both are
 // computed from Power read before either lands.
+//
+// Two class traits arrived with classes - Volley and Scorch - and neither is a
+// new site of mutation or a new ordering rule. Both are continuations of an
+// `act`: Volley makes it spawn a second `attack`, and Scorch makes it spawn a
+// `scorch`, which is `damageAll`'s loop under its own name. Everything an act
+// spawns queues ahead of any reaction to its first swing, which is the rule
+// already stated above, and the checkpoint runs between the two swings, which
+// is what decides that a Volley body killed by its first swing's retaliation
+// never takes the second.
+//
+// AN ACT THAT ENDED THE FIGHT STILL FINISHES, AND THE RESOLVER ANNOUNCES EVERY
+// EFFECT THAT REACHED A TARGET AND NOTHING ABOUT ONE THAT FOUND NONE.
+//
+// An act spawns its continuations up front, so the swings and the rider are
+// already queued when the first swing kills the enemy hero; `resolvePhase`
+// breaks between entities, not inside one. The alternative - clearing the queue
+// at the checkpoint that killed a hero - is a change to the resolution
+// contract, and it would drop board changes the view has already been told
+// about. So the act finishes, and the rule is about what is SAID:
+//
+//   - A second swing that finds no legal target reached nobody, so it says
+//     nothing. It is not a `fizzled`.
+//   - A Scorch with nothing to burn likewise reached nobody and says nothing,
+//     which is the rule `damageAll`/`scorch` already carried and the reason
+//     this one is written the same way.
+//   - An effect that DID reach a target announces it, dead hero or not, and
+//     announces it at 0 when the target's Armour ate the whole point. **Reached
+//     a target is not changed the board**, and that is deliberate: the two come
+//     apart exactly where Armour is at least the damage, and a defender with
+//     0 Power hitting back for 0 is a blow that bounced rather than a blow that
+//     never came. `test/hero-attacks.test.ts` pins `{raw: 1, dealt: 0}` as the
+//     correct report for a burn a Shieldwall's Armour stopped.
+//   - A SPELL cast into an empty line still fizzles. Energy was spent on it and
+//     the screen owes the player that.
+//
+// WHAT DISCRIMINATES THE FIZZLE IS THE ENERGY, NOT REACHABILITY. The empty-pool
+// case is reachable for a spell and for a swing alike - `damageOne` calls the
+// same `legalTargets` as `attack`, on the same boards - so "an attack can only
+// hit this after a hero died" is an observation about *frequency*, not a reason.
+// The reason is that a spell was paid for: the player spent energy, the card
+// left the hand, and nothing happened, so the screen says so. A swing costs
+// nothing and is not owed a receipt. Two spells in one round can therefore
+// print `fizzled` under a `died` - `fight.ts` runs every cast in `applyCasts`
+// before `settleResult`, with no result check between them, so a `damageOne`
+// that kills the enemy hero is followed by the next spell fizzling into the
+// empty line. That is correct and is left alone: the second spell's energy was
+// spent whatever the first one did. No shipped content reaches it, because the
+// run deals only units and nothing casts through `src/ui/session.ts`.
+//
+// WHAT A PLAYER IS SHOWN IS A SEPARATE QUESTION, AND IT IS NOT THIS FILE'S.
+// The engine reports; the view decides what is worth narrating. `buildBeats` in
+// `src/render/view.ts` drops a blow that moved no Health once a hero is down,
+// so "the Warchief dies" is not followed by "scorches the Shieldwall for 0",
+// and `src/render/odds.ts` already answers the same way on the forecast side -
+// a unit taking nothing is absent from the burn rather than present at zero.
+//
+// Gated by "an attack that finds no target says nothing, and a spell cast into
+// the same empty line still fizzles" in `test/rules.test.ts`, and on the view
+// side by "once the fight is decided the screen stops narrating blows that
+// moved nothing" in `test/render-view.test.ts`.
 
 import { type Rng, pick } from './rng.ts';
 import {
@@ -60,6 +120,13 @@ export type Effect =
   // something and the loop trace stays one shape.
   | { kind: 'damageOne'; uid: number; amount: number }
   | { kind: 'damageAll'; uid: number; side: Side; amount: number }
+  /**
+   * The Mage's rider: every unit on `side` takes `amount`, less its Armour, as
+   * spell damage. It is `damageAll`'s loop under its own name, and the one
+   * difference is stated at the loop - a rider with nothing to burn says
+   * nothing, where a spell cast into an empty line fizzles.
+   */
+  | { kind: 'scorch'; uid: number; side: Side; amount: number }
   | { kind: 'buffAll'; uid: number; side: Side; amount: number }
   | { kind: 'equip'; uid: number; item: EquipmentCard };
 
@@ -107,7 +174,25 @@ export type TriggerRule = (
 
 export const RELAY_POWER = 2;
 export const WAKE_POWER = 2;
+/**
+ * The two class traits' numbers, beside Relay's and Wake's. `docs/design/game.md`:
+ * "the Ranger for 1 twice, the Mage for 1 with a rider". Volley's count is the
+ * design's own. Scorch's damage is a starting guess: 1 kills a Goblin in two
+ * turns and does nothing to anything with Armour, which is the whole shape of
+ * the class that carries it.
+ */
+export const VOLLEY_SWINGS = 2;
+export const SCORCH_DAMAGE = 1;
 export const DEFAULT_MAX_ITERATIONS = 4096;
+
+/**
+ * How many attacks one act spawns for `e`: `VOLLEY_SWINGS` for Volley, one for
+ * anything else. Exported so the odds shown before commit can count a second
+ * swing.
+ */
+export function swingsOf(e: Entity): number {
+  return e.traits.includes('volley') ? VOLLEY_SWINGS : 1;
+}
 
 /**
  * Legal targets for an attack by `attacker`.
@@ -121,9 +206,10 @@ export const DEFAULT_MAX_ITERATIONS = 4096;
  * emptied this pool entirely and made your whole side untargetable for the rest
  * of the fight, which two cheap cards could buy on turn one.
  *
- * An empty pool is still reachable and still fizzles, because a side can have
- * no living entity at all in the instant between a lethal hit and the next
- * checkpoint.
+ * An empty pool is still reachable, because a side can have no living entity at
+ * all in the instant between a lethal hit and the next checkpoint. What the
+ * caller does with it differs by caller and not by board: `damageOne` fizzles
+ * because energy was spent on it, `attack` says nothing.
  */
 export function legalTargets(state: GameState, attacker: Entity): Entity[] {
   const defenders = state.board[otherSide(attacker.side)];
@@ -169,16 +255,43 @@ function apply(
   rng: Rng,
 ): { events: GameEvent[]; spawned: Effect[] } {
   switch (effect.kind) {
+    /**
+     * An act: the entity's action, then its after-acting hook.
+     *
+     * The action is one attack by default. The two class traits change what it
+     * is, for a hero and a unit alike, because the resolver does not know what
+     * a class is - `docs/design/game.md`: "The Knight swings for 2, the Ranger
+     * for 1 twice, the Mage for 1 with a rider." The Knight is the default
+     * branch.
+     *
+     *   - **Volley** spawns `VOLLEY_SWINGS` attacks instead of one. Each is its
+     *     own `attack` effect, so each picks its own target from the board as
+     *     the previous swing left it and, for a unit, draws its own
+     *     retaliation, and the checkpoint runs between them. A unit that dies
+     *     to the first swing's retaliation never reaches the second: `attack`
+     *     skips an entity that has left the board, the same rule that stops a
+     *     dead Relay body from firing. A hero takes no retaliation, so a hero's
+     *     second swing is never lost that way.
+     *   - **Scorch** spawns a `scorch` against the other side after the swing.
+     *     It is spell damage - nothing hits back, Guard does not narrow it, the
+     *     enemy hero is not in it - and it is one effect, so every unit it
+     *     kills dies at one checkpoint in board order.
+     *
+     * Everything spawned here is a continuation of the act, so it all queues
+     * ahead of any reaction to the first swing: a Volley's second swing lands
+     * before a Wake answering the first swing's kill gains its Power, and a
+     * Scorch burns before it too. Gated in `test/hero-attacks.test.ts`.
+     */
     case 'act': {
       const e = findEntity(state, effect.uid);
       if (e === null || !e.alive) return { events: [], spawned: [] };
-      return {
-        events: [{ kind: 'acted', uid: e.uid }],
-        spawned: [
-          { kind: 'attack', uid: e.uid },
-          { kind: 'afterAct', uid: e.uid },
-        ],
-      };
+      const spawned: Effect[] = [];
+      for (let i = 0; i < swingsOf(e); i++) spawned.push({ kind: 'attack', uid: e.uid });
+      if (e.traits.includes('scorch')) {
+        spawned.push({ kind: 'scorch', uid: e.uid, side: otherSide(e.side), amount: SCORCH_DAMAGE });
+      }
+      spawned.push({ kind: 'afterAct', uid: e.uid });
+      return { events: [{ kind: 'acted', uid: e.uid }], spawned };
     }
 
     /**
@@ -216,13 +329,24 @@ function apply(
      * number and take nothing back. A spell is cast from behind the line, and
      * that is what keeps AoE the answer to a wide board rather than a way to
      * feed one.
+     *
+     * **An attack with no legal target says nothing**, where a spell into the
+     * same empty line fizzles. The rule is in this file's header and the
+     * discriminator is the energy, not the board: `damageOne` asks the same
+     * `legalTargets` and finds the same empty pool on the same boards, and what
+     * separates them is that the spell was paid for. It is still not an error,
+     * and still draws no retaliation - only the event is gone.
+     *
+     * **An attack that DOES find a target announces it, at 0 if Armour ate the
+     * whole point.** Reaching a target is what is reported; whether the Health
+     * bar moved is not this function's question.
      */
     case 'attack': {
       const e = findEntity(state, effect.uid);
       if (e === null || !e.alive) return { events: [], spawned: [] };
       const targets = legalTargets(state, e);
       if (targets.length === 0) {
-        return { events: [{ kind: 'fizzled', uid: e.uid }], spawned: [] };
+        return { events: [], spawned: [] };
       }
       const target = pick(rng, targets);
       const raw = power(e);
@@ -312,8 +436,17 @@ function apply(
      *
      * Armour still applies, per target, so the design's "concentrate against
      * armour, spread against a swarm" inversion survives contact with spells.
+     *
+     * `scorch` - the Mage's rider - is this same loop, and shares it rather than
+     * copying it so the three properties above hold for both by construction.
+     * The two differ in one line, at the bottom: a spell cast into an empty
+     * line fizzles, because energy was spent on nothing and the screen says so;
+     * a Scorch is a rider on a swing that has already landed, so with nothing
+     * to burn it says nothing. A `fizzled` there would follow an `attacked`
+     * from the same hero and contradict it on screen.
      */
-    case 'damageAll': {
+    case 'damageAll':
+    case 'scorch': {
       const e = findEntity(state, effect.uid);
       if (e === null || !e.alive) return { events: [], spawned: [] };
       const events: GameEvent[] = [];
@@ -323,7 +456,7 @@ function apply(
         t.health -= dealt;
         events.push({ kind: 'damaged', uid: e.uid, targetUid: t.uid, raw: effect.amount, dealt });
       }
-      if (events.length === 0) {
+      if (events.length === 0 && effect.kind === 'damageAll') {
         return { events: [{ kind: 'fizzled', uid: e.uid }], spawned: [] };
       }
       return { events, spawned: [] };
@@ -335,6 +468,19 @@ function apply(
      * hero is the rightmost entity of its own line, not a back rank.
      *
      * Like every other buff it lasts until the owner's next `startTurn`.
+     *
+     * **The fizzle below cannot be reached by any spell this game ships, and it
+     * is kept anyway.** `cast.ts`'s `spellQueue` aims `buffAll` at the caster's
+     * own side, and the caster is alive past the guard three lines up, so the
+     * loop always finds at least the caster and always emits at least one
+     * event. It is reachable through the effect vocabulary rather than through
+     * a card - an effect aimed at a side whose hero is dead and whose units are
+     * gone finds nobody - and that is the case the branch answers correctly:
+     * energy was spent, so the screen says so. Deleting it would make the first
+     * card that aims a buff anywhere else fail silently. Gated at the vocabulary
+     * by "an attack that finds no target says nothing, and a spell cast into the
+     * same empty line still fizzles" in `test/rules.test.ts`, which reaches it
+     * by queueing the effect directly; no shipped card covers it.
      */
     case 'buffAll': {
       const e = findEntity(state, effect.uid);

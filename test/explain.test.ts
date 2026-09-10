@@ -48,6 +48,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { ENEMY_CARDS, PLAYER_CARDS, PLAYER_HERO } from '../src/content/cards.ts';
+import { CLASSES } from '../src/content/classes.ts';
 import { RELAY_POWER, WAKE_POWER, drain } from '../src/engine/resolver.ts';
 import { makeRng } from '../src/engine/rng.ts';
 import {
@@ -70,6 +71,7 @@ import {
   TRIBE_TERMS,
   tribeTerm,
 } from '../src/render/glossary.ts';
+import { CLASS_TERMS } from '../src/render/class-terms.ts';
 import { ICON_NAMES, iconShape, iconSvg, type IconName } from '../src/render/icons.ts';
 import { explainCard } from '../src/render/inspect.ts';
 import { MIN_CARD_W, cardViewOf, pipIconSize, traitPips } from '../src/render/board.ts';
@@ -175,14 +177,18 @@ test('no explanation survives the trait it explains', () => {
   // trait from the engine's union makes `glossary.ts` stop compiling. This is
   // the runtime half - a trait still in the union but on no card in the pool is
   // a rule no player can meet, and a tooltip for it is a rule that does not
-  // exist as far as the game is concerned.
-  const used = new Set<string>(ALL_CARDS.flatMap((c) => [...c.traits]));
+  // exist as far as the game is concerned. A class hero's trait counts: a Mage
+  // player meets Scorch every turn, and no card carries it.
+  const used = new Set<string>([
+    ...ALL_CARDS.flatMap((c) => [...c.traits]),
+    ...CLASSES.flatMap((c) => [...(c.hero.traits ?? [])]),
+  ]);
   for (const trait of Object.keys(TRAIT_TERMS)) {
     assert.ok(
       used.has(trait),
-      `TRAIT_TERMS explains "${trait}", but no card in PLAYER_CARDS or ENEMY_CARDS has it. ` +
-        `Either the trait was removed and its explanation was left behind, or a card that ` +
-        `carries it is missing. Delete the entry or add the card.`,
+      `TRAIT_TERMS explains "${trait}", but no card in PLAYER_CARDS or ENEMY_CARDS and no class ` +
+        `hero has it. Either the trait was removed and its explanation was left behind, or a ` +
+        `card that carries it is missing. Delete the entry or add the card.`,
     );
   }
 });
@@ -237,6 +243,197 @@ test('trait rules carry the resolver’s own numbers, not retyped ones', () => {
     `src/render/glossary.ts contains the literal "${literal?.[0]}". A Power number written out ` +
       'here stops following the resolver the moment that constant is re-tuned.',
   );
+});
+
+test('Volley’s count in words is the count the resolver swings', () => {
+  // The class half of the test above, and it is written differently on purpose.
+  //
+  // `assert.equal(VOLLEY_SWINGS, 2)` next to a tooltip saying "twice" is the
+  // trap canon names: a check built from the same symbol as the thing it
+  // checks proves only that the code agrees with itself, and when the constant
+  // moves the repair is to edit the test, which ships the lie. So the count is
+  // MEASURED - one Volley entity, one drain, count the `attacked` events - and
+  // the words below come from a table this file owns. Nothing here can be
+  // satisfied by re-reading `VOLLEY_SWINGS`.
+  //
+  // Bound: it proves the four sentences state the swing count the resolver
+  // performs, at whatever `VOLLEY_SWINGS` is today. It says nothing about the
+  // rest of either sentence, and nothing about where they are drawn.
+  const state: GameState = { board: { player: [], enemy: [] }, nextUid: 1 };
+  state.board.player.push(makeHero(state, 'player', { name: 'H', health: 30, power: 1, armour: 0 }));
+  state.board.enemy.push(makeHero(state, 'enemy', { name: 'E', health: 99, power: 0, armour: 0 }));
+  const archer = makeUnit(state, 'player', {
+    id: 'fixture:volley', name: 'fixture', cost: 1, power: 1, health: 20, armour: 0,
+    tribe: 'human', traits: ['volley'],
+  });
+  insertUnit(state, 'player', archer, unitCount(state, 'player'));
+
+  const { events } = drain(state, [{ kind: 'act', uid: archer.uid }], makeRng(9, 'combat'));
+  const swings = events.filter((ev) => ev.kind === 'attacked').length;
+  assert.ok(swings > 1, `the fixture measured ${swings} swing(s), so it is not measuring Volley`);
+
+  // This file's own words, so the assertion does not borrow the production
+  // mapping it is checking.
+  const SAID: Readonly<Record<number, string>> = { 2: 'twice', 3: 'three times', 4: 'four times' };
+  const said = SAID[swings];
+  assert.ok(said !== undefined, `no word for ${swings} swings; extend this table with timesWord`);
+
+  const sentences: [string, string][] = [
+    ['the Volley tooltip', TRAIT_TERMS.volley.line],
+    ['the Ranger’s swing line', CLASS_TERMS.ranger.swing(1)],
+    ['the Ranger’s pool line', CLASS_TERMS.ranger.pool],
+  ];
+  for (const [what, line] of sentences) {
+    assert.ok(
+      line.includes(said),
+      `${what} does not say "${said}", and the resolver swings ${swings} times.\n\n${line}`,
+    );
+    for (const [n, word] of Object.entries(SAID)) {
+      if (Number(n) === swings) continue;
+      assert.ok(!line.includes(word), `${what} says "${word}" as well as "${said}".\n\n${line}`);
+    }
+  }
+
+  // The source half, exactly as Relay's above: the sentences have to be BUILT
+  // from the constant, or they agree with it today and stop the day it moves.
+  // `timesWord`'s own lookup table is the one place a count word is code, so
+  // it is cut out before the scan rather than exempted by name.
+  const terms = codeOf('src/render/class-terms.ts');
+  const built = terms.split('timesWord(VOLLEY_SWINGS)').length - 1;
+  assert.ok(
+    built >= 4,
+    `src/render/class-terms.ts interpolates timesWord(VOLLEY_SWINGS) ${built} time(s). Every ` +
+      'sentence that states Volley\'s count must be built from the resolver\'s constant.',
+  );
+  const outsideTable = terms.replace(/const words:[\s\S]*?};/, '');
+  const literal = /\b(once|twice|three times|four times)\b/.exec(outsideTable);
+  assert.equal(
+    literal,
+    null,
+    `src/render/class-terms.ts contains the literal "${literal?.[0]}" outside timesWord's table. ` +
+      'A swing count written out here stops following VOLLEY_SWINGS the moment it is re-tuned.',
+  );
+
+  // The third place the count is written, and the reason this half is a list
+  // rather than one file: `src/sim/runbots.ts` values a Volley card by counting
+  // its Power once per swing, and it wrote that as `+ card.power` - a copy of
+  // "Volley is two" that nothing connected to the resolver. Every file that
+  // states the count states it from the constant.
+  for (const rel of ['src/render/class-terms.ts', 'src/sim/runbots.ts']) {
+    assert.ok(
+      codeOf(rel).includes('VOLLEY_SWINGS'),
+      `${rel} writes Volley's swing count without naming VOLLEY_SWINGS, so it is a second copy ` +
+        'of the rule that will not follow the resolver.',
+    );
+  }
+});
+
+test('the log calls a fizzle what a fizzle is: only a spell can produce one', () => {
+  // `src/ui/app.ts`'s log said "has no legal target — the attack fizzles". That
+  // was true when it was written and became wrong in the same commit that took
+  // the attack's `fizzled` away: after it, the three producers left are
+  // `damageOne`, `damageAll` and `buffAll`, and every one of them is a card
+  // that cost energy. Two neighbouring strings in the same file were reworded
+  // in that commit and this post-hoc one was missed.
+  //
+  // Written the way the Volley gate above is: the producer set is MEASURED
+  // against the resolver, and the words are then checked against what was
+  // measured. Asserting the sentence alone is repaired by editing the sentence,
+  // and asserting the resolver alone says nothing about what the player reads.
+  //
+  // Bound: the sentence is checked as source text, because `src/ui/app.ts`
+  // needs a DOM and `node --test` has none - so this proves the string in the
+  // file, not a line in a browser. It is also unreachable in the shipped app
+  // today: nothing casts a spell through `src/ui/session.ts`, so no fight the
+  // screen plays can emit `fizzled` at all.
+  const state: GameState = { board: { player: [], enemy: [] }, nextUid: 1 };
+  state.board.player.push(makeHero(state, 'player', { name: 'H', health: 30, power: 1, armour: 0 }));
+  state.board.enemy.push(makeHero(state, 'enemy', { name: 'E', health: 30, power: 1, armour: 0 }));
+  const caster = heroOf(state, 'enemy');
+  const mark = heroOf(state, 'player');
+  mark.health = 0;
+  mark.alive = false;
+
+  const fizzles = (effect: Parameters<typeof drain>[1][number]): boolean =>
+    drain(state, [effect], makeRng(4, 'combat')).events.some((e) => e.kind === 'fizzled');
+
+  assert.equal(fizzles({ kind: 'damageOne', uid: caster.uid, amount: 3 }), true);
+  assert.equal(fizzles({ kind: 'damageAll', uid: caster.uid, side: 'player', amount: 3 }), true);
+  assert.equal(fizzles({ kind: 'buffAll', uid: caster.uid, side: 'player', amount: 2 }), true);
+  assert.equal(
+    fizzles({ kind: 'attack', uid: caster.uid }),
+    false,
+    'an attack emitted a fizzle, so the log calling it an attack would be right and this gate ' +
+      'is the thing that is wrong - check src/engine/resolver.ts first',
+  );
+
+  // The block, not a scan for a quoted string: `app.ts` is full of template
+  // literals, and a `\`[^\`]*fizzle[^\`]*\`` scan matches the gap BETWEEN two of
+  // them the moment `case 'fizzle':` sits in that gap. It came back green on
+  // the fixed file and red on nothing - measuring the wrong thing, confidently.
+  const app = codeOf('src/ui/app.ts');
+  const blocks = app
+    .split("case 'fizzle':")
+    .slice(1)
+    .map((rest) => rest.split('break;')[0] ?? '');
+  assert.ok(
+    blocks.length > 0,
+    "src/ui/app.ts no longer handles a `fizzle` beat at all. If the beat was removed, remove " +
+      'this gate with it; if it was renamed, this gate has stopped watching anything.',
+  );
+  // There is one block per switch - one draws the beat, one writes the log -
+  // and only the second one speaks to the player.
+  const spoken = blocks.filter((b) => b.includes('logLine('));
+  assert.equal(
+    spoken.length,
+    1,
+    `${spoken.length} of the ${blocks.length} fizzle blocks in src/ui/app.ts write a log line; ` +
+      'this gate reads exactly the one that does.',
+  );
+  for (const said of blocks) {
+    assert.ok(
+      !/\battack\b/i.test(said),
+      `src/ui/app.ts tells the player a fizzle is an attack:\n\n${said}\nOnly a spell fizzles, ` +
+        'and the three effects that can are all cast from a card that cost energy.',
+    );
+  }
+  assert.ok(
+    /\bspell\b/i.test(spoken[0]!),
+    `src/ui/app.ts does not say what fizzled:\n\n${spoken[0]!}\nThe player spent energy on a ` +
+      'card and nothing happened; the line is the receipt for that.',
+  );
+});
+
+test('the odds read Armour the way every damage site must: through armourOf', () => {
+  // `src/engine/state.ts` on `armourOf`: "Every damage site reads this, never
+  // `e.armour`, so a worn shield covers an attack and a spell alike."
+  // `src/render/odds.ts` is a second implementation of the engine's damage
+  // arithmetic - it is what the player reads before committing - and it had a
+  // `damageIfHit` map built from `e.armour`. It had no consumers anywhere and
+  // was deleted rather than fixed; this is what stops the read coming back.
+  //
+  // Bound: **this is a text check, and it is a text check because no board can
+  // tell the two apart today.** Equipment is the only thing that makes
+  // `armourOf` differ from `.armour`, `apply`'s `equip` case skips any entity
+  // with no slots - every unit - and the burn never reaches a hero. So a
+  // behavioural gate here would pass under either reading, and would report
+  // that as proof. The day a unit can wear something, replace this with one.
+  const odds = codeOf('src/render/odds.ts');
+  // The offending LINE, not the match object: `assert.equal(exec(...), null)`
+  // prints the whole RegExpExecArray, which is the entire file plus its own
+  // `input` field, and buries the one line that matters in it.
+  const offending = odds
+    .split(/\r?\n/)
+    .filter((l) => /\.armour\b/.test(l))
+    .join('\n');
+  assert.equal(
+    offending,
+    '',
+    `src/render/odds.ts reads \`.armour\` off an entity:\n\n${offending}\n\nEvery damage site ` +
+      'reads `armourOf`, or the number on screen stops matching the blow the moment a worn ' +
+      'shield is in play.',
+  );
+  assert.ok(odds.includes('armourOf('), 'src/render/odds.ts no longer computes damage at all');
 });
 
 test('the "race carries no rule" claim is still true of the resolver', () => {

@@ -189,17 +189,48 @@ export type MapShape = {
 };
 
 /**
+ * One class a run can be started as: a hero, a starting deck and a reward
+ * pool, which is exactly what `docs/design/game.md` says a class sets.
+ *
+ * `startRun` copies the chosen class's three fields over the content's own
+ * `hero`, `startingDeck` and `rewards`, so nothing inside the loop reads a
+ * class: `nodes.ts` draws from `run.content.rewards` and `fightSetupFor` hands
+ * a fight `run.content.hero`, as they did before classes existed. The class
+ * survives as `RunState.classId`, which the log records and the hash covers.
+ */
+export type RunClass = {
+  readonly id: string;
+  readonly name: string;
+  readonly hero: HeroSpec;
+  readonly startingDeck: readonly string[];
+  readonly rewards: readonly RewardEntry[];
+};
+
+/**
  * Everything a run is made of, handed in rather than imported.
  *
  * Same seam as `CardPool`: `src/run/` never reaches into `src/content/` from
- * inside the loop, so the loop can be driven by a fixture. `defaultRunContent`
- * in `content.ts` is the one place that builds this from the shipped cards.
+ * inside the loop, so the loop can be driven by a fixture. `RUN_CONTENT` in
+ * `content.ts` is the one place that builds this from the shipped cards.
  */
 export type RunContent = {
   readonly pool: CardPool;
+  /**
+   * The hero, deck and pool a run of this content plays. With `classes`
+   * present these are the chosen class's, copied in by `startRun`; without it
+   * they are the content's one and only class, whose id is `knight`.
+   */
   readonly hero: HeroSpec;
   /** Card ids the run starts with. Instances are minted from these. */
   readonly startingDeck: readonly string[];
+  /**
+   * The classes a run may be started as. The first listed is the class a run
+   * starts as when none is named, and `contentForClass` derives a content
+   * listing one class for that reason. Optional so a fixture with one hero and
+   * one deck needs no class list: `startRun` treats such a content as offering
+   * the default class alone.
+   */
+  readonly classes?: readonly RunClass[];
   readonly acts: readonly ActContent[];
   readonly mapShape: MapShape;
   readonly rewards: readonly RewardEntry[];
@@ -264,6 +295,14 @@ export type NodeRecord = {
  */
 export type RunLog = {
   readonly seed: number;
+  /**
+   * The class the run was started as. Every log written since classes
+   * existed carries it; a log written before them has no field, and
+   * `replayRun` reads that as the default class, which is the only class
+   * such a run could have been. `test/classes.test.ts` holds a log of the old
+   * shape and requires it to keep replaying.
+   */
+  readonly classId?: string;
   readonly nodes: NodeRecord[];
 };
 
@@ -285,7 +324,13 @@ export type RunAgentChoice = {
 
 export type RunState = {
   readonly seed: number;
-  /** Immutable data shared by every run on this content. Not hashed. */
+  /** The class this run was started as. Recorded in the log, covered by the hash. */
+  readonly classId: string;
+  /**
+   * Immutable data shared by every run of this class on this content: the
+   * content handed to `startRun` with the class's hero, deck and pool in
+   * place. Not hashed.
+   */
   readonly content: RunContent;
   /** All three act maps, generated once at setup from the seed alone. */
   readonly maps: readonly ActMap[];

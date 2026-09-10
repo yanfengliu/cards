@@ -85,6 +85,24 @@ Five properties this buys, each of which is a bug class it forecloses:
 
 **Guard the loop.** A cap of some thousands of iterations that throws with the full queue trace. A hang is strictly worse than a crash: a crash names its cause, a hang produces a bug report saying "it froze."
 
+### The verbs, and the one added since the vocabulary was frozen
+
+Point 8 of the delegation plan below freezes the effect vocabulary and makes adding a verb a coordinator decision, never a worker's. The `Effect` union in `src/engine/resolver.ts` is that vocabulary: `act`, `attack`, `afterAct`, `gainPower`, `damageOne`, `damageAll`, `buffAll`, `equip` — and `scorch`.
+
+**`scorch` was authorised by the coordinator as part of the classes unit,** in the assignment that produced it, and it is recorded here because a verb that arrived without this line looks exactly like one a worker added on its own. It is the Mage's rider: after the hero's swing, every enemy unit takes a flat amount less its Armour, as spell damage. It shares `damageAll`'s loop rather than copying it, so "one effect, no target-selection rule, units and not heroes" holds for both by construction; it is a separate `kind` because it differs in one line — a spell cast into an empty line fizzles, a rider with nothing to burn says nothing.
+
+The Ranger's Volley needed no verb. It is `act` spawning `VOLLEY_SWINGS` `attack` effects instead of one, which is why each swing picks its own target, draws its own retaliation, and has the state-based checkpoint run before the next.
+
+### An act that ended the fight still finishes
+
+`act` queues its continuations up front, and `resolvePhase` breaks between entities rather than inside one, so a Volley's second swing and a Scorch's burn are already queued when the first swing kills the enemy hero. They still run. Clearing the queue at the checkpoint that killed a hero would be a different resolution contract, and it would drop board changes the view has already been told about.
+
+What that costs is bounded by one rule: **the resolver announces every effect that reached a target and nothing about one that found none.** A swing that finds no legal target reached nobody, so it emits no event — an attack's `fizzled` could only ever be printed under the announcement of the death that ended the fight, and that is what a player read as "the Warchief dies", then "has no legal target". An effect that did reach a target is announced, dead hero or not — **and announced at 0 when the target's Armour ate the whole point.** A *spell* cast into an empty line still fizzles: energy was spent on it, and what separates it from a swing is that payment, not the board. `damageOne` asks the same `legalTargets` and finds the same empty pool on the same boards, so reachability discriminates nothing.
+
+Reached a target is deliberately not the same as changed the board. The two come apart exactly where Armour is at least the damage, and the engine reports both: a 0-Power defender that hits back for 0 is a blow that bounced, not a blow that never came, and the animation draws it as one.
+
+**What a player is shown is a separate rule, and it belongs to render.** Once a hero is down the fight is decided, and `buildBeats` in `src/render/view.ts` stops turning a blow that moved no Health into a beat — so "**Warchief** dies." is not followed by "scorches **Orc Shieldwall** for **0**". It leaves a `fizzled` alone, because that is the receipt for spent energy rather than a blow, and it treats an attack and the retaliation it drew as one blow, so "hits back" never appears with no swing above it. `src/render/odds.ts` answers the same way on the forecast side: a unit taking nothing is absent from the burn rather than present at zero. The split is the general one — the engine reports what happened, the view decides what is worth saying — and putting the judgement in `apply` would put an animation concern inside the only function that writes to `GameState`.
+
 ### Echo is a termination hazard, and it is a design bug I shipped you
 
 `Echo — repeat the action of the unit that resolved immediately before me` does not terminate under adjacency. Two adjacent Echoes: B copies A, A copies whatever preceded it, and if that is also an Echo the chain walks backwards indefinitely. Worse, a future *Echo Sigil* makes this trivially reachable — the player can just build it.

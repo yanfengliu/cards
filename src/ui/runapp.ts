@@ -4,6 +4,9 @@
  * One controller (`run.ts`) holds the run; this file draws whatever it is
  * waiting on and hands its answer back. The screens are:
  *
+ *   pick       the class: hero, starting deck and pool for each of the three,
+ *              before anything else - `classpick.ts` draws it, this file
+ *              starts the run when a class is chosen
  *   map        the act's whole map, every node with its icon, the nodes you can
  *              reach lit, and - on hover - everything a node still leads to,
  *              because a map whose routes cannot be read is not a map
@@ -29,12 +32,14 @@
  */
 
 import { CARD_POOL } from '../content/cards.ts';
-import type { UnitCard } from '../engine/state.ts';
+import { type ClassDef, CLASSES, classById } from '../content/classes.ts';
+import type { CardPool, UnitCard } from '../engine/state.ts';
 import { RUN_CONTENT } from '../run/content.ts';
 import { resolveDeckCard, runPool } from '../run/deck.ts';
 import { pathSpread } from '../run/map.ts';
 import { encounterFor, goldFor, restAmount } from '../run/nodes.ts';
 import { currentMap, travelOptions } from '../run/run.ts';
+import { renderClassPick } from './classpick.ts';
 import type { DeckCard, EventEffect, ForgeMode, RunEventDef } from '../run/types.ts';
 import { compressedCard } from '../render/board.ts';
 import { STAT_TERMS, TRAIT_TERMS } from '../render/glossary.ts';
@@ -105,6 +110,57 @@ const FORGE_WORDS: Readonly<Record<ForgeMode, string>> = {
   cost: `−1 ${STAT_TERMS.cost.name}`,
 };
 
+/**
+ * The classes this app offers, and the one gate on a class named from outside
+ * it. Both are up here, exported, rather than inline in `startRunApp`, and that
+ * is the point rather than tidiness.
+ *
+ * `startRunApp` needs a document, so nothing inside it can be reached by
+ * `node --test`. An independent review found what that costs: the screen was
+ * handed `CLASSES` at one call site and no test touched this file, so removing
+ * the Mage from what the screen is offered left the whole suite green, and so
+ * did deleting the guard that refuses an unknown `?class=`. A wiring nobody can
+ * test is a wiring nobody is checking.
+ *
+ * So the two decisions live in two functions with no DOM in them, and
+ * `test/classes.test.ts` calls exactly what the screen calls. Gated by "the
+ * screen is handed every class the game has" and "a class named from outside
+ * the app is refused unless it is one of the three".
+ */
+export const PICKABLE_CLASSES: readonly ClassDef[] = CLASSES;
+
+/** The class-pick screen as the app builds it, with the classes the app offers. */
+export function classPickHtml(opts: {
+  seed: number;
+  pool: CardPool;
+  mount: boolean;
+  hatch: boolean;
+}): string {
+  return renderClassPick({
+    seed: opts.seed,
+    classes: PICKABLE_CLASSES,
+    pool: opts.pool,
+    mount: opts.mount,
+    hatch: opts.hatch,
+  });
+}
+
+/**
+ * A class id from outside the app - a `?class=` in the address bar, or the
+ * `data-class` of whatever was clicked - narrowed to one this app offers, or
+ * null.
+ *
+ * Null rather than a throw, and rather than a fallback to the Knight: an
+ * address naming a class that does not exist should put the pick screen up and
+ * let the player choose, not silently start a run as something else. Every
+ * caller that does start a run passes the result to `createRunController`,
+ * which refuses an unknown class by name.
+ */
+export function pickableClassId(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined) return null;
+  return PICKABLE_CLASSES.some((c) => c.id === raw) ? raw : null;
+}
+
 /** The three permanent bonuses on a deck card, as short marks. Empty when none. */
 function bonusMarks(dc: DeckCard): string {
   const marks: string[] = [];
@@ -136,14 +192,27 @@ export function startRunApp(): void {
   const startSeed = Number.isFinite(seedParam) && seedParam > 0 ? seedParam : 7;
   /** A word for the notice bar about how this run came to be on screen. */
   let opened: 'fresh' | 'resumed' | 'refused' = 'fresh';
-  let ctl: RunController = createRunController(RUN_CONTENT, startSeed);
+  /**
+   * A run starts by choosing a class. `?class=ranger` names one and skips the
+   * screen, the way `?seed=` and `?encounter=` make a run addressable; a saved
+   * run carries its own class and never asks. Otherwise the class-pick screen
+   * is up and the controller below is a placeholder that is never rendered.
+   */
+  const classParam = pickableClassId(params.get('class'));
+  let picking = classParam === null;
+  let ctl: RunController = createRunController(
+    RUN_CONTENT,
+    startSeed,
+    classParam === null ? {} : { classId: classParam },
+  );
   // `?fresh=1` ignores a saved run; otherwise a run in progress on this seed
   // is replayed from its log and picks up where it stood between nodes.
   const saved = params.get('fresh') === '1' ? null : loadSaved(startSeed);
   if (saved !== null && saved.nodes.length > 0) {
     try {
-      ctl = createRunController(RUN_CONTENT, startSeed, saved);
+      ctl = createRunController(RUN_CONTENT, startSeed, { resume: saved });
       opened = 'resumed';
+      picking = false;
     } catch (e) {
       console.error('cards: the saved run did not replay and was discarded', e);
       forget(startSeed);
@@ -185,6 +254,11 @@ export function startRunApp(): void {
 
   function actName(act: number): string {
     return RUN_CONTENT.acts[act]?.name ?? `Act ${act + 1}`;
+  }
+
+  /** The class the run on screen was started as, by name. */
+  function className(): string {
+    return classById(ctl.classId).name;
   }
 
   /** The node ids walked in the current act, in order, from the log alone. */
@@ -289,7 +363,8 @@ export function startRunApp(): void {
     // During a fight the fight screen writes the subtitle - the round and both
     // heroes' Health - and it must not be overwritten from here.
     if (p.kind !== 'fight') {
-      dom.subtitle.textContent = `Act ${act + 1} of ${RUN_CONTENT.acts.length} — ${actName(act)} · ${where}`;
+      dom.subtitle.textContent =
+        `${className()} · Act ${act + 1} of ${RUN_CONTENT.acts.length} — ${actName(act)} · ${where}`;
     }
     const health = p.kind === 'reward' ? p.healthAfter : s.hero.health;
     const gold = p.kind === 'reward' ? p.goldAfter : s.gold;
@@ -410,7 +485,7 @@ export function startRunApp(): void {
           ? `Run resumed on seed ${ctl.seed}, ${s.nodesVisited} node${s.nodesVisited === 1 ? '' : 's'} in, replayed from its choice list. ` +
             `A node in progress is not saved, so a reload returns you here, to the map.`
           : (opened === 'refused' ? 'The saved run on this seed did not replay and was discarded. ' : '') +
-            `A new run on seed ${ctl.seed}. Your hero has ${s.hero.health} ${STAT_TERMS.health.name} for the whole run, ${s.deck.length} cards, and no gold.`;
+            `A new run on seed ${ctl.seed} as the ${className()}. Your hero has ${s.hero.health} ${STAT_TERMS.health.name} for the whole run, ${s.deck.length} cards, and no gold.`;
       dom.notice.className = 'run__notice';
       return;
     }
@@ -575,7 +650,31 @@ export function startRunApp(): void {
     dom.body.hidden = true;
   }
 
+  /**
+   * The class pick, in the node panel where every other screen goes. The
+   * placeholder controller is not read: the HUD says only the seed, and the
+   * run's own readouts start with the run.
+   */
+  function renderPick(): void {
+    showRun();
+    dom.subtitle.textContent = `Choose a class · seed ${ctl.seed}`;
+    dom.status.innerHTML =
+      `<span class="hud__stat hud__stat--seed" title="The run's seed. The same seed and the same choices replay the same run.">seed ${ctl.seed}</span>`;
+    dom.node.innerHTML = classPickHtml({
+      seed: ctl.seed,
+      pool: CARD_POOL,
+      mount: screen.mount(),
+      hatch: screen.hatch(),
+    });
+    dom.node.hidden = false;
+    dom.body.hidden = true;
+  }
+
   function render(): void {
+    if (picking) {
+      renderPick();
+      return;
+    }
     renderHud();
     if (ctl.phase.kind === 'fight') {
       dom.run.hidden = true;
@@ -604,7 +703,7 @@ export function startRunApp(): void {
       screen.start(p.setup, {
         title: `${esc(actName(s.act))} · ${esc(p.encounter.name)} (${NODE_LABEL[p.node.type].toLowerCase()}, row ${p.node.row + 1}).`,
         intro: [
-          `Your hero brings ${s.hero.health} of ${s.hero.maxHealth} Health into this fight. ` +
+          `Your ${esc(className())} brings ${s.hero.health} of ${s.hero.maxHealth} Health into this fight. ` +
             `Winning pays ${pay} gold and one card of three; losing ends the run.`,
           'Your line resolves left to right. Your hero swings last.',
         ],
@@ -639,10 +738,12 @@ export function startRunApp(): void {
     render();
   }
 
+  /** A new run starts by choosing a class, so this puts the pick up. */
   function newRun(seed: number): void {
     forget(ctl.seed);
     forget(seed);
     ctl = createRunController(RUN_CONTENT, seed);
+    picking = true;
     opened = 'fresh';
     focus = null;
     forgeIndex = null;
@@ -651,7 +752,22 @@ export function startRunApp(): void {
     const url = new URL(globalThis.location.href);
     url.searchParams.set('seed', String(seed));
     url.searchParams.delete('fresh');
+    url.searchParams.delete('class');
     globalThis.history.replaceState(null, '', url);
+    render();
+  }
+
+  /** The pick was made: start the run as that class, on the seed already chosen. */
+  function pickClass(raw: string): void {
+    const classId = pickableClassId(raw);
+    if (!picking || classId === null) return;
+    ctl = createRunController(RUN_CONTENT, ctl.seed, { classId });
+    picking = false;
+    opened = 'fresh';
+    const url = new URL(globalThis.location.href);
+    url.searchParams.set('class', classId);
+    globalThis.history.replaceState(null, '', url);
+    screen.showInspect(null);
     render();
   }
 
@@ -669,6 +785,9 @@ export function startRunApp(): void {
     if (act === null) return;
     const int = (key: string): number => Number.parseInt(act.dataset[key] ?? '', 10);
     switch (act.dataset['run']) {
+      case 'pick-class':
+        pickClass(act.dataset['class'] ?? '');
+        break;
       case 'reward':
         ctl.pickReward(int('pick'));
         afterChoice();

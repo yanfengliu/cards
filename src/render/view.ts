@@ -91,6 +91,21 @@ export type Beat =
       readonly amount: number;
       readonly source: BuffSource;
     }
+  /**
+   * Damage that did not come from an attack: a spell's, or a Scorch rider's.
+   * Same shape as `attack` less `guardForced`, because a spell consults no
+   * Guard, and nothing hits back - which is why it is its own beat rather than
+   * an `attack` with a flag the retaliation drawing would have to read.
+   */
+  | {
+      readonly kind: 'spell';
+      readonly uid: number;
+      readonly targetUid: number;
+      readonly raw: number;
+      readonly dealt: number;
+      readonly absorbed: number;
+      readonly wasted: number;
+    }
   | { readonly kind: 'death'; readonly uid: number; readonly side: Side };
 
 function viewOf(e: Entity, pool: CardPool): EntityView {
@@ -269,6 +284,14 @@ function guardForced(view: BoardView, target: EntityView): boolean {
   return view[target.side].some((e) => e.alive && !e.traits.includes('guard'));
 }
 
+/** Is a hero down? Then the fight is decided and nothing after it can turn it. */
+function decidedAlready(view: BoardView): boolean {
+  for (const side of ['player', 'enemy'] as const) {
+    for (const e of view[side]) if (e.isHero && !e.alive) return true;
+  }
+  return false;
+}
+
 /**
  * Turn one phase's events into the ordered beats that draw it, walking a
  * *copy-free* simulation of the same view the animation will show. The walk has
@@ -279,13 +302,56 @@ function guardForced(view: BoardView, target: EntityView): boolean {
  * `view` is advanced as a side effect, so callers building beats ahead of time
  * hand in a scratch view and then re-snapshot for playback. `buildBeats` and
  * `applyBeat` share one mutation path so the two can never disagree.
+ *
+ * ## The epilogue rule: once the fight is decided, a blow that moved nothing is
+ * not narrated
+ *
+ * The engine reports every effect that reached a target and says nothing about
+ * one that found none (`engine/resolver.ts`'s header). *Reached a target* is not
+ * *changed the board*, and the two come apart exactly where Armour is at least
+ * the damage: a Scorch that reaches an Orc Shieldwall (Armour 1) reports
+ * `damaged` at 0, and a Volley second swing into the same body reports
+ * `attacked` at 0. That is the engine being right - an effect that landed on
+ * somebody is a fact about the fight, and dropping it would put the burden of
+ * "did anything happen" inside `apply`, where the animation layer's judgement
+ * does not belong.
+ *
+ * Deciding whether a beat is worth showing *is* this layer's judgement, and
+ * there is one place it has to be exercised. An act that ended the fight still
+ * finishes (`resolvePhase` breaks between entities, never inside one), so the
+ * rest of that act still resolves against a board whose hero is dead. On screen
+ * the player read "**Warchief** dies." and then "scorches **Orc Shieldwall** for
+ * **0**" - a line about a fight that was already over, describing nothing.
+ *
+ * So: **once a hero is down, a blow that moved no Health is not drawn.** Three
+ * things that rule deliberately does not do:
+ *
+ *   - It does not apply before the fight is decided. A Scorch stopped by Armour
+ *     mid-fight is exactly what a Mage's player needs to see, and a 0-Power
+ *     defender hitting back for 0 is a blow that bounced rather than a blow that
+ *     never came.
+ *   - It does not touch a `fizzled`. A fizzle is the receipt for spent energy,
+ *     not a blow, and only a spell can produce one.
+ *   - **It treats a trade as one blow.** An attack and the retaliation it drew
+ *     are shown together or not at all, so "hits back" can never appear with no
+ *     swing above it. `retaliated` is emitted immediately after the `attacked`
+ *     it answers, which is what makes the pair readable from the stream here.
+ *
+ * A suppressed beat moved no Health by construction, so `viewDrift` is
+ * untouched: the view still equals the engine's state at the end of the phase.
+ *
+ * Gated by "once the fight is decided the screen stops narrating blows that
+ * moved nothing" in `test/render-view.test.ts`, over the corpus of real decided
+ * fights the three classes produce.
  */
 export function buildBeats(view: BoardView, events: readonly GameEvent[]): Beat[] {
   const beats: Beat[] = [];
   let lastActed: number | null = null;
   const deaths: { uid: number; rightUid: number | null }[] = [];
+  let decided = decidedAlready(view);
 
-  for (const ev of events) {
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i]!;
     switch (ev.kind) {
       case 'acted': {
         lastActed = ev.uid;
@@ -298,6 +364,14 @@ export function buildBeats(view: BoardView, events: readonly GameEvent[]): Beat[
         // The hook itself has no picture; its consequences do.
         break;
       case 'attacked': {
+        // The trade is one blow: read the answer that follows this swing, so
+        // the pair is kept or dropped together.
+        const next = events[i + 1];
+        const back = next !== undefined && next.kind === 'retaliated' ? next : null;
+        if (decided && ev.dealt === 0 && (back === null || back.dealt === 0)) {
+          if (back !== null) i++;
+          break;
+        }
         const target = findView(view, ev.targetUid);
         const before = target?.health ?? 0;
         const beat: Beat = {
@@ -332,6 +406,8 @@ export function buildBeats(view: BoardView, events: readonly GameEvent[]): Beat[
         break;
       }
       case 'retaliated': {
+        // Reached only when the swing above it was kept - a suppressed trade
+        // consumes its own answer - so this needs no `decided` test of its own.
         const target = findView(view, ev.targetUid);
         const before = target?.health ?? 0;
         const beat: Beat = {
@@ -347,11 +423,44 @@ export function buildBeats(view: BoardView, events: readonly GameEvent[]): Beat[
         applyBeat(view, beat);
         break;
       }
+      case 'damaged': {
+        // Spell damage. Before the Mage's Scorch no fight the screen played
+        // could produce this event - the run deals only units - and a view
+        // that dropped it drifted from the engine on the first scorched line.
+        //
+        // A burn is one target at a time, so there is no pair to keep: a rider
+        // that reached four bodies and moved nothing on two of them still
+        // narrates the two it moved.
+        if (decided && ev.dealt === 0) break;
+        const target = findView(view, ev.targetUid);
+        const before = target?.health ?? 0;
+        const beat: Beat = {
+          kind: 'spell',
+          uid: ev.uid,
+          targetUid: ev.targetUid,
+          raw: ev.raw,
+          dealt: ev.dealt,
+          absorbed: ev.raw - ev.dealt,
+          wasted: Math.max(0, ev.dealt - before),
+        };
+        beats.push(beat);
+        applyBeat(view, beat);
+        break;
+      }
+      case 'equipped':
+        // Worn, not drawn: equipment changes the hero's numbers through
+        // `power()` and `armourOf()`, which the view reads off the engine's
+        // state at the end of the phase. No card the run deals is equipment.
+        break;
       case 'died': {
         deaths.push({ uid: ev.uid, rightUid: ev.rightUid });
+        const dying = findView(view, ev.uid);
         const beat: Beat = { kind: 'death', uid: ev.uid, side: ev.side };
         beats.push(beat);
         applyBeat(view, beat);
+        // A hero falling ends the fight, and everything the act still owes is
+        // an epilogue. Read before nothing: `isHero` is fixed at snapshot.
+        if (dying !== null && dying.isHero) decided = true;
         break;
       }
     }
@@ -377,7 +486,8 @@ export function applyBeat(view: BoardView, beat: Beat): void {
       break;
     }
     case 'attack':
-    case 'retaliate': {
+    case 'retaliate':
+    case 'spell': {
       const target = findView(view, beat.targetUid);
       if (target !== null) target.health -= beat.dealt;
       break;

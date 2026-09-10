@@ -29,6 +29,7 @@
 
 import type { Trait, Tribe } from '../engine/state.ts';
 import { RELAY_POWER, WAKE_POWER } from '../engine/resolver.ts';
+import { CLASS_TRAIT_TERMS } from './class-terms.ts';
 import type { IconName } from './icons.ts';
 import { type HatchPattern, type Tincture, TINCTURES, hatchOf } from './heraldry/tinctures.ts';
 import { type ChargeId, getCharge } from './heraldry/charges.ts';
@@ -117,6 +118,7 @@ export const TRAIT_TERMS: Readonly<Record<Trait, Term>> = {
       `When the unit immediately to its left dies this turn, this gains +${WAKE_POWER} Power ` +
       'until the end of the turn.',
   },
+  ...CLASS_TRAIT_TERMS,
 };
 
 // ------------------------------------------------------------ the price of a swing
@@ -203,7 +205,7 @@ export function tribeTerm(tribe: string): Term {
 export const TRIBE_TERMS: Readonly<Record<Tribe, Term>> = {
   human: { name: 'Human', icon: 'human', line: 'Your line’s generalists — the Squire, Captain and Champion.' },
   dwarf: { name: 'Dwarf', icon: 'dwarf', line: 'Your line’s heavy bodies — Shieldbearers, Ironguards, Pikemen.' },
-  elf: { name: 'Elf', icon: 'elf', line: 'Your line’s protectors — the Sentinel, which is a Guard.' },
+  elf: { name: 'Elf', icon: 'elf', line: 'Your line’s archers and wardens — the Archer, the Wayfinder, the Sentinel.' },
   orc: { name: 'Orc', icon: 'orc', line: 'The enemy’s rank and file — Goblins, Shieldwalls and Ogres.' },
   beast: { name: 'Beast', icon: 'beast', line: 'The enemy’s armoured monsters, such as the Stone Troll.' },
   hero: { name: 'Hero', icon: 'hero', line: 'Not a race. A hero is one per side and its Health is the fight.' },

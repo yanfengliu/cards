@@ -22,6 +22,17 @@
 // content, and it ends in a spread of places", which is what makes the run
 // measurable at all. They do not say the run is fun, well paced, or thirty
 // minutes long.
+//
+// **`npm run verify:run` is one class's gate, and that class is the Knight.**
+// The script names no `--class`, so all eight invariants run against the
+// default - `startRun` with no class named is the Knight - and a Ranger or a
+// Mage whose replay diverged would not turn it red. The other two classes are
+// gated by `test/classes.test.ts` instead, over seeds 1..6 rather than 200.
+// Pointing `--verify` at a class is expected to be useful and is not always
+// meaningful: the eighth invariant asks whether the seed window can see a
+// difference at all, and a class that wins no run in 200 seeds has no such
+// power, so `--verify --class mage` exits non-zero for a reason that is not a
+// code failure. Its message says which.
 
 import { pathToFileURL } from 'node:url';
 
@@ -33,7 +44,7 @@ import { makeDeckCard, runPool } from '../run/deck.ts';
 import { hashMaps, hashRun } from '../run/hash.ts';
 import { branchingTypes, mapProblems } from '../run/map.ts';
 import { drawDistinctCards, fightSeedFor } from '../run/nodes.ts';
-import { replayRun, runRun, startRun } from '../run/run.ts';
+import { contentForClass, replayRun, runRun, startRun } from '../run/run.ts';
 import type {
   NodeType,
   RunContent,
@@ -608,7 +619,13 @@ function main(): void {
 
   // Wall clock only for the elapsed line. Nothing in the run reads a clock.
   const started = Number(process.hrtime.bigint() / 1000000n);
-  const content = RUN_CONTENT;
+  // `--class <id>` measures one class. The content derived for it lists that
+  // class alone and starts as it, and everything below reads `content.hero`,
+  // `content.startingDeck` and `content.rewards`, so the class's hero, deck
+  // and pool are measured with no other change. Without the flag the content
+  // is the shipped one, which starts as the Knight, and this is the report it
+  // was before classes existed. An unknown class is refused by name.
+  const content = has('class') ? contentForClass(RUN_CONTENT, arg('class', '')) : RUN_CONTENT;
   const acts = content.acts.length;
 
   console.log('# How far does a run get, and where does it stop?');
@@ -616,8 +633,8 @@ function main(): void {
   console.log(`Seeds: ${n}, contiguous, ${first}..${first + n - 1}. Every arm ran every seed.`);
   console.log(
     `Content: ${acts} acts, ${content.mapShape.rows.length} rows an act, ` +
-      `hero ${content.hero.health} Health, ${content.startingDeck.length}-card starting deck, ` +
-      `max ${content.maxRounds} rounds a fight.`,
+      `hero ${content.hero.name} with ${content.hero.health} Health, ` +
+      `${content.startingDeck.length}-card starting deck, max ${content.maxRounds} rounds a fight.`,
   );
   console.log(
     'A route style and a placement style are separate dials; the routing comparison holds ' +
@@ -806,8 +823,12 @@ function main(): void {
     //           is structurally sound and offers routing choices that change
     //           what a path contains; and that the outcome distribution is not
     //           a fixed point.
-    //   Bound   to the shipped `RUN_CONTENT`. Nothing here says another content
-    //           set generates sound maps, only that this one does.
+    //   Bound   to the shipped `RUN_CONTENT`, as the class `--class` names or
+    //           the Knight when none is - `npm run verify:run` names none, so
+    //           the gate is the Knight's, and the other two classes' replay
+    //           and determinism are `test/classes.test.ts`'s over a smaller
+    //           seed window. Nothing here says another content set generates
+    //           sound maps, only that this one does.
     //   Bound   to bots. Every win rate printed above is evidence about the
     //           router and the placement bot, not about a person, and none of
     //           them is gated for that reason.

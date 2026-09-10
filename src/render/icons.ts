@@ -32,10 +32,18 @@ export type IconName =
   | 'health'
   | 'cost'
   | 'armour'
-  // The traits. One per `Trait` in `engine/state.ts`; `glossary.ts` binds them.
+  // The traits. One per `Trait` in `engine/state.ts`; `glossary.ts` binds them,
+  // the last two through `class-terms.ts`.
   | 'guard'
   | 'relay'
   | 'wake'
+  | 'volley'
+  | 'scorch'
+  // The classes. One per `ClassId` in `content/classes.ts`; `class-terms.ts`
+  // binds them, and the hero plate wears its class's as a crest.
+  | 'knight'
+  | 'ranger'
+  | 'mage'
   // The rest of the card.
   | 'target'
   | 'field'
@@ -126,6 +134,63 @@ const ICONS: Readonly<Record<IconName, IconDef>> = {
     shape: 'an arrow rising from a line',
     fillRule: 'nonzero',
     d: 'M12 1.8 L19.6 10.4 H15 V16.8 H9 V10.4 H4.4 Z M4 19.2 H20 V22 H4 Z',
+  },
+  // Two arrows flying the same way, one behind the other: two swings from one
+  // act. Relay is one arrow handing something along; this is a pair in flight.
+  volley: {
+    shape: 'two arrows flying right, one above the other',
+    fillRule: 'nonzero',
+    d:
+      'M2 5.6 H10.4 V2.6 L18 7 L10.4 11.4 V8.4 H2 Z' +
+      ' M6 15.6 H14.4 V12.6 L22 17 L14.4 21.4 V18.4 H6 Z',
+  },
+  // A single flame with a hollow core. The campfire (`rest`) is a flame over
+  // two logs; this one stands alone and is hollow, so the two silhouettes
+  // differ at eleven pixels and not only in their bases.
+  scorch: {
+    shape: 'a lone flame with a hollow core',
+    fillRule: 'evenodd',
+    d:
+      'M12 1.2 C15.2 5.4 19.4 8.6 19.4 14.2 C19.4 18.8 16.1 22.4 12 22.4' +
+      ' C7.9 22.4 4.6 18.8 4.6 14.2 C4.6 11 6.6 9.2 7.8 6.6 C8.4 9 9.4 10.4 11 11.2' +
+      ' C10.4 7.6 10.9 4.4 12 1.2 Z' +
+      ' M12 19.6 C13.9 19.6 15.2 18.3 15.2 16.5 C15.2 14.9 13.9 13.9 13.2 12.6' +
+      ' C12.8 13.9 12.2 14.5 11.5 14.9 C11.1 13.9 11 13.1 11.2 12.2 C9.9 13.4 8.8 14.7' +
+      ' 8.8 16.5 C8.8 18.3 10.1 19.6 12 19.6 Z',
+  },
+
+  // ---- the classes, worn as the hero plate's crest and shown on the class
+  // pick. Each is the thing the class fights with, not a portrait.
+
+  // A great helm: a rounded crown over a face plate with an eye slit and a
+  // breath line. Not a shield - that is Guard - and not a sword, which is Power.
+  knight: {
+    shape: 'a great helm with an eye slit',
+    fillRule: 'evenodd',
+    d:
+      'M12 1.6 C7.2 1.6 4 4.8 4 9.6 V22 H20 V9.6 C20 4.8 16.8 1.6 12 1.6 Z' +
+      ' M6.6 10.4 H17.4 V12.8 H6.6 Z M11.1 14.4 H12.9 V19.6 H11.1 Z',
+  },
+  // A bow, strung, with an arrow nocked and pointing right. The bow is what
+  // makes it a bow rather than an arrow: Relay and Volley are arrows alone.
+  ranger: {
+    shape: 'a strung bow with an arrow nocked',
+    fillRule: 'nonzero',
+    d:
+      'M5.2 1.6 C12.6 5.6 12.6 18.4 5.2 22.4 L7.4 22.4 C14.8 18.4 14.8 5.6 7.4 1.6 Z' +
+      ' M5.4 2.2 H6.4 V21.8 H5.4 Z' +
+      ' M7.8 10.9 H17.2 V9.2 L22.4 12 L17.2 14.8 V13.1 H7.8 Z',
+  },
+  // A pointed hat over a brim, with a star on the cone. The star is what stops
+  // it reading as a plain triangle on a bar at small size.
+  mage: {
+    shape: 'a pointed hat with a star, over a brim',
+    fillRule: 'evenodd',
+    d:
+      'M12 1.2 L17.2 15.2 H21.4 L22.6 18.4 H1.4 L2.6 15.2 H6.8 Z' +
+      ' M12 6.2 L12.9 8.6 L15.5 8.8 L13.5 10.5 L14.1 13.1 L12 11.7 L9.9 13.1 L10.5 10.5' +
+      ' L8.5 8.8 L11.1 8.6 Z' +
+      ' M3.2 19.6 H20.8 V22 H3.2 Z',
   },
   // A ring around a dot: the chance an attack lands here.
   target: {

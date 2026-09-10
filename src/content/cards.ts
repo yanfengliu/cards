@@ -1,8 +1,10 @@
-// Data only, no logic. Twenty-two hand-authored cards across the design's
-// three types: ten units the player can place, four the enemy fields, five
+// Data only, no logic. Thirty-two hand-authored cards across the design's
+// three types: twenty units the player can place, four the enemy fields, five
 // spells and three pieces of equipment. Enough traits and verbs to make
 // placement and spending mean something and no more - this is a vocabulary, not
-// the card pool.
+// the card pool. Which of these a run can draft is `classes.ts`'s decision: a
+// class owns a starting deck and a reward pool, and this file owns the cards
+// and their ids.
 //
 // Numbers are starting guesses tuned once, to land the baseline win rate near
 // 50% so the A/B measurement is not compressed against a floor or a ceiling.
@@ -36,6 +38,30 @@ export const PLAYER_CARDS: readonly UnitCard[] = [
   { id: 'u_captain', name: 'Human Captain', cost: 3, power: 3, health: 4, armour: 1, tribe: 'human', traits: ['relay'] },
   { id: 'u_sentinel', name: 'Elf Sentinel', cost: 3, power: 2, health: 6, armour: 1, tribe: 'elf', traits: ['guard'] },
   { id: 'u_champion', name: 'Human Champion', cost: 3, power: 5, health: 4, armour: 0, tribe: 'human', traits: [] },
+
+  // The ten below arrived with classes, so the three pools in `classes.ts`
+  // could lean different ways. Every number is a starting guess and none has
+  // been tuned; `npm run measure:run` per class is what says what they do.
+  //
+  //   - Volley bodies, for the Ranger. A second swing is a second retaliation
+  //     too, so the Archer is given 3 Health rather than the 2 a 1-cost body
+  //     usually gets: at 2 it died on its first swing into any Goblin and the
+  //     trait never fired.
+  //   - Two 0-Power bodies. A 0-Power unit retaliates for 0, so it is a wall
+  //     that is free to attack into; the Treewarden is a wall that is also a
+  //     Guard, and the Herald hands +2 to its right and can hurt nothing itself.
+  //   - Armoured dwarves and a Paladin, for the Knight: the Bulwark is a Stone
+  //     Troll of your own, and its Armour 2 makes a Goblin's swing worth 0.
+  { id: 'u_archer', name: 'Elf Archer', cost: 1, power: 1, health: 3, armour: 0, tribe: 'elf', traits: ['volley'] },
+  { id: 'u_wayfinder', name: 'Elf Wayfinder', cost: 2, power: 2, health: 3, armour: 0, tribe: 'elf', traits: ['relay'] },
+  { id: 'u_treewarden', name: 'Elf Treewarden', cost: 2, power: 0, health: 6, armour: 0, tribe: 'elf', traits: ['guard'] },
+  { id: 'u_longbow', name: 'Elf Longbow', cost: 3, power: 2, health: 5, armour: 0, tribe: 'elf', traits: ['volley'] },
+  { id: 'u_herald', name: 'Human Herald', cost: 2, power: 0, health: 5, armour: 0, tribe: 'human', traits: ['relay'] },
+  { id: 'u_manatarms', name: 'Human Man-at-Arms', cost: 2, power: 3, health: 3, armour: 0, tribe: 'human', traits: [] },
+  { id: 'u_paladin', name: 'Human Paladin', cost: 3, power: 3, health: 5, armour: 1, tribe: 'human', traits: ['guard'] },
+  { id: 'u_veteran', name: 'Dwarf Veteran', cost: 2, power: 3, health: 2, armour: 0, tribe: 'dwarf', traits: ['wake'] },
+  { id: 'u_thane', name: 'Dwarf Thane', cost: 3, power: 4, health: 4, armour: 1, tribe: 'dwarf', traits: [] },
+  { id: 'u_bulwark', name: 'Dwarf Bulwark', cost: 3, power: 1, health: 7, armour: 2, tribe: 'dwarf', traits: ['guard'] },
 ];
 
 export const ENEMY_CARDS: readonly UnitCard[] = [
@@ -48,8 +74,11 @@ export const ENEMY_CARDS: readonly UnitCard[] = [
 /**
  * The negative control for the whole measurement.
  *
- * The same ten cards with every trait that reads a neighbour - Relay and Wake -
- * removed. Guard stays, because Guard does not care where it stands.
+ * The same cards with every trait that reads a neighbour - Relay and Wake -
+ * removed. Guard stays, because Guard does not care where it stands, and so do
+ * Volley and Scorch: neither reads a neighbour, so neither is a cascade trait.
+ * Only the eighteen cards of `PLAYER_DECK` are ever measured, and none of them
+ * carries either.
  *
  * If the optimal-placement bot still beats the random one by as much on this
  * set, the measurement is picking up something other than the cascade and the
@@ -216,10 +245,12 @@ export function castableById(id: string): CastableCard | null {
  * Knight: 30 Health, swings for 2. No equipment in this probe.
  *
  * Hero health persists across a whole run in the design, so the player's bar is
- * larger than any single encounter's - `src/run/content.ts` runs 200. The enemy
- * hero's health is this probe's difficulty dial; see `ENCOUNTERS`, and note
- * that a hero now retaliates when it is struck, so its Power is a live number
- * here in a way it was not.
+ * larger than any single encounter's - the run's Knight in `classes.ts` has
+ * 200. The enemy hero's health is this probe's difficulty dial; see
+ * `ENCOUNTERS`, and note that a hero now retaliates when it is struck, so its
+ * Power is a live number here in a way it was not. This is the single-fight
+ * probe's hero and every measured placement number is taken with it; the
+ * three run heroes, one per class, are `classes.ts`'s.
  */
 export const PLAYER_HERO: HeroSpec = { name: 'Knight', health: 30, power: 2, armour: 0 };
 

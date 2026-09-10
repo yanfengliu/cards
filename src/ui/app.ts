@@ -77,7 +77,7 @@ import {
 } from '../render/board.ts';
 import { explainCard } from '../render/inspect.ts';
 import { STAT_TERMS, TRAIT_TERMS, tribeTerm } from '../render/glossary.ts';
-import { incomingOdds, pct, projectOwnPhase } from '../render/odds.ts';
+import { burnTotal, incomingOdds, pct, projectOwnPhase } from '../render/odds.ts';
 import { type Playback, type Step, play, schedule } from '../render/anim.ts';
 import { makeFx } from '../render/fx.ts';
 import { type Intent, wireInput } from './input.ts';
@@ -470,16 +470,35 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
     const outgoing = incomingOdds(projected, 'player');
     const share = incoming.poolSize === 0 ? 0 : 1 / incoming.poolSize;
 
+    /**
+     * The burn, said after the swings and said as certain, because it is.
+     *
+     * A Scorch picks no target, so it belongs in neither the attack count nor
+     * the percentages; leaving it out of the line entirely is what understated
+     * a Mage's whole turn by fourfold. "Whatever the rolls" is the phrase that
+     * separates it from every other number on this line, all of which are
+     * conditional on a target roll.
+     */
+    const burnWords = (odds: typeof incoming, whose: string): string => {
+      const total = burnTotal(odds);
+      if (odds.scorchers === 0) return '';
+      if (total === 0) {
+        return ` ${whose} Scorch is stopped by Armour on every one of them.`;
+      }
+      return ` ${whose} Scorch burns <b>${total}</b> more across the line, whatever the rolls.`;
+    };
+
     dom.enemyIntent.innerHTML =
       `<b>${incoming.attackers}</b> attack${incoming.attackers === 1 ? '' : 's'} on the line now ` +
       `(plus whatever it plays), <b>${incoming.totalPower}</b> Power. ` +
       (incoming.poolSize === 0
-        ? '<span class="warn">Nothing of yours is left to strike</span> — every attack fizzles.'
+        ? '<span class="warn">Nothing of yours is left to strike</span> — every attack finds no target.'
         : incoming.guarded
           ? `Your Guards absorb everything: each attack is <b>${pct(share)}</b> onto each of your ` +
             `<b>${incoming.poolSize}</b> Guard${incoming.poolSize === 1 ? '' : 's'}.`
           : `<span class="warn">No Guard.</span> Each attack is <b>${pct(share)}</b> onto each of ` +
-            `your <b>${incoming.poolSize}</b> targets — your hero included.`);
+            `your <b>${incoming.poolSize}</b> targets — your hero included.`) +
+      burnWords(incoming, 'Its');
 
     const outShare = outgoing.poolSize === 0 ? 0 : 1 / outgoing.poolSize;
     // `outgoing` is read off the projected board, so this total already
@@ -487,11 +506,12 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
     dom.playerIntent.innerHTML =
       `<b>${outgoing.attackers}</b> of yours will swing for <b>${outgoing.totalPower}</b> Power. ` +
       (outgoing.poolSize === 0
-        ? 'No legal enemy target — your attacks will fizzle.'
+        ? 'No legal enemy target — your attacks will find nothing to hit.'
         : outgoing.guarded
           ? `Enemy Guards force every one of them: <b>${pct(outShare)}</b> onto each of ` +
             `<b>${outgoing.poolSize}</b>.`
-          : `Each lands <b>${pct(outShare)}</b> onto each of <b>${outgoing.poolSize}</b> targets.`);
+          : `Each lands <b>${pct(outShare)}</b> onto each of <b>${outgoing.poolSize}</b> targets.`) +
+      burnWords(outgoing, 'Your');
   }
 
   function renderHand(): void {
@@ -681,8 +701,35 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
         break;
       }
       case 'fizzle':
-        logLine('has no legal target — the attack fizzles.');
+        // Only a spell can fizzle. An attack that finds no legal target says
+        // nothing at all - `src/engine/resolver.ts`'s header - so the three
+        // producers left are `damageOne`, `damageAll` and `buffAll`, every one
+        // of them cast from a card that cost energy. This line used to say "the
+        // attack fizzles", which was true when it was written and became wrong
+        // in the same commit that removed the attack's `fizzled`.
+        //
+        // It names the caster because a spell is not an `act`: there is no
+        // "X acts." line above it to carry the subject, the way there is for a
+        // swing. Unreachable through the app today - nothing casts through
+        // `src/ui/session.ts` - and gated by "the log calls a fizzle what a
+        // fizzle is: only a spell can produce one" in `test/explain.test.ts`,
+        // which measures the producer set off the resolver and then reads this
+        // block as text, because `node --test` has no DOM to draw it in.
+        logLine(
+          `<b>${nameOf(beat.uid)}</b>’s spell has no legal target — it fizzles, and the energy is spent.`,
+        );
         break;
+      case 'spell': {
+        const bits: string[] = [];
+        if (beat.absorbed > 0) bits.push(`${beat.absorbed} stopped by armour`);
+        if (beat.wasted > 0) bits.push(`${beat.wasted} wasted`);
+        logLine(
+          `scorches <b>${nameOf(beat.targetUid)}</b> for <b>${beat.dealt}</b>` +
+            (bits.length > 0 ? ` <i>(${bits.join('; ')})</i>` : '') +
+            ' — spell damage, nothing hits back.',
+        );
+        break;
+      }
       case 'buff': {
         const from =
           beat.source.via === 'relay'
@@ -735,6 +782,17 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
       case 'fizzle': {
         const at = elementFor(beat.uid);
         if (at !== null) fx.float(at, 'no target', 'is-small', ms);
+        break;
+      }
+      case 'spell': {
+        // No beam: a scorch reaches every unit on the line at once, and one
+        // beam per target from the same hero is a fan of lines saying nothing
+        // an attack beam does not. The number over each target is the beat.
+        const to = elementFor(beat.targetUid);
+        if (to !== null) {
+          fx.float(to, beat.dealt > 0 ? `−${beat.dealt}` : 'blocked', 'is-spell', ms, 4);
+          if (beat.absorbed > 0) fx.float(to, `armour −${beat.absorbed}`, 'is-small', ms, 38);
+        }
         break;
       }
       case 'buff': {
