@@ -63,6 +63,16 @@
   box-sizing: border-box;
 }
 
+/*
+ * `hidden` must win over every `display` this sheet sets. The user-agent's own
+ * `[hidden] { display: none }` loses to any author rule, so a `.screen` that is
+ * `display: flex` would show through its own `hidden` attribute - which is how
+ * the fight's empty lines appeared under the map on the first run.
+ */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -1213,6 +1223,669 @@ button.is-on {
   font-weight: 400;
   margin-top: 4px;
   color: var(--ink-2);
+}
+
+/* ---------- the two screens ---------- */
+
+/*
+ * `#app[data-mode]` says which screen owns the page. The fight-only controls
+ * (seed, encounter, "New fight") and the run-only ones (the readouts, the
+ * continue bar after a fight) hide by mode, so neither screen has to know the
+ * other's HUD exists.
+ */
+#app[data-mode='run'] .fight-only,
+#app[data-mode='fight'] .run-only {
+  display: none !important;
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  animation: screen-in 240ms ease-out;
+}
+
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- the run: HUD readouts ---------- */
+
+.hud__group--status {
+  gap: var(--sp-3);
+}
+
+.hud__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  cursor: help;
+}
+
+.hud__stat b {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.hud__stat svg {
+  color: var(--ink-3);
+}
+
+.hud__stat--health svg {
+  color: var(--gules);
+}
+
+[data-theme='dark'] .hud__stat--health svg {
+  color: #e0555f;
+}
+
+.hud__bar {
+  display: inline-block;
+  width: 64px;
+  height: 6px;
+  margin-left: 4px;
+  border-radius: 3px;
+  background: var(--rule);
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.hud__bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--gules), #d8434e);
+}
+
+.hud__stat--seed {
+  font-family: var(--mono);
+  color: var(--ink-3);
+}
+
+/* ---------- the run: layout ---------- */
+
+.run__body {
+  display: grid;
+  grid-template-columns: minmax(340px, auto) minmax(280px, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.run__map {
+  padding: var(--sp-2);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: auto;
+}
+
+.run__map svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.run__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.run__panel,
+.run__notice,
+.run__node {
+  padding: var(--sp-3);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.run__notice {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  border-left: 4px solid var(--rule);
+}
+
+.run__notice.is-live {
+  border-left-color: var(--gold);
+}
+
+.run__notice b,
+.run__panel b,
+.run__node b {
+  color: var(--ink);
+}
+
+.run__h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: var(--fs-small);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+
+.run__h svg {
+  color: var(--gold);
+}
+
+[data-theme='light'] .run__h svg {
+  color: #8a6707;
+}
+
+.run__panel p,
+.run__node p {
+  margin: 0 0 8px;
+}
+
+.run__panel p:last-child {
+  margin-bottom: 0;
+}
+
+.run__facts {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+
+.run__facts li {
+  margin-bottom: 3px;
+}
+
+.run__muted {
+  font-size: var(--fs-small);
+  color: var(--ink-3);
+}
+
+.run__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: var(--fs-title);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.run__title svg {
+  color: var(--gold);
+}
+
+[data-theme='light'] .run__title svg {
+  color: #8a6707;
+}
+
+.run__title.is-won {
+  color: var(--vert);
+}
+
+[data-theme='dark'] .run__title.is-won {
+  color: #63c47a;
+}
+
+.run__title.is-lost {
+  color: var(--danger);
+}
+
+.run__lead {
+  font-size: var(--fs-lead);
+  color: var(--ink-2);
+}
+
+/* ---------- the run: the map ---------- */
+
+/*
+ * Node state is a class, and the words are on `aria-label`: walked, here,
+ * reachable, further on, not taken. Colour is the type's tint on the disc and
+ * never the only carrier - every node wears its icon and its label.
+ */
+.map .medge {
+  stroke: var(--rule);
+  stroke-width: 2;
+  transition: stroke 140ms ease, opacity 140ms ease;
+}
+
+.map .medge.is-walked {
+  stroke: var(--gold);
+  stroke-width: 3.5;
+}
+
+.map .medge.is-open {
+  stroke: var(--ink-2);
+  stroke-width: 3;
+  stroke-dasharray: 6 5;
+}
+
+.map .medge.is-in-focus {
+  stroke: var(--azure);
+  stroke-width: 3;
+}
+
+[data-theme='dark'] .map .medge.is-in-focus {
+  stroke: #7fa8e8;
+}
+
+.map .medge.is-passed {
+  opacity: 0.35;
+}
+
+.map .mnode__ring {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 2.5;
+  transition: stroke 140ms ease;
+}
+
+.map .mnode__disc {
+  fill: var(--panel-2);
+  stroke: var(--ink-3);
+  stroke-width: 1.5;
+  transition: fill 140ms ease, stroke 140ms ease;
+}
+
+.map .mnode__icon svg {
+  color: var(--ink-2);
+}
+
+/* A halo in the panel colour keeps the words readable where an edge runs
+   under them, which on a four-wide row is most of the captions. */
+.map .mnode__label,
+.map .mnode__caption {
+  paint-order: stroke fill;
+  stroke: var(--panel);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.map .mnode__label {
+  font: 700 10px var(--font);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  fill: var(--ink-2);
+}
+
+.map .mnode__caption {
+  font: 400 9.5px var(--font);
+  fill: var(--ink-3);
+}
+
+/* The type tint. Elites and the boss in gules, rest in vert, shop in or,
+   forge in azure; fights and events stay on the panel colour. */
+.map .mnode--elite .mnode__disc,
+.map .mnode--boss .mnode__disc {
+  stroke: var(--gules);
+}
+
+.map .mnode--boss .mnode__disc {
+  fill: rgba(163, 32, 42, 0.16);
+}
+
+.map .mnode--rest .mnode__disc {
+  stroke: var(--vert);
+}
+
+.map .mnode--shop .mnode__disc {
+  stroke: var(--gold);
+}
+
+.map .mnode--forge .mnode__disc {
+  stroke: var(--azure);
+}
+
+.map .mnode.is-walked .mnode__disc {
+  fill: var(--gold);
+  stroke: var(--gold);
+}
+
+.map .mnode.is-walked .mnode__icon svg {
+  color: #201a06;
+}
+
+.map .mnode.is-current .mnode__disc {
+  fill: var(--ink);
+  stroke: var(--gold);
+  stroke-width: 3;
+}
+
+.map .mnode.is-current .mnode__icon svg {
+  color: var(--ground);
+}
+
+.map .mnode.is-current .mnode__ring {
+  stroke: var(--gold);
+}
+
+.map .mnode.is-reachable {
+  cursor: pointer;
+}
+
+.map .mnode.is-reachable .mnode__disc {
+  fill: var(--panel);
+  stroke-width: 2.5;
+}
+
+.map .mnode.is-reachable .mnode__ring {
+  stroke: rgba(217, 165, 32, 0.55);
+  animation: map-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes map-pulse {
+  from {
+    stroke-opacity: 0.35;
+  }
+  to {
+    stroke-opacity: 1;
+  }
+}
+
+.map .mnode.is-reachable .mnode__label {
+  fill: var(--ink);
+}
+
+.map .mnode.is-reachable:hover .mnode__disc,
+.map .mnode.is-reachable:focus-visible .mnode__disc,
+.map .mnode.is-focus .mnode__disc {
+  fill: var(--gold);
+  stroke: var(--gold);
+}
+
+.map .mnode.is-reachable:hover .mnode__icon svg,
+.map .mnode.is-reachable:focus-visible .mnode__icon svg,
+.map .mnode.is-focus .mnode__icon svg {
+  color: #201a06;
+}
+
+.map .mnode.is-reachable:focus {
+  outline: none;
+}
+
+.map .mnode.is-reachable:focus-visible .mnode__ring {
+  stroke: var(--azure);
+  animation: none;
+}
+
+.map .mnode.is-in-focus .mnode__disc {
+  stroke: var(--azure);
+  stroke-width: 2.5;
+}
+
+[data-theme='dark'] .map .mnode.is-in-focus .mnode__disc {
+  stroke: #7fa8e8;
+}
+
+.map .mnode.is-passed {
+  opacity: 0.38;
+}
+
+.map .mnode.is-ahead:not(.is-in-focus) .mnode__disc {
+  fill: var(--ground);
+}
+
+/* ---------- the run: cards on offer, the deck, the forge ---------- */
+
+.run__offer,
+.run__deckgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 4px 0 10px;
+}
+
+.runcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 128px;
+  padding: 14px 6px 8px;
+  background: var(--panel-2);
+  border: 2px solid var(--rule);
+  border-radius: var(--radius);
+  text-align: center;
+  cursor: pointer;
+  transition: transform 130ms ease, border-color 130ms ease, box-shadow 130ms ease;
+}
+
+.runcard:hover:not(:disabled),
+.runcard:focus-visible {
+  transform: translateY(-4px);
+  border-color: var(--gold);
+  box-shadow: var(--shadow-lift);
+}
+
+.runcard[aria-pressed='true'] {
+  border-color: var(--gold);
+  background: rgba(217, 165, 32, 0.14);
+}
+
+.runcard:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  filter: saturate(0.4);
+}
+
+.runcard .card__art {
+  display: block;
+  width: 96px;
+  line-height: 0;
+}
+
+.runcard .card__art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.runcard__cost {
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--azure);
+  color: #fff;
+  font-weight: 900;
+  font-size: 12px;
+  line-height: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: var(--shadow);
+}
+
+.runcard__name {
+  font-size: var(--fs-small);
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.runcard__stats {
+  font-size: var(--fs-micro);
+  color: var(--ink-2);
+  line-height: 1.3;
+}
+
+.runcard__price {
+  margin-top: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #201a06;
+  font-size: var(--fs-micro);
+  font-weight: 800;
+}
+
+.runcard__price.is-short {
+  background: var(--rule);
+  color: var(--ink-2);
+}
+
+.runcard__forged {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(38, 80, 143, 0.16);
+  border: 1px solid var(--azure);
+  color: var(--azure);
+  font-size: var(--fs-micro);
+  font-weight: 800;
+}
+
+[data-theme='dark'] .runcard__forged {
+  color: #7fa8e8;
+  border-color: #7fa8e8;
+}
+
+/* The deck beside the map: every card at a glance, forged ones marked. */
+.run__deckgrid--small {
+  gap: 5px;
+  margin: 0;
+}
+
+.runcard--mini {
+  width: 52px;
+  padding: 0;
+  border-width: 1px;
+  background: transparent;
+  gap: 0;
+}
+
+.runcard--mini .card__art {
+  width: 52px;
+}
+
+.runcard--mini .runcard__forged {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 4px;
+  font-size: 9px;
+  background: var(--azure);
+  color: #fff;
+  border: none;
+  white-space: nowrap;
+}
+
+.run__modes,
+.run__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 4px 0 8px;
+}
+
+.run__mode,
+.run__option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 180px;
+  max-width: 320px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.run__mode b,
+.run__option b {
+  font-size: var(--fs-lead);
+}
+
+.run__mode small,
+.run__option small {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+
+.run__mode:hover:not(:disabled),
+.run__option:hover:not(:disabled) {
+  border-color: var(--gold);
+}
+
+/* ---------- the run: the end ---------- */
+
+.run__stats {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 0 0 10px;
+  font-size: var(--fs-small);
+}
+
+.run__stats dt {
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  align-self: center;
+}
+
+.run__stats dd {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.run__log textarea {
+  width: 100%;
+  max-width: 720px;
+  margin: 6px 0;
+  font: 11px/1.4 var(--mono);
+  color: var(--ink-2);
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.run__newrun {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.run__newrun input {
+  width: 84px;
+  margin-left: 6px;
+  font: inherit;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--panel-2);
+  color: inherit;
+}
+
+/* ---------- after a run's fight ---------- */
+
+.fight__after {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-2);
+}
+
+@media (max-width: 860px) {
+  .run__body {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

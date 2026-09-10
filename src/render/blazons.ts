@@ -79,9 +79,20 @@ function hashId(id: string): number {
   return h >>> 0;
 }
 
-/** Strips the negative control's suffix: `u_squire_nc` is the Squire's device. */
+/**
+ * Strips the two suffixes a card id can wear and still be the same card.
+ *
+ * `u_squire_nc` is the negative control's copy of the Squire. `u_squire#7` is
+ * the run's seventh deck instance of it: `src/run/deck.ts` mints one per copy
+ * so the forge can upgrade one Squire out of three, and `#` is its
+ * `INSTANCE_SEPARATOR`, never part of a card id. Both are the Squire's device.
+ * Before the instance suffix was stripped every player card in a run was drawn
+ * as a hashed stranger - `test/ui-run.test.ts` holds it.
+ */
 function baseId(id: string): string {
-  return id.endsWith('_nc') ? id.slice(0, -3) : id;
+  const hash = id.indexOf('#');
+  const bare = hash >= 0 ? id.slice(0, hash) : id;
+  return bare.endsWith('_nc') ? bare.slice(0, -3) : bare;
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
- * The game, as a screen.
+ * The fight, as a screen.
  *
- * Three modes and one loop:
+ * Three modes and one loop, once a fight has been handed in:
  *
  *   planning   the hand is drawn, energy is unspent, and every placement is a
  *              ghost the player can take back. Nothing has been committed, so
@@ -13,19 +13,36 @@
  *              screen replays its event stream one beat at a time.
  *   over       a hero is at zero, or the round cap ran out.
  *
+ * And a fourth, `idle`, in which there is no fight at all: the run screen owns
+ * the page and this one ignores every input until `start` is called.
+ *
  * The engine is never asked to be interactive. A committed round is resolved in
  * full by `session.commitRound`, and what the player watches is a replay of the
  * events it produced against a view this layer owns. That is what keeps the
  * animation out of the determinism story entirely: pause it, speed it up, skip
  * it, and the fight is the same fight.
+ *
+ * The screen is handed a `FightSetup` and hands back a `Fight` plus its action
+ * list. It builds nothing from `src/content/` itself, so the same screen fights
+ * a run's node - a run deck of instance ids resolved through `runPool` - and
+ * the single addressable fight `startApp` below still offers. Every committed
+ * round is recorded as the `RoundRecord` `replayFight` reads, which is what
+ * lets `src/ui/run.ts` replay a hand-played fight inside a hand-played run.
  */
 
-import { type Fight, type Placement, setupFight, cloneFight, applyPlacements } from '../engine/fight.ts';
-import { heroOf, type GameState, type UnitCard } from '../engine/state.ts';
+import {
+  type Fight,
+  type FightSetup,
+  type Placement,
+  type RoundRecord,
+  setupFight,
+  cloneFight,
+  applyPlacements,
+} from '../engine/fight.ts';
+import { heroOf, type CardPool, type GameState, type UnitCard } from '../engine/state.ts';
 import {
   CARD_POOL,
   ENCOUNTERS,
-  ENERGY_PER_TURN,
   MAX_ROUNDS,
   PLAYER_DECK,
   PLAYER_HERO,
@@ -40,7 +57,17 @@ import {
   lineCost,
   placementsFrom,
 } from './session.ts';
-import { type Beat, type BoardView, type EntityView, findView, snapshot, applyBeat, buildBeats, viewDrift } from '../render/view.ts';
+import {
+  type Beat,
+  type BoardView,
+  type EntityView,
+  cardEntityView,
+  findView,
+  snapshot,
+  applyBeat,
+  buildBeats,
+  viewDrift,
+} from '../render/view.ts';
 import {
   type LineItem,
   cardViewOf,
@@ -55,7 +82,58 @@ import { type Playback, type Step, play, schedule } from '../render/anim.ts';
 import { makeFx } from '../render/fx.ts';
 import { type Intent, wireInput } from './input.ts';
 
-type Mode = 'planning' | 'resolving' | 'over';
+type Mode = 'idle' | 'planning' | 'resolving' | 'over';
+
+export type Theme = 'light' | 'dark';
+
+/** What the log says as a fight opens, and what the hint says once it is over. */
+export type FightHeading = {
+  readonly title: string;
+  readonly intro: readonly string[];
+  readonly overHint: string;
+};
+
+export type FightOutcome = {
+  readonly fight: Fight;
+  /** One record per committed round, in order: what `replayFight` reads. */
+  readonly rounds: RoundRecord[];
+};
+
+export type FightHooks = {
+  /** Called once, after the final render, when a fight reaches a terminal result. */
+  readonly onFightOver?: (outcome: FightOutcome) => void;
+  /** The "New fight" control was pressed. Absent in a run, which has no such control. */
+  readonly onNewFight?: () => void;
+  /**
+   * Resolve a card id shown outside the fight - a reward on offer, a deck card
+   * at the forge - for the explanation panel. Null means "not one of mine";
+   * the fight's own pool is asked next.
+   */
+  readonly resolveCard?: (id: string) => UnitCard | null;
+};
+
+export type FightScreen = {
+  /** Put a fight on screen and open its first round. */
+  start(setup: FightSetup, heading: FightHeading): void;
+  /**
+   * Take the fight off screen. Until the next `start`, no render runs: a
+   * window resize while the map is up used to re-render the finished fight's
+   * HUD over the run's, because the fight was still in `over` rather than
+   * `idle`. The finished `Fight` stays readable through `fight()` until then.
+   */
+  idle(): void;
+  setTheme(value: Theme): void;
+  setHatch(value: boolean): void;
+  setSpeed(value: number): void;
+  theme(): Theme;
+  /** Whether cards are drawn with the dark-ground halo. Follows the theme. */
+  mount(): boolean;
+  hatch(): boolean;
+  /** Explain `target`, or hide the panel with null. Shared with the run screens. */
+  showInspect(target: HTMLElement | null): void;
+  /** The fight on screen, or null while idle. */
+  fight(): Fight | null;
+};
 
 /**
  * A trait's rule, in one sentence, from the one table that has them.
@@ -73,7 +151,7 @@ function traitRule(trait: string): string | null {
   return term === undefined ? null : `<b>${term.name}</b> — ${term.line}`;
 }
 
-function need<T extends HTMLElement>(id: string): T {
+export function need<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (node === null) {
     throw new Error(
@@ -84,12 +162,47 @@ function need<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
-export function startApp(): void {
+/** The theme the page opens in: the URL's, else the system's. */
+export function initialTheme(params: URLSearchParams): Theme {
+  const themeParam = params.get('theme');
+  if (themeParam === 'light' || themeParam === 'dark') return themeParam;
+  const prefersDark =
+    typeof globalThis.matchMedia === 'function' &&
+    globalThis.matchMedia('(prefers-color-scheme: dark)').matches;
+  return prefersDark ? 'dark' : 'light';
+}
+
+/** A pool lookup that answers null for an id the pool refuses, instead of throwing. */
+function safeCard(pool: CardPool, id: string): UnitCard | null {
+  try {
+    return pool.card(id);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * An empty fight to hold the slot while idle, so nothing below has to ask
+ * whether there is a fight before reading it. Never rendered: `idle` skips
+ * every render, and `start` replaces it before the mode leaves `idle`.
+ */
+function idleFight(): Fight {
+  return setupFight({
+    seed: 1,
+    pool: CARD_POOL,
+    playerDeck: [],
+    enemyDeck: [],
+    enemyOpening: [],
+    playerHero: PLAYER_HERO,
+    enemyHero: PLAYER_HERO,
+    maxRounds: 1,
+  });
+}
+
+export function createFightScreen(hooks: FightHooks = {}): FightScreen {
   const dom = {
     app: need<HTMLElement>('app'),
     subtitle: need<HTMLElement>('subtitle'),
-    seed: need<HTMLInputElement>('seed'),
-    encounter: need<HTMLSelectElement>('encounter'),
     enemyName: need<HTMLElement>('enemy-name'),
     enemyIntent: need<HTMLElement>('enemy-intent'),
     playerIntent: need<HTMLElement>('player-intent'),
@@ -110,30 +223,11 @@ export function startApp(): void {
 
   const fx = makeFx(dom.fx);
 
-  /*
-   * The fight is addressable: `?seed=12&encounter=hard` opens exactly that
-   * fight. `ARCHITECTURE.md` makes a seed plus an action list the whole bug
-   * report, and a link is the cheapest possible way to hand one over.
-   */
-  const params = new URLSearchParams(globalThis.location.search);
-  const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-  const startSeed = Number.isFinite(seedParam) && seedParam > 0 ? seedParam : 7;
-  const encounterParam = params.get('encounter');
-  let encounterId = ENCOUNTERS.some((e) => e.id === encounterParam)
-    ? (encounterParam as string)
-    : PRIMARY_ENCOUNTER;
-  let encounter = encounterById(encounterId);
-
-  dom.seed.value = String(startSeed);
-  for (const e of ENCOUNTERS) {
-    const option = document.createElement('option');
-    option.value = e.id;
-    option.textContent = `${e.id} — ${e.name}`;
-    option.selected = e.id === encounterId;
-    dom.encounter.append(option);
-  }
-
-  let mode: Mode = 'planning';
+  let mode: Mode = 'idle';
+  let fight: Fight = idleFight();
+  /** Every committed round of the fight on screen, as `replayFight` reads them. */
+  let fightLog: RoundRecord[] = [];
+  let overHint = 'The fight is over.';
   /** The line being built: real units, with pending cards spliced in. */
   let plan: PlanItem[] = [];
   /** ghost id -> the hand slot it came out of, so the hand can show it spent. */
@@ -145,6 +239,7 @@ export function startApp(): void {
   let instant = false;
   let view: BoardView = { player: [], enemy: [] };
   let frozen: { player: number; enemy: number } | null = null;
+  let theme: Theme = 'light';
   let mount = false;
   /**
    * Rule every field with its heraldic hatching.
@@ -161,20 +256,9 @@ export function startApp(): void {
 
   // ---------------------------------------------------------------- setup
 
-  function makeFight(seed: number): Fight {
-    return setupFight({
-      seed,
-      pool: CARD_POOL,
-      playerDeck: PLAYER_DECK,
-      enemyDeck: ENEMY_DECK,
-      enemyOpening: encounter.opening,
-      playerHero: PLAYER_HERO,
-      enemyHero: encounter.enemyHero,
-      maxRounds: MAX_ROUNDS,
-    });
+  function energyPerTurn(): number {
+    return fight.pool.energyPerTurn;
   }
-
-  let fight: Fight = makeFight(1);
 
   function resetPlan(): void {
     plan = fight.state.board.player
@@ -184,18 +268,24 @@ export function startApp(): void {
     selected = null;
   }
 
-  function newFight(seed: number): void {
+  function start(setup: FightSetup, heading: FightHeading): void {
     playback?.cancel();
     playback = null;
     fx.clear();
-    fight = makeFight(seed);
+    fight = setupFight(setup);
+    fightLog = [];
+    overHint = heading.overHint;
     mode = 'planning';
     frozen = null;
     dom.log.textContent = '';
+    // A run deck's instance ids carry stats that a forge can change between
+    // two fights, and the cache is keyed by id alone.
+    handArtCache.clear();
+    showInspect(null);
     beginRound(fight);
     resetPlan();
-    logLine(`Fight seed ${seed} — ${encounter.name}.`, 'is-head');
-    logLine('Your line resolves left to right. Your hero swings last.');
+    logLine(heading.title, 'is-head');
+    for (const line of heading.intro) logLine(line);
     render();
   }
 
@@ -253,6 +343,7 @@ export function startApp(): void {
   }
 
   function render(): void {
+    if (mode === 'idle') return;
     if (mode === 'resolving') {
       renderRows();
       renderHud();
@@ -359,7 +450,7 @@ export function startApp(): void {
       `round ${fight.round} of ${fight.maxRounds} · ` +
       `you ${Math.max(0, hero.health)}/${hero.maxHealth} · ` +
       `${foeName} ${Math.max(0, foe.health)}/${foe.maxHealth}`;
-    dom.enemyName.textContent = `${foeName}'s line`;
+    dom.enemyName.textContent = `${foeName}${foeName.endsWith('s') ? '’' : '’s'} line`;
     dom.skip.disabled = mode !== 'resolving';
     dom.commit.disabled = mode !== 'planning';
     dom.commit.textContent = mode === 'over' ? 'Fight over' : 'Commit turn';
@@ -403,28 +494,8 @@ export function startApp(): void {
           : `Each lands <b>${pct(outShare)}</b> onto each of <b>${outgoing.poolSize}</b> targets.`);
   }
 
-  function handCardView(card: UnitCard): EntityView {
-    return {
-      uid: -1,
-      cardId: card.id,
-      name: card.name,
-      tribe: card.tribe,
-      side: 'player',
-      isHero: false,
-      basePower: card.power,
-      bonusPower: 0,
-      health: card.health,
-      maxHealth: card.health,
-      armour: card.armour,
-      traits: card.traits,
-      cost: card.cost,
-      alive: true,
-      acting: false,
-    };
-  }
-
   function renderHand(): void {
-    const affordable = ENERGY_PER_TURN - spent();
+    const affordable = energyPerTurn() - spent();
     dom.hand.textContent = '';
     fight.player.hand.forEach((cardId, index) => {
       const card = fight.pool.card(cardId);
@@ -484,12 +555,13 @@ export function startApp(): void {
   function renderHandArt(card: UnitCard): string {
     const cached = handArtCache.get(card.id);
     if (cached !== undefined) return cached;
-    const svg = compressedCard(handCardView(card), 78, mount, hatch);
+    const svg = compressedCard(cardEntityView(card), 78, mount, hatch);
     handArtCache.set(card.id, svg);
     return svg;
   }
 
   function renderEnergy(): void {
+    const total = energyPerTurn();
     const used = spent();
     dom.energy.textContent = '';
     // The pips are discs with no text. Named as a group, and each one told
@@ -497,11 +569,11 @@ export function startApp(): void {
     // an explanation of anything.
     dom.energy.setAttribute(
       'aria-label',
-      `${ENERGY_PER_TURN - used} of ${ENERGY_PER_TURN} ${STAT_TERMS.cost.name} left. ${STAT_TERMS.cost.line}`,
+      `${total - used} of ${total} ${STAT_TERMS.cost.name} left. ${STAT_TERMS.cost.line}`,
     );
-    for (let i = 0; i < ENERGY_PER_TURN; i++) {
+    for (let i = 0; i < total; i++) {
       const pip = document.createElement('span');
-      const left = i < ENERGY_PER_TURN - used;
+      const left = i < total - used;
       pip.className = left ? 'energy__pip' : 'energy__pip is-spent';
       pip.title = left ? `${STAT_TERMS.cost.name} — unspent` : `${STAT_TERMS.cost.name} — spent`;
       dom.energy.append(pip);
@@ -510,15 +582,13 @@ export function startApp(): void {
     label.style.marginLeft = '6px';
     label.style.color = 'var(--ink-2)';
     label.textContent =
-      mode === 'planning'
-        ? `${ENERGY_PER_TURN - used} of ${ENERGY_PER_TURN}`
-        : `${ENERGY_PER_TURN} next turn`;
+      mode === 'planning' ? `${total - used} of ${total}` : `${total} next turn`;
     dom.energy.append(label);
   }
 
   function renderHint(): void {
     if (mode === 'over') {
-      dom.hint.innerHTML = 'Set a seed and start a new fight.';
+      dom.hint.innerHTML = overHint;
       return;
     }
     if (mode === 'resolving') {
@@ -704,9 +774,17 @@ export function startApp(): void {
 
   function commit(): void {
     if (mode !== 'planning') return;
-    if (spent() > ENERGY_PER_TURN) return;
+    if (spent() > energyPerTurn()) return;
 
     const chosen = placements();
+    // The record is `runRound`'s: the hand as drawn this round, and the
+    // placements as chosen. Taken before `commitRound` spends the hand, because
+    // `handBefore` is the hand a replay checks its placements against.
+    fightLog.push({
+      round: fight.round,
+      handBefore: fight.player.hand.slice(),
+      placements: chosen.map((p) => ({ cardId: p.cardId, index: p.index })),
+    });
     const committed = commitRound(fight, chosen);
     // The pending line is spent the moment it is committed: leaving it in place
     // would make the next `preview()` try to play cards that are no longer in
@@ -832,6 +910,7 @@ export function startApp(): void {
         'is-head',
       );
       render();
+      hooks.onFightOver?.({ fight, rounds: fightLog.slice() });
       return;
     }
     mode = 'planning';
@@ -847,7 +926,7 @@ export function startApp(): void {
     const cardId = fight.player.hand[selected];
     if (cardId === undefined) return;
     const card = fight.pool.card(cardId);
-    if (spent() + card.cost > ENERGY_PER_TURN) return;
+    if (spent() + card.cost > energyPerTurn()) return;
     const id = nextGhostId++;
     plan.splice(index, 0, { kind: 'ghost', id, cardId });
     ghostFromHand.set(id, selected);
@@ -872,7 +951,8 @@ export function startApp(): void {
     }
   }
 
-  function setTheme(value: 'light' | 'dark'): void {
+  function setTheme(value: Theme): void {
+    theme = value;
     document.documentElement.dataset['theme'] = value;
     mount = value === 'dark';
     for (const node of Array.from(dom.app.querySelectorAll('[data-act="theme"]'))) {
@@ -907,6 +987,7 @@ export function startApp(): void {
       delete (node as HTMLElement).dataset['sig'];
     }
     showInspect(null);
+    if (mode === 'idle') return;
     if (mode === 'resolving') renderRows();
     else render();
   }
@@ -943,6 +1024,9 @@ export function startApp(): void {
    * pointer is already there, and anything off-screen is worst of all. Distance
    * from the card breaks ties, so the panel stays next to what it describes
    * whenever it can do that for free.
+   *
+   * On a run screen both rows are hidden and measure as empty rectangles, so
+   * every candidate costs nothing in coverage and the nearest one wins.
    */
   function placeInspect(anchor: HTMLElement): void {
     const pad = 8;
@@ -1027,8 +1111,12 @@ export function startApp(): void {
     }
     let entity: EntityView | null = null;
     const cardId = target.dataset['cardId'];
-    if (cardId !== undefined) entity = handCardView(fight.pool.card(cardId));
-    else {
+    if (cardId !== undefined) {
+      // A run screen's card first - a reward on offer, a deck card at the
+      // forge - then the fight's own pool, which is the hand's.
+      const card = hooks.resolveCard?.(cardId) ?? safeCard(fight.pool, cardId);
+      if (card !== null) entity = cardEntityView(card);
+    } else {
       const uid = Number.parseInt(target.dataset['uid'] ?? '', 10);
       if (Number.isFinite(uid)) entity = findView(view, uid);
     }
@@ -1062,7 +1150,7 @@ export function startApp(): void {
         const cardId = fight.player.hand[intent.index];
         if (cardId === undefined) return;
         if ([...ghostFromHand.values()].includes(intent.index)) return;
-        if (fight.pool.card(cardId).cost > ENERGY_PER_TURN - spent()) return;
+        if (fight.pool.card(cardId).cost > energyPerTurn() - spent()) return;
         selected = selected === intent.index ? null : intent.index;
         render();
         break;
@@ -1074,6 +1162,7 @@ export function startApp(): void {
         removeGhost(intent.id);
         break;
       case 'clearSelection':
+        if (mode === 'idle') return;
         selected = null;
         render();
         break;
@@ -1095,13 +1184,9 @@ export function startApp(): void {
       case 'hatch':
         setHatch(intent.value);
         break;
-      case 'newFight': {
-        const seed = Number.parseInt(dom.seed.value, 10);
-        encounterId = dom.encounter.value;
-        encounter = encounterById(encounterId);
-        newFight(Number.isFinite(seed) && seed > 0 ? seed : 1);
+      case 'newFight':
+        hooks.onNewFight?.();
         break;
-      }
       case 'inspect':
         showInspect(intent.target);
         break;
@@ -1113,18 +1198,100 @@ export function startApp(): void {
     // The panel is placed against the rows' measured rectangles, so a resize
     // invalidates the placement as surely as it invalidates the card widths.
     showInspect(null);
+    if (mode === 'idle') return;
     if (mode === 'resolving') renderRows();
     else render();
   });
 
-  const prefersDark =
-    typeof globalThis.matchMedia === 'function' &&
-    globalThis.matchMedia('(prefers-color-scheme: dark)').matches;
-  const themeParam = params.get('theme');
-  setTheme(themeParam === 'light' || themeParam === 'dark' ? themeParam : prefersDark ? 'dark' : 'light');
+  function idle(): void {
+    playback?.cancel();
+    playback = null;
+    fx.clear();
+    showInspect(null);
+    mode = 'idle';
+  }
+
+  return {
+    start,
+    idle,
+    setTheme,
+    setHatch,
+    setSpeed,
+    theme: () => theme,
+    mount: () => mount,
+    hatch: () => hatch,
+    showInspect,
+    fight: () => (mode === 'idle' ? null : fight),
+  };
+}
+
+/**
+ * The single addressable fight: `?seed=12&encounter=hard` opens exactly that
+ * fight against the shipped probe content. `ARCHITECTURE.md` makes a seed plus
+ * an action list the whole bug report, and a link is the cheapest possible way
+ * to hand one over. The run around a fight is `runapp.ts`; this is the screen
+ * on its own, which is what `tools/ui-probe/play.ts` photographs.
+ */
+export function startApp(): void {
+  const app = need<HTMLElement>('app');
+  app.dataset['mode'] = 'fight';
+  need<HTMLElement>('fight').hidden = false;
+  need<HTMLElement>('run').hidden = true;
+
+  const seedInput = need<HTMLInputElement>('seed');
+  const encounterSelect = need<HTMLSelectElement>('encounter');
+
+  const params = new URLSearchParams(globalThis.location.search);
+  const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
+  const startSeed = Number.isFinite(seedParam) && seedParam > 0 ? seedParam : 7;
+  const encounterParam = params.get('encounter');
+  let encounterId = ENCOUNTERS.some((e) => e.id === encounterParam)
+    ? (encounterParam as string)
+    : PRIMARY_ENCOUNTER;
+
+  seedInput.value = String(startSeed);
+  for (const e of ENCOUNTERS) {
+    const option = document.createElement('option');
+    option.value = e.id;
+    option.textContent = `${e.id} — ${e.name}`;
+    option.selected = e.id === encounterId;
+    encounterSelect.append(option);
+  }
+
+  function newFight(seed: number): void {
+    const encounter = encounterById(encounterId);
+    screen.start(
+      {
+        seed,
+        pool: CARD_POOL,
+        playerDeck: PLAYER_DECK,
+        enemyDeck: ENEMY_DECK,
+        enemyOpening: encounter.opening,
+        playerHero: PLAYER_HERO,
+        enemyHero: encounter.enemyHero,
+        maxRounds: MAX_ROUNDS,
+      },
+      {
+        title: `Fight seed ${seed} — ${encounter.name}.`,
+        intro: ['Your line resolves left to right. Your hero swings last.'],
+        overHint: 'Set a seed and start a new fight.',
+        // (the run's own hint is set by runapp.ts, which owns what comes next)
+      },
+    );
+  }
+
+  const screen = createFightScreen({
+    onNewFight: () => {
+      const seed = Number.parseInt(seedInput.value, 10);
+      encounterId = encounterSelect.value;
+      newFight(Number.isFinite(seed) && seed > 0 ? seed : 1);
+    },
+  });
+
+  screen.setTheme(initialTheme(params));
   // `?hatch=1` opens the fight with hatching on, the way `?theme=` and `?seed=`
   // already make a fight addressable.
-  setHatch(params.get('hatch') === '1' || params.get('hatch') === 'on');
-  setSpeed(1);
+  screen.setHatch(params.get('hatch') === '1' || params.get('hatch') === 'on');
+  screen.setSpeed(1);
   newFight(startSeed);
 }

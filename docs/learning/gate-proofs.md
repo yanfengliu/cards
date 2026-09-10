@@ -6,7 +6,43 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
-## 2026-09-07 — merging units 6 and 7: the trade is explained, and the paragraph that explains it has a budget (`test/explain.test.ts`)
+## 2026-09-08 — a run a person plays is the run `replayRun` replays (`test/ui-run.test.ts`, `test/map-render.test.ts`)
+
+Taken on branch `worktree-agent-af6686455b89ab68a`, cut from `ea8852c`; the suite is **164 tests** here, 156 at the base. Every mutation below was applied to the stated file, the stated command run, and the tree restored before the next one. The commands were `node --test test/ui-run.test.ts` and `node --test test/map-render.test.ts`.
+
+### The controller, and the one thing it duplicates
+
+`src/ui/run.ts` advances a run by nothing but `replayRun`, and it *previews* an offer by cloning the canonical state and calling the `nodes.ts` function `visit` will call. That duplicates one fact per node type — which draw comes when — and "the controller previews what visit computes and its log replays to runRun's hash" drives the controller with the decisions a bot made inside `runRun` and compares every preview with what the bot was handed.
+
+| mutation | site | what failed |
+|---|---|---|
+| the shop shelf previewed from a clone stepped one draw forward | `run.ts:travel`, `shop` case | `fixture seed 1 random: shop shelf previewed [t_grunt,t_wall], runRun offered [t_wall,t_grunt]` |
+| the recorded reward pick is `(pick + 1) % offer.length`, not the pick shown | `run.ts:pickReward` | the controller's own post-commit check, not the test's comparison: `run: the screen showed the card taken as t_wall and the replay produced t_grunt. The preview in src/ui/run.ts no longer computes what src/run/run.ts visit() computes` |
+| the reward offer drawn on the **live** state instead of a clone (`rewardOffer(state)`) | `run.ts:finishFight` | **nothing — all green.** Not a hole in the gate: the live state's advanced generator is discarded by the next `replayRun`, and the offer itself is drawn from the same position the clone would use, so the mutation has no observable effect. The design absorbs it. Recorded so nobody "fixes" the gate for it. |
+
+The blazon half of the same file went red before its fix existed: `blazonFor('u_squire#17', ...)` returned `azure, a eagle argent` against the Squire's `azure, a sword argent`, because `baseId` stripped only `_nc`. Every player card in a run is an instance id, so every one of them was drawn as a hashed stranger until `src/render/blazons.ts` learned the instance separator.
+
+### The map: what it lights and what it says lies beyond a node
+
+| mutation | site | what failed |
+|---|---|---|
+| `standingOf` loses its `reachable` branch, so no node is ever `is-reachable` | `render/map.ts` | "reachable nodes are the controls, and only they are": `seed 1: buttons — actual 0, expected 1` |
+| `spreadFrom` keeps the rows above the root (`map.rows.map(...)` without `.slice(root.row)`) | `render/map.ts` | "what a node says lies beyond it is pathSpread on the sub-map it roots": `seed 1 node 1: "fight" — actual { min: Infinity, max: -Infinity }, expected { min: 2, max: 3 }` |
+
+### The invariant crossing the DOM, measured rather than argued
+
+`tools/ui-probe/run.ts` plays a whole run through the real controls — a lit node, a shelf card, a hand card and a gap, the commit button — with a bot deciding and a headless `createRunController` mirroring every choice, and at the end compares the hash the page prints with `hashRun` of `runRun` on the same seed and agent. This is a probe, not a test in `npm test`, because it needs Chrome:
+
+| seed | theme | outcome | page hash | headless | mirror |
+|---|---|---|---|---|---|
+| 1 | light | dead after 17 nodes, 11 fights | `156ba9eaa0210673` | `156ba9eaa0210673` | `156ba9eaa0210673` |
+| 7 | dark | won after 24 nodes, 14 fights | `94ff2460abecaf26` | `94ff2460abecaf26` | `94ff2460abecaf26` |
+
+### Bound
+
+- The controller gate runs 30 fixture seeds and 12 shipped seeds, each under the greedy and the random route, and asserts its population: 84 runs, every decision kind compared, at least 5 declines, 5 lost fights and 5 won runs. It proves nothing about the DOM, about timing, or about a fight the screen plays differently from `runFight` — that is `test/ui-session.test.ts`'s claim.
+- The map gate counts attributes and classes in an SVG string over 40 seeds x 3 acts of the shipped shape. It proves the markup's structure, not what it looks like, and says nothing about `applyMapFocus`, which needs a DOM.
+- The probe's hash comparison is two seeds, one bot, one browser. It is evidence that the DOM path and the headless path agree on those; the per-decision gate above is what covers the population.
 
 Taken on branch `worktree-agent-adcc5f0005b2166d6`, the merge of `worktree-agent-a2f9237928772992a` (unit 7) into `02b4e50` (unit 6 integrated); the suite is **156 tests** here, 155 at the merge before these three gates were added and 133 on `main` before the merge. Every mutation below was applied to the stated file, the stated command run, and the tree restored before the next one.
 

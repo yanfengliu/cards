@@ -86,18 +86,19 @@ export function wireInput(root: HTMLElement, dispatch: (intent: Intent) => void)
   });
 
   // Inspect: the expanded tier follows the pointer over anything that has a
-  // card behind it. `ARCHITECTURE.md` puts the charge, the card text and the
-  // trait rules in this tier, and nothing a turn decision needs.
+  // card behind it - a card in a line, in the hand, or on a run screen's shelf.
+  // `ARCHITECTURE.md` puts the charge, the card text and the trait rules in
+  // this tier, and nothing a turn decision needs.
   root.addEventListener('pointerover', (ev) => {
     const target = ev.target as HTMLElement | null;
-    const card = target?.closest('[data-uid], .handcard, [data-ghost]') as HTMLElement | null;
+    const card = target?.closest('[data-uid], .handcard, [data-ghost], .runcard') as HTMLElement | null;
     dispatch({ kind: 'inspect', target: card });
   });
   root.addEventListener('pointerleave', () => dispatch({ kind: 'inspect', target: null }));
 
   root.addEventListener('focusin', (ev) => {
     const target = ev.target as HTMLElement | null;
-    const card = target?.closest('[data-uid], .handcard, [data-ghost]') as HTMLElement | null;
+    const card = target?.closest('[data-uid], .handcard, [data-ghost], .runcard') as HTMLElement | null;
     dispatch({ kind: 'inspect', target: card });
   });
 
