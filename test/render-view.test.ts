@@ -26,6 +26,13 @@
 //   this gate would say so rather than mis-draw an arrow.
 //   Says nothing about pixels, timing, or the DOM.
 //
+//   The odds tests carry their own bounds and are stated at each. What all of
+//   them share: every fight walked here was a KNIGHT's until classes landed, so
+//   `swingsOf` was only ever asked about entities that return 1 and no Scorch
+//   ever stood on the attacking line. "the odds corpus is walked as each of the
+//   three classes" is what fixes that, and it asserts that both were seen
+//   rather than assuming it.
+//
 // Made to go red: deleting the `bonusPower` line from `applyBeat`'s `buff`
 // case fails on seed 1 with "uid 5 bonusPower: view 0, engine 2"; dropping the
 // Relay branch of `attributeBuff` fails the attribution test with a buff whose
@@ -41,7 +48,21 @@ import {
   selectPlays,
   setupFight,
 } from '../src/engine/fight.ts';
-import { type GameState, unitCount } from '../src/engine/state.ts';
+import {
+  type Entity,
+  type GameState,
+  type HeroSpec,
+  type Side,
+  type Trait,
+  type UnitCard,
+  heroOf,
+  insertUnit,
+  makeHero,
+  makeUnit,
+  unitCount,
+} from '../src/engine/state.ts';
+import { SCORCH_DAMAGE, VOLLEY_SWINGS, resolvePhase } from '../src/engine/resolver.ts';
+import { classById } from '../src/content/classes.ts';
 import { makeRng, mixSeeds, nextInt } from '../src/engine/rng.ts';
 import {
   CARD_POOL,
@@ -54,11 +75,11 @@ import {
 import { beginRound, commitRound } from '../src/ui/session.ts';
 import { applyBeat, buildBeats, snapshot, viewDrift } from '../src/render/view.ts';
 import { fitWidth, CARD_GAP, MIN_CARD_W, MAX_CARD_W } from '../src/render/board.ts';
-import { incomingOdds, projectOwnPhase } from '../src/render/odds.ts';
+import { burnTotal, incomingOdds, projectOwnPhase } from '../src/render/odds.ts';
 import { blazonFor } from '../src/render/blazons.ts';
 import { parseBlazon, blazonWarnings } from '../src/render/heraldry/blazon.ts';
 
-function setup(seed: number, encounterId: string): FightSetup {
+function setup(seed: number, encounterId: string, playerHero: HeroSpec = PLAYER_HERO): FightSetup {
   const encounter = encounterById(encounterId);
   return {
     seed,
@@ -66,7 +87,7 @@ function setup(seed: number, encounterId: string): FightSetup {
     playerDeck: PLAYER_DECK,
     enemyDeck: ENEMY_DECK,
     enemyOpening: encounter.opening,
-    playerHero: PLAYER_HERO,
+    playerHero,
     enemyHero: encounter.enemyHero,
     maxRounds: MAX_ROUNDS,
   };
@@ -176,6 +197,183 @@ test('target odds are exactly the engine’s uniform pick', () => {
     }
     if (seed === 1) assert.ok(guarded > 0, 'seed 1 should reach a board where Guard narrows the pool');
   }
+});
+
+// --------------------------------------------------------- the class damage
+
+/** A hand-built board, so the comparison below is exact rather than sampled. */
+function board(playerHero: HeroSpec, enemyHero: HeroSpec): {
+  state: GameState;
+  add: (side: Side, id: string, power: number, health: number, armour: number, traits?: readonly Trait[]) => Entity;
+} {
+  const state: GameState = { board: { player: [], enemy: [] }, nextUid: 1 };
+  state.board.player.push(makeHero(state, 'player', playerHero));
+  state.board.enemy.push(makeHero(state, 'enemy', enemyHero));
+  return {
+    state,
+    add(side, id, power, health, armour, traits = []) {
+      const c: UnitCard = { id, name: id, cost: 1, power, health, armour, tribe: 'human', traits };
+      const u = makeUnit(state, side, c);
+      insertUnit(state, side, u, unitCount(state, side));
+      return u;
+    },
+  };
+}
+
+test('everything the odds promise is everything the phase then deals: Volley swings and a Scorch burn', () => {
+  // `ARCHITECTURE.md`: fair means the odds were visible before you committed.
+  // That is a claim about the WHOLE turn, and it is the claim that broke twice
+  // over when classes landed - a Volley entity's second swing was counted by
+  // `swingsOf` but nothing gated it, and a Scorch was not in this file at all,
+  // so a Mage facing three units read "1 of yours will swing for 1 Power" while
+  // it was about to deal 1 and burn 3 more.
+  //
+  // So both are checked against the resolver rather than against themselves:
+  // the board is built so that targeting is forced (one enemy Guard, nothing
+  // dies, nothing fizzles), the phase is resolved, and the damage the enemy
+  // line actually lost is compared with what the pre-commit numbers said.
+  //
+  // Made to go red: `attackers += 1; totalPower += power(e)` in place of the
+  // two `swingsOf` lines fails the Volley half at "5 attacks promised, 3
+  // counted"; deleting the `burnOn` loop fails the Mage half. See
+  // `docs/learning/gate-proofs.md`.
+  //
+  // Bound: two hand-built boards, one seed each, with targeting forced by a
+  // single Guard so no roll enters. It proves the arithmetic on the line, not
+  // that it survives a unit dying mid-phase - the label on screen says "as the
+  // line stands" for exactly that reason, and the shipped-corpus walk below
+  // covers real boards instead.
+  {
+    // Volley: a Ranger hero, a Volley body and a plain body, all swinging into
+    // one Guard that cannot kill anything back.
+    const f = board(
+      { name: 'Ranger', health: 30, power: 1, armour: 0, traits: ['volley'] },
+      { name: 'Warchief', health: 99, power: 0, armour: 0 },
+    );
+    f.add('player', 'test:archer', 2, 20, 0, ['volley']);
+    f.add('player', 'test:grunt', 3, 20, 0);
+    const wall = f.add('enemy', 'test:wall', 0, 99, 0, ['guard']);
+
+    const odds = incomingOdds(f.state, 'player');
+    assert.equal(odds.attackers, 2 * VOLLEY_SWINGS + 1, 'two Volley entities and one plain body');
+    assert.equal(odds.totalPower, (1 + 2) * VOLLEY_SWINGS + 3);
+    assert.equal(odds.scorchers, 0);
+    assert.equal(burnTotal(odds), 0, 'no Scorch on this line, so no burn is promised');
+
+    const before = wall.health;
+    const events = resolvePhase(f.state, 'player', makeRng(1, 'combat'));
+    const swings = events.filter((e) => e.kind === 'attacked');
+    assert.equal(
+      swings.length,
+      odds.attackers,
+      `the line promised ${odds.attackers} attacks and threw ${swings.length}`,
+    );
+    assert.equal(
+      before - wall.health,
+      odds.totalPower,
+      `the line promised ${odds.totalPower} Power and dealt ${before - wall.health}`,
+    );
+  }
+  {
+    // Scorch: a Mage hero and a second scorcher, so the per-target burn is a
+    // multiple and not just `SCORCH_DAMAGE`. One target carries Armour, which
+    // is the case a flat total would get wrong.
+    const f = board(
+      { name: 'Mage', health: 30, power: 1, armour: 0, traits: ['scorch'] },
+      { name: 'Warchief', health: 99, power: 0, armour: 0 },
+    );
+    f.add('player', 'test:ember', 0, 20, 0, ['scorch']);
+    const wall = f.add('enemy', 'test:wall', 0, 99, 0, ['guard']);
+    const soft = f.add('enemy', 'test:soft', 0, 99, 0);
+    const plated = f.add('enemy', 'test:plated', 0, 99, SCORCH_DAMAGE);
+    const enemyHero = heroOf(f.state, 'enemy');
+
+    const odds = incomingOdds(f.state, 'player');
+    assert.equal(odds.scorchers, 2);
+    assert.equal(odds.burnOn.get(wall.uid), 2 * SCORCH_DAMAGE);
+    assert.equal(odds.burnOn.get(soft.uid), 2 * SCORCH_DAMAGE);
+    assert.equal(odds.burnOn.get(plated.uid), undefined, 'Armour stops it, so nothing is promised');
+    assert.equal(odds.burnOn.get(enemyHero.uid), undefined, 'a rider never reaches a hero');
+    assert.equal(burnTotal(odds), 4 * SCORCH_DAMAGE);
+
+    const health = new Map(
+      [wall, soft, plated, enemyHero].map((e) => [e.uid, e.health] as const),
+    );
+    const events = resolvePhase(f.state, 'player', makeRng(2, 'combat'));
+    assert.equal(events.filter((e) => e.kind === 'attacked').length, odds.attackers);
+
+    // Everything the enemy line lost, against everything the screen promised.
+    let lost = 0;
+    for (const e of [wall, soft, plated, enemyHero]) lost += (health.get(e.uid) ?? 0) - e.health;
+    assert.equal(
+      lost,
+      odds.totalPower + burnTotal(odds),
+      `the screen promised ${odds.totalPower} Power and ${burnTotal(odds)} burn; the line lost ${lost}`,
+    );
+    assert.equal(plated.health, health.get(plated.uid), 'the plated unit took nothing, as promised');
+    assert.equal(enemyHero.health, health.get(enemyHero.uid), 'and the hero was never in the burn');
+  }
+});
+
+test('the odds corpus is walked as each of the three classes, so Volley and Scorch are in it', () => {
+  // The corpus half. Before this, every fight the odds were ever checked
+  // against was a Knight's: `swingsOf` was exercised only through entities that
+  // return 1, and no Scorch ever stood on the attacking line.
+  //
+  // Bound: 20 seeds a class at `hard`, and the exact comparison runs only on
+  // player phases in which nothing of the player's died - a unit that dies to
+  // retaliation mid-phase never swings, and the pre-commit number is honestly
+  // an over-statement there, which is what "as the line stands" means. Both
+  // populations are counted and asserted, so a version of this that skips
+  // everything cannot pass.
+  let checked = 0;
+  let skipped = 0;
+  let volleySeen = 0;
+  let scorchSeen = 0;
+  for (const cls of ['knight', 'ranger', 'mage'] as const) {
+    for (let seed = 1; seed <= 20; seed++) {
+      const f = setupFight(setup(seed, 'hard', classById(cls).hero));
+      while (beginRound(f)) {
+        const committed = commitRound(f, decide(f));
+        const playerPhase = committed.segments[0]!;
+        if (playerPhase.kind !== 'phase') throw new Error('fixture: first segment is the player phase');
+
+        const projected = projectOwnPhase(committed.stateAtStart, 'player');
+        const odds = incomingOdds(projected, 'player');
+        if (odds.attackers > committed.stateAtStart.board.player.filter((e) => e.alive).length) {
+          volleySeen++;
+        }
+        if (odds.scorchers > 0) scorchSeen++;
+
+        const died = playerPhase.events.some((e) => e.kind === 'died' && e.side === 'player');
+        if (died || committed.result !== 'ongoing') {
+          skipped++;
+        } else {
+          const swings = playerPhase.events.filter((e) => e.kind === 'attacked');
+          assert.equal(
+            swings.length,
+            odds.attackers,
+            `${cls} seed ${seed} round ${f.round}: the screen promised ${odds.attackers} attacks ` +
+              `and the phase threw ${swings.length}`,
+          );
+          let raw = 0;
+          for (const e of swings) if (e.kind === 'attacked') raw += e.raw;
+          assert.equal(
+            raw,
+            odds.totalPower,
+            `${cls} seed ${seed} round ${f.round}: the screen promised ${odds.totalPower} Power ` +
+              `and the phase swung for ${raw}`,
+          );
+          checked++;
+        }
+        if (committed.result !== 'ongoing') break;
+      }
+    }
+  }
+  assert.ok(checked > 50, `expected a real corpus, compared ${checked} phases`);
+  assert.ok(skipped > 0, 'no phase lost a unit, so the exclusion above is hiding nothing');
+  assert.ok(volleySeen > 0, 'no phase in the corpus held a Volley entity, so swingsOf was never exercised');
+  assert.ok(scorchSeen > 0, 'no phase in the corpus held a Scorch entity, so the burn was never exercised');
 });
 
 test('the Relays shown before commit are the ones that land, on a phase nothing died in', () => {

@@ -276,10 +276,26 @@ test('Guard is the only rule that narrows the pool: nothing else removes an enti
   );
 });
 
-test('an attack with no legal target fizzles rather than throwing', () => {
+test('an attack that finds no target says nothing, and a spell cast into the same empty line still fizzles', () => {
+  // `src/engine/resolver.ts`'s header rule: an act that ended the fight still
+  // finishes, and the resolver announces every change it makes and nothing it
+  // does not. An attack into an empty pool changes nothing, so it says nothing;
+  // a spell into the same pool fizzles, because energy was spent on it.
+  //
   // The only way to empty the pool now that Ward is gone: a side with nothing
-  // alive on it. That is the state between a lethal hit and the checkpoint that
-  // ends the fight - a dead hero stays on the board and legalTargets skips it.
+  // alive on it. That is the state after a lethal hit on a hero - a dead hero
+  // stays on the board and legalTargets skips it - which is why the event this
+  // used to emit could only ever be printed under the `died` that ended the
+  // fight. A Volley second swing is exactly that case and is where a player met
+  // it: "the Warchief dies", then "no legal target".
+  //
+  // Both halves are asserted together on purpose. The attack half alone is
+  // satisfied by an `apply` that returns nothing for every kind, and the spell
+  // half is what says the fizzle vocabulary still exists.
+  //
+  // Bound: one hand-built board with one dead hero. It says nothing about which
+  // boards can reach an empty pool in a real fight; that is
+  // `legalTargets`'s own gates above.
   const f = fixture(0);
   const attacker = f.add('enemy', card('att', 5, 5, 0));
   const hero = heroOf(f.state, 'player');
@@ -288,9 +304,35 @@ test('an attack with no legal target fizzles rather than throwing', () => {
 
   assert.deepEqual(legalTargets(f.state, attacker), []);
 
-  const { events } = drain(f.state, [{ kind: 'attack', uid: attacker.uid }], makeRng(2, 'combat'));
-  assert.equal(events.some((e) => e.kind === 'fizzled'), true);
-  assert.equal(attacker.health, 5, 'a fizzled attack draws no retaliation either');
+  const { events, trace } = drain(
+    f.state,
+    [{ kind: 'attack', uid: attacker.uid }],
+    makeRng(2, 'combat'),
+  );
+  assert.deepEqual(trace.map((e) => e.kind), ['attack'], 'the effect was applied, not skipped');
+  assert.deepEqual(events, [], 'an attack that changed nothing says nothing');
+  assert.equal(attacker.health, 5, 'and it draws no retaliation either');
+
+  // The same empty line, reached by a spell rather than a swing.
+  const spell = drain(
+    f.state,
+    [{ kind: 'damageOne', uid: attacker.uid, amount: 3 }],
+    makeRng(2, 'combat'),
+  );
+  assert.deepEqual(spell.events.map((e) => e.kind), ['fizzled'], 'energy was spent on nothing');
+  const wipe = drain(
+    f.state,
+    [{ kind: 'damageAll', uid: attacker.uid, side: 'player', amount: 3 }],
+    makeRng(2, 'combat'),
+  );
+  assert.deepEqual(wipe.events.map((e) => e.kind), ['fizzled']);
+  // And the rider, which is the case the attack now matches.
+  const rider = drain(
+    f.state,
+    [{ kind: 'scorch', uid: attacker.uid, side: 'player', amount: 3 }],
+    makeRng(2, 'combat'),
+  );
+  assert.deepEqual(rider.events, [], 'a rider with nothing to burn says nothing');
 });
 
 test('no unit acts after dying, even with its action already queued', () => {

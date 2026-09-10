@@ -60,6 +60,7 @@ import {
 import type { RunContent, RunLog } from '../src/run/types.ts';
 import { makeRunAgent } from '../src/sim/runbots.ts';
 import { renderClassPick } from '../src/ui/classpick.ts';
+import { PICKABLE_CLASSES, classPickHtml, pickableClassId } from '../src/ui/runapp.ts';
 import { createRunController } from '../src/ui/run.ts';
 
 const SEEDS = [1, 2, 3, 4, 5, 6];
@@ -310,21 +311,29 @@ test('createRunController starts as the class it is given, records it, and refus
   assert.equal(createRunController(RUN_CONTENT, 5, { resume: old }).classId, 'knight', 'an old log resumes as the Knight');
 });
 
-test('the class pick offers the three classes, each with a button naming it and its numbers', () => {
-  // Mutation watched going red: the Mage left out of the `classes` handed to
-  // the screen - `renderClassPick` draws what it is given, and what it is
-  // given is `CLASSES`.
-  const cards: readonly UnitCard[] = PLAYER_CARDS;
-  const pool: CardPool = {
-    card: (id) => {
-      const c = cards.find((x) => x.id === id);
-      if (c === undefined) throw new Error(`no card "${id}"`);
-      return c;
-    },
-    energyPerTurn: 3,
-    handSize: 5,
-  };
-  const html = renderClassPick({ seed: 7, classes: CLASSES, pool, mount: true, hatch: false });
+test('the screen the app builds is handed every class the game has', () => {
+  // **This test used to construct its own `renderClassPick({classes: CLASSES})`
+  // call and never touch `src/ui/runapp.ts`.** An independent review proved
+  // what that was worth: handing the screen `CLASSES.filter(c => c.id !==
+  // 'mage')` at the one production call site left `npm test` green. So the
+  // subject here is `classPickHtml`, which is the function `renderPick` calls,
+  // and the classes it hands over are the app's own list.
+  //
+  // Mutation watched going red: `PICKABLE_CLASSES` set to
+  // `CLASSES.filter((c) => c.id !== 'mage')`.
+  //
+  // Bound: HTML, not pixels. It says the three buttons and their numbers are in
+  // the markup the app builds; what the screen LOOKS like is
+  // `node tools/ui-probe/pick.ts`'s, and the shots are digested in
+  // `docs/work/10_classes/plan.md`. It also says nothing about the click that
+  // reaches `pickClass`, which needs a document - the probe covers that too.
+  assert.deepEqual(
+    PICKABLE_CLASSES.map((c) => c.id),
+    CLASSES.map((c) => c.id),
+    'the app offers the classes the game has; a class the game ships and the screen never shows ' +
+      'cannot be picked and nothing else would say so',
+  );
+  const html = classPickHtml({ seed: 7, pool: CARD_POOL, mount: true, hatch: false });
   const buttons = [...html.matchAll(/data-run="pick-class" data-class="([a-z]+)"/g)].map((m) => m[1]);
   assert.deepEqual(buttons, ['knight', 'ranger', 'mage'], 'one button per class, in the order the classes are listed');
   for (const cls of CLASSES) {
@@ -337,4 +346,57 @@ test('the class pick offers the three classes, each with a button naming it and 
     }
   }
   assert.match(html, /Seed 7/);
+
+  // The screen itself still draws exactly what it is given, which is what makes
+  // the assertion above the whole story rather than half of it.
+  const cards: readonly UnitCard[] = PLAYER_CARDS;
+  const pool: CardPool = {
+    card: (id) => {
+      const c = cards.find((x) => x.id === id);
+      if (c === undefined) throw new Error(`no card "${id}"`);
+      return c;
+    },
+    energyPerTurn: 3,
+    handSize: 5,
+  };
+  const oneOnly = renderClassPick({ seed: 7, classes: [classById('mage')], pool, mount: true, hatch: false });
+  assert.deepEqual(
+    [...oneOnly.matchAll(/data-run="pick-class" data-class="([a-z]+)"/g)].map((m) => m[1]),
+    ['mage'],
+  );
+});
+
+test('a class named from outside the app is refused unless it is one of the three', () => {
+  // The other half of the same wiring, and the other mutation that left the
+  // suite green: deleting the membership check in the pick handler. Both
+  // callers - the `?class=` in the address bar and the `data-class` of whatever
+  // was clicked - go through `pickableClassId`, so there is one gate rather
+  // than two that can drift apart.
+  //
+  // Mutation watched going red: `pickableClassId` returning `raw` whenever it
+  // is not null.
+  //
+  // Null, not a throw and not a fallback to the Knight: an address naming a
+  // class that does not exist puts the pick screen up and lets the player
+  // choose. `picking = classParam === null` in `startRunApp` is that sentence
+  // in code.
+  for (const cls of CLASSES) assert.equal(pickableClassId(cls.id), cls.id);
+  assert.equal(pickableClassId('bard'), null, 'a class the game does not have');
+  assert.equal(pickableClassId('Knight'), null, 'ids are lower case and are not guessed at');
+  assert.equal(pickableClassId(''), null);
+  assert.equal(pickableClassId(null), null, 'no ?class= at all');
+  assert.equal(pickableClassId(undefined), null, 'and a dataset entry that was not there');
+
+  // What the refusal is worth: every id it does admit starts a run, and every
+  // id it refuses would have thrown one call later.
+  for (const cls of CLASSES) {
+    const id = pickableClassId(cls.id);
+    assert.ok(id !== null);
+    assert.equal(createRunController(RUN_CONTENT, 5, { classId: id }).classId, cls.id);
+  }
+  assert.throws(
+    () => createRunController(RUN_CONTENT, 5, { classId: 'bard' }),
+    /class "bard" is not one this content offers/,
+    'the refusal above is what stands between a typed address and this',
+  );
 });

@@ -6,6 +6,81 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-10 — closing an independent review of the class layer: the screen, the tooltip, the odds and the fizzle
+
+Taken on branch `worktree-agent-a2039c8da0f15808d`, cut from `2781bab`; the suite is **195 tests** here, 189 at the base. The review found the resolver sound and found four things in the surfaces the new verbs feed. Fourteen mutations below, each applied to the shipped source, run against the shipped test command, and reverted with its digest compared. All fourteen came back the colour they were meant to — thirteen red and one deliberately green. No anchor was broken.
+
+`src/engine/resolver.ts` hashes `92ebe53c…`, `src/render/odds.ts` `76d32595…`, `src/render/class-terms.ts` `6272d40b…`, `src/ui/runapp.ts` `77f325fa…` and `src/sim/runbots.ts` `ae5fa1f6…` after the last mutation was reverted. The runner is `.probe/mutate.mjs`, under an ignored path; it writes CRLF anchors, refuses an anchor that does not occur exactly once, and compares each file's digest before and after.
+
+### The one finding that needed no mutation, because it was structural
+
+The review proved that mutating `src/ui/runapp.ts` — dropping the Mage from the classes handed to the screen, or deleting the pick handler's guard — left `npm test` green. That is not a sample, it is a certainty: at `2781bab`, `git grep -l runapp -- test/` returns **nothing**. No test file named `src/ui/runapp.ts`, imported it, or read it as text, and `node --test` runs only `test/**`. **No mutation anywhere inside that file could have been observed by any gate.** The fix is the two exported functions the screen and the address bar both go through, and the two mutations below are the review's own, applied at their new sites.
+
+### F1 — the class-pick wiring (`test/classes.test.ts`)
+
+| mutation | site | the failure |
+|---|---|---|
+| `PICKABLE_CLASSES = CLASSES.filter((c) => c.id !== 'mage')` | `src/ui/runapp.ts` | "the screen the app builds is handed every class the game has": *the app offers the classes the game has; a class the game ships and the screen never shows cannot be picked and nothing else would say so* — `['knight','ranger'] !== ['knight','ranger','mage']` |
+| `pickableClassId` returns `raw` with no membership test | `src/ui/runapp.ts` | "a class named from outside the app is refused unless it is one of the three": *a class the game does not have* — `'bard' !== null` |
+
+The first mutation also turns the second test red, because a Mage that is not pickable is not admitted by `pickableClassId` either — one list, two callers, which is the point of the change.
+
+**What these two gates do not cover, and what does.** They are HTML and a string, not pixels and not a click. `tools/ui-probe/pick.ts` is the other half: it opens the real page, asserts the three cards and their numbers, photographs the whole screen and **each card on its own at its native 455×430**, in both themes, then clicks "Play the Ranger" and checks the run that starts is a Ranger. It also loads `?class=bard` and checks the pick screen stays up, which is `pickableClassId`'s DOM half.
+
+**A defect the probe found on its first run, which no gate had:** `tools/ui-probe/run.ts` had been broken for a whole unit. It navigated to `?seed=&theme=&fresh=1` and waited for `#run-map svg`, and the class-pick screen now stands in front of that — so the repo's own instrument for playing a whole run through the browser died on a 30-second timeout, with nothing saying so. It now clicks the Knight. After the fix, seed 7 plays 18 nodes and 13 fights through the DOM and hashes `3d135f5e12b240ea`, identical to the headless run.
+
+### F2 — Volley's count in the tooltip (`test/explain.test.ts`)
+
+`src/render/class-terms.ts`'s header said "The numbers come from the resolver", and `VOLLEY_SWINGS` was never imported anywhere under `src/render/`: "twice" was typed in four places. The trap the review named is that `assert.equal(VOLLEY_SWINGS, 2)` beside a tooltip saying "twice" is repaired by editing the test. So the gate **measures** the swings — one Volley entity, one `drain`, count the `attacked` events — and looks up the word in a table the test file owns.
+
+| mutation | the failure |
+|---|---|
+| the tooltip hardcoded to "Attacks three times" | *the Volley tooltip does not say "twice", and the resolver swings 2 times.* |
+| all four sentences retyped as they were, with no interpolation | *src/render/class-terms.ts interpolates timesWord(VOLLEY_SWINGS) 0 time(s). Every sentence that states Volley's count must be built from the resolver's constant.* |
+| `VOLLEY_SWINGS = 3` **and** the tooltip retyped as "twice" | *the Volley tooltip does not say "three times", and the resolver swings 3 times.* |
+| `VOLLEY_SWINGS = 3` alone, with the sentences derived | **green, 24 tests** — which is the half that says the derivation works rather than that the words happen to agree today |
+| `runbots.ts` back to `+ card.power`, import removed | *src/sim/runbots.ts writes Volley's swing count without naming VOLLEY_SWINGS, so it is a second copy of the rule that will not follow the resolver.* |
+
+The third and fourth are one experiment in two arms and neither alone means anything: red when the constant moves under retyped words, green when it moves under derived ones. The fifth closes the review's F6 note — `src/sim/runbots.ts` was a third copy of "Volley is two", written as `+ card.power`; it is now `card.power * (VOLLEY_SWINGS - 1)`, which is numerically identical at 2 and follows the constant at 3.
+
+### F3 — the pre-commit odds (`test/render-view.test.ts`)
+
+`swingsOf` is exported so the odds can count the second swing, and no odds test contained a Volley entity; Scorch was absent from the odds entirely, so a Mage facing three units read "1 of yours will swing for 1 Power" while about to deal 1 and burn 3 more.
+
+| mutation | the failure |
+|---|---|
+| `attackers += 1; totalPower += power(e)` in place of the two `swingsOf` lines | "everything the odds promise…": *two Volley entities and one plain body* — `3 !== 5`; and the corpus walk: *ranger seed 1 round 1: the screen promised 3 attacks and the phase threw 4* |
+| `if (false) scorchers++` — Scorch not counted | `0 !== 2`, and the corpus walk's instrument check: *no phase in the corpus held a Scorch entity, so the burn was never exercised* |
+| the burn's `t.isHero` filter dropped | *a rider never reaches a hero* — `2 !== undefined` |
+| the burn ignores Armour | *Armour stops it, so nothing is promised* — `2 !== undefined` |
+
+Both new tests are engine-backed rather than self-consistent: the fixture resolves the phase and compares the damage the enemy line actually lost with `totalPower + burnTotal`, and the corpus walks the three class heroes at `hard` for 20 seeds each, comparing `attackers` and `totalPower` with the phase's own `attacked` events on every phase in which nothing of the player's died. **Bounds:** the fixture forces targeting with one Guard so no roll enters, and the corpus's exact comparison skips phases with a death, because a unit that dies to retaliation never swings and the pre-commit number is honestly an over-statement there. Both populations are counted and asserted, so a version that skips everything cannot pass.
+
+**Seen on screen**, which is the point of a number a player reads: a lone Ranger hero at Power 1 reads *"2 of yours will swing for 2 Power"*, and a Mage in round 2 of its first fight reads *"Your Scorch burns 1 more across the line, whatever the rolls."* Both shots are in `.probe-ui/pick-7-light/`.
+
+### F4 — what an act says after its own blow ended the fight (`test/rules.test.ts`, `test/hero-attacks.test.ts`)
+
+Measured first, through the shipped seam (`beginRound`/`commitRound`), append-right placement, 500 seeds at `trivial`: the Ranger emitted `fizzled` after the winning blow in **43** of its 499 wins, and the Mage emitted `damaged` after the enemy hero's `died` in **62** of its 491. On screen the Ranger read "…Warchief dies." then "has no legal target — the attack fizzles". The same commit already suppressed the equivalent for `scorch` and left it live for `attack`.
+
+The rule chosen — stated in `src/engine/resolver.ts`'s header and in `ARCHITECTURE.md` — is that **the act finishes, and the resolver announces every change it makes and nothing it does not**. An attack with no legal target changes nothing, so it emits nothing; a burn that lands is still announced, dead hero or not, because the board really did change; a spell into an empty line still fizzles, because energy was spent on it.
+
+| mutation | the failure |
+|---|---|
+| the attack's `fizzled` restored | *`['acted','attacked','died','fizzled','afterActed']`* against the expected four; and *an attack that changed nothing says nothing* — `[{kind:'fizzled',uid:3}]` against `[]` |
+| the **spell's** fizzle suppressed as well | *energy was spent on nothing* — `[]` against `['fizzled']` |
+
+The second is what stops the gate being satisfied by an `apply` that returns nothing for everything. After the change the same 500-seed sweep reports **0** fizzles for the Ranger and the same win counts — 500, 499, 491 — so no outcome moved, and `npm run verify` and `npm run verify:run` print byte-identical tables to the base.
+
+### F5 — the design's two play examples (`test/hero-attacks.test.ts`)
+
+`docs/design/game.md` gained the Mage's rider and the Volley death rule, both marked as agent-decided rather than `[owner]`, each with a walked example. `AGENTS.md` requires the example; a gate is what keeps it true.
+
+| mutation | the failure |
+|---|---|
+| the rider ignores Armour (`Math.max(0, amount - armourOf(t))` → `amount`) | "the two play examples in docs/design/game.md walk exactly as written": the Mage example's *step 2: "the Shieldwall takes 1 - 1 = 0, each Wolfrider takes 1 - 0 = 1"* |
+
+Both examples walked correctly on the first run, before any mutation — they were written from the rules and the engine agreed.
+
 ## 2026-09-10 — the class layer: Volley, Scorch, and a run that is the class it was started as (`test/hero-attacks.test.ts`, `test/classes.test.ts`)
 
 Taken on branch `worktree-agent-aa48bc3f62599eab6`, cut from `8b4177c`; the suite is **189 tests** here, 164 at the base before the two files were added. `test/hero-attacks.test.ts` is 13 of them and `test/classes.test.ts` is 12.

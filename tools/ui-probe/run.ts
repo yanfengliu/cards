@@ -88,6 +88,18 @@ async function playRun(page: Page, seed: number, theme: string): Promise<void> {
 
   await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1`);
   await page.evaluate(() => document.fonts.ready);
+  // A run now starts at the class pick, and this probe walked straight past it
+  // into a 30-second timeout for a whole unit: classes shipped, `#run-map` was
+  // no longer the first thing on screen, and the repo's own instrument for
+  // playing a run stopped working with nothing saying so.
+  //
+  // The class is clicked rather than named in the address, for the reason at
+  // the top of this file. It is the Knight because the headless mirror is:
+  // `createRunController` with no class named is the Knight, and the hash
+  // comparison at the end only means something while the two are the same run.
+  await page.waitForSelector('[data-class-card]');
+  await shoot(page, dir, 'class-pick', taken);
+  await page.locator('[data-run="pick-class"][data-class="knight"]').click();
   await page.waitForSelector('#run-map svg');
 
   let steps = 0;

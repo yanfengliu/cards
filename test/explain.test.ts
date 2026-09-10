@@ -71,6 +71,7 @@ import {
   TRIBE_TERMS,
   tribeTerm,
 } from '../src/render/glossary.ts';
+import { CLASS_TERMS } from '../src/render/class-terms.ts';
 import { ICON_NAMES, iconShape, iconSvg, type IconName } from '../src/render/icons.ts';
 import { explainCard } from '../src/render/inspect.ts';
 import { MIN_CARD_W, cardViewOf, pipIconSize, traitPips } from '../src/render/board.ts';
@@ -242,6 +243,89 @@ test('trait rules carry the resolver’s own numbers, not retyped ones', () => {
     `src/render/glossary.ts contains the literal "${literal?.[0]}". A Power number written out ` +
       'here stops following the resolver the moment that constant is re-tuned.',
   );
+});
+
+test('Volley’s count in words is the count the resolver swings', () => {
+  // The class half of the test above, and it is written differently on purpose.
+  //
+  // `assert.equal(VOLLEY_SWINGS, 2)` next to a tooltip saying "twice" is the
+  // trap canon names: a check built from the same symbol as the thing it
+  // checks proves only that the code agrees with itself, and when the constant
+  // moves the repair is to edit the test, which ships the lie. So the count is
+  // MEASURED - one Volley entity, one drain, count the `attacked` events - and
+  // the words below come from a table this file owns. Nothing here can be
+  // satisfied by re-reading `VOLLEY_SWINGS`.
+  //
+  // Bound: it proves the four sentences state the swing count the resolver
+  // performs, at whatever `VOLLEY_SWINGS` is today. It says nothing about the
+  // rest of either sentence, and nothing about where they are drawn.
+  const state: GameState = { board: { player: [], enemy: [] }, nextUid: 1 };
+  state.board.player.push(makeHero(state, 'player', { name: 'H', health: 30, power: 1, armour: 0 }));
+  state.board.enemy.push(makeHero(state, 'enemy', { name: 'E', health: 99, power: 0, armour: 0 }));
+  const archer = makeUnit(state, 'player', {
+    id: 'fixture:volley', name: 'fixture', cost: 1, power: 1, health: 20, armour: 0,
+    tribe: 'human', traits: ['volley'],
+  });
+  insertUnit(state, 'player', archer, unitCount(state, 'player'));
+
+  const { events } = drain(state, [{ kind: 'act', uid: archer.uid }], makeRng(9, 'combat'));
+  const swings = events.filter((ev) => ev.kind === 'attacked').length;
+  assert.ok(swings > 1, `the fixture measured ${swings} swing(s), so it is not measuring Volley`);
+
+  // This file's own words, so the assertion does not borrow the production
+  // mapping it is checking.
+  const SAID: Readonly<Record<number, string>> = { 2: 'twice', 3: 'three times', 4: 'four times' };
+  const said = SAID[swings];
+  assert.ok(said !== undefined, `no word for ${swings} swings; extend this table with timesWord`);
+
+  const sentences: [string, string][] = [
+    ['the Volley tooltip', TRAIT_TERMS.volley.line],
+    ['the Ranger’s swing line', CLASS_TERMS.ranger.swing(1)],
+    ['the Ranger’s pool line', CLASS_TERMS.ranger.pool],
+  ];
+  for (const [what, line] of sentences) {
+    assert.ok(
+      line.includes(said),
+      `${what} does not say "${said}", and the resolver swings ${swings} times.\n\n${line}`,
+    );
+    for (const [n, word] of Object.entries(SAID)) {
+      if (Number(n) === swings) continue;
+      assert.ok(!line.includes(word), `${what} says "${word}" as well as "${said}".\n\n${line}`);
+    }
+  }
+
+  // The source half, exactly as Relay's above: the sentences have to be BUILT
+  // from the constant, or they agree with it today and stop the day it moves.
+  // `timesWord`'s own lookup table is the one place a count word is code, so
+  // it is cut out before the scan rather than exempted by name.
+  const terms = codeOf('src/render/class-terms.ts');
+  const built = terms.split('timesWord(VOLLEY_SWINGS)').length - 1;
+  assert.ok(
+    built >= 4,
+    `src/render/class-terms.ts interpolates timesWord(VOLLEY_SWINGS) ${built} time(s). Every ` +
+      'sentence that states Volley\'s count must be built from the resolver\'s constant.',
+  );
+  const outsideTable = terms.replace(/const words:[\s\S]*?};/, '');
+  const literal = /\b(once|twice|three times|four times)\b/.exec(outsideTable);
+  assert.equal(
+    literal,
+    null,
+    `src/render/class-terms.ts contains the literal "${literal?.[0]}" outside timesWord's table. ` +
+      'A swing count written out here stops following VOLLEY_SWINGS the moment it is re-tuned.',
+  );
+
+  // The third place the count is written, and the reason this half is a list
+  // rather than one file: `src/sim/runbots.ts` values a Volley card by counting
+  // its Power once per swing, and it wrote that as `+ card.power` - a copy of
+  // "Volley is two" that nothing connected to the resolver. Every file that
+  // states the count states it from the constant.
+  for (const rel of ['src/render/class-terms.ts', 'src/sim/runbots.ts']) {
+    assert.ok(
+      codeOf(rel).includes('VOLLEY_SWINGS'),
+      `${rel} writes Volley's swing count without naming VOLLEY_SWINGS, so it is a second copy ` +
+        'of the rule that will not follow the resolver.',
+    );
+  }
 });
 
 test('the "race carries no rule" claim is still true of the resolver', () => {

@@ -77,7 +77,7 @@ import {
 } from '../render/board.ts';
 import { explainCard } from '../render/inspect.ts';
 import { STAT_TERMS, TRAIT_TERMS, tribeTerm } from '../render/glossary.ts';
-import { incomingOdds, pct, projectOwnPhase } from '../render/odds.ts';
+import { burnTotal, incomingOdds, pct, projectOwnPhase } from '../render/odds.ts';
 import { type Playback, type Step, play, schedule } from '../render/anim.ts';
 import { makeFx } from '../render/fx.ts';
 import { type Intent, wireInput } from './input.ts';
@@ -470,16 +470,35 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
     const outgoing = incomingOdds(projected, 'player');
     const share = incoming.poolSize === 0 ? 0 : 1 / incoming.poolSize;
 
+    /**
+     * The burn, said after the swings and said as certain, because it is.
+     *
+     * A Scorch picks no target, so it belongs in neither the attack count nor
+     * the percentages; leaving it out of the line entirely is what understated
+     * a Mage's whole turn by fourfold. "Whatever the rolls" is the phrase that
+     * separates it from every other number on this line, all of which are
+     * conditional on a target roll.
+     */
+    const burnWords = (odds: typeof incoming, whose: string): string => {
+      const total = burnTotal(odds);
+      if (odds.scorchers === 0) return '';
+      if (total === 0) {
+        return ` ${whose} Scorch is stopped by Armour on every one of them.`;
+      }
+      return ` ${whose} Scorch burns <b>${total}</b> more across the line, whatever the rolls.`;
+    };
+
     dom.enemyIntent.innerHTML =
       `<b>${incoming.attackers}</b> attack${incoming.attackers === 1 ? '' : 's'} on the line now ` +
       `(plus whatever it plays), <b>${incoming.totalPower}</b> Power. ` +
       (incoming.poolSize === 0
-        ? '<span class="warn">Nothing of yours is left to strike</span> — every attack fizzles.'
+        ? '<span class="warn">Nothing of yours is left to strike</span> — every attack finds no target.'
         : incoming.guarded
           ? `Your Guards absorb everything: each attack is <b>${pct(share)}</b> onto each of your ` +
             `<b>${incoming.poolSize}</b> Guard${incoming.poolSize === 1 ? '' : 's'}.`
           : `<span class="warn">No Guard.</span> Each attack is <b>${pct(share)}</b> onto each of ` +
-            `your <b>${incoming.poolSize}</b> targets — your hero included.`);
+            `your <b>${incoming.poolSize}</b> targets — your hero included.`) +
+      burnWords(incoming, 'Its');
 
     const outShare = outgoing.poolSize === 0 ? 0 : 1 / outgoing.poolSize;
     // `outgoing` is read off the projected board, so this total already
@@ -487,11 +506,12 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
     dom.playerIntent.innerHTML =
       `<b>${outgoing.attackers}</b> of yours will swing for <b>${outgoing.totalPower}</b> Power. ` +
       (outgoing.poolSize === 0
-        ? 'No legal enemy target — your attacks will fizzle.'
+        ? 'No legal enemy target — your attacks will find nothing to hit.'
         : outgoing.guarded
           ? `Enemy Guards force every one of them: <b>${pct(outShare)}</b> onto each of ` +
             `<b>${outgoing.poolSize}</b>.`
-          : `Each lands <b>${pct(outShare)}</b> onto each of <b>${outgoing.poolSize}</b> targets.`);
+          : `Each lands <b>${pct(outShare)}</b> onto each of <b>${outgoing.poolSize}</b> targets.`) +
+      burnWords(outgoing, 'Your');
   }
 
   function renderHand(): void {

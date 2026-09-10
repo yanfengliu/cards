@@ -12,9 +12,13 @@
  *
  * The same three rules `glossary.ts` states hold here:
  *
- *   The numbers come from the resolver. `SCORCH_DAMAGE` is imported, and a
- *   class's swing is written from the hero's printed Power at the moment the
- *   sentence is made, so a re-tuned constant re-words the tooltip.
+ *   The numbers come from the resolver. `SCORCH_DAMAGE` and `VOLLEY_SWINGS`
+ *   are imported - the swing count through `timesWord`, so `VOLLEY_SWINGS = 3`
+ *   re-words every "twice" here to "three times" - and a class's swing is
+ *   written from the hero's printed Power at the moment the sentence is made,
+ *   so a re-tuned constant re-words the tooltip. Gated by "Volley's count in
+ *   words is the count the resolver swings" in `test/explain.test.ts`, which
+ *   reads the swings off a real drain rather than off the constant.
  *
  *   A class is looked up by the hero's name, because that is what a hero
  *   entity carries - `cardId` is `hero:<name>` - and a run's hero is named for
@@ -30,10 +34,28 @@
  */
 
 import type { ClassId } from '../content/classes.ts';
-import { SCORCH_DAMAGE } from '../engine/resolver.ts';
+import { SCORCH_DAMAGE, VOLLEY_SWINGS } from '../engine/resolver.ts';
 import type { Trait } from '../engine/state.ts';
 import type { Term } from './glossary.ts';
 import type { IconName } from './icons.ts';
+
+/**
+ * "twice", not "2 times" - a count of repetitions as a player would say it.
+ *
+ * This exists so that every sentence about Volley below is built from
+ * `VOLLEY_SWINGS` rather than from the word the design happens to use today.
+ * `VOLLEY_SWINGS = 3` re-words all four of them at once; a number typed here
+ * would not follow it, which is the whole failure `glossary.ts`'s "the numbers
+ * come from the resolver" rule exists to stop.
+ *
+ * Above four it falls back to digits, which is the honest answer: English has
+ * no ordinary word for it and a card that swung five times would want a
+ * different sentence anyway.
+ */
+export function timesWord(n: number): string {
+  const words: Readonly<Record<number, string>> = { 1: 'once', 2: 'twice', 3: 'three times', 4: 'four times' };
+  return words[n] ?? `${n} times`;
+}
 
 /** The two traits classes brought, explained. Spread into `TRAIT_TERMS`. */
 export const CLASS_TRAIT_TERMS: Readonly<Record<Extract<Trait, 'volley' | 'scorch'>, Term>> = {
@@ -41,8 +63,9 @@ export const CLASS_TRAIT_TERMS: Readonly<Record<Extract<Trait, 'volley' | 'scorc
     name: 'Volley',
     icon: 'volley',
     line:
-      'Attacks twice. Each swing picks its own target and, on a unit, draws its own ' +
-      'retaliation — so a fragile body may not live to swing again. A hero takes none.',
+      `Attacks ${timesWord(VOLLEY_SWINGS)}. Each swing picks its own target and, on a unit, ` +
+      'draws its own retaliation — so a fragile body may not live to swing again. A hero ' +
+      'takes none.',
   },
   scorch: {
     name: 'Scorch',
@@ -79,11 +102,12 @@ export const CLASS_TERMS: Readonly<Record<ClassId, ClassTerm>> = {
     name: 'Ranger',
     icon: 'ranger',
     swing: (power) =>
-      `Swings for ${power}, twice, each swing picking its own target. Every point a Relay ` +
-      `or a weapon hands the hero is spent twice; against Armour, ${power} twice can be nothing.`,
+      `Swings for ${power}, ${timesWord(VOLLEY_SWINGS)}, each swing picking its own target. ` +
+      `Every point a Relay or a weapon hands the hero is spent ${timesWord(VOLLEY_SWINGS)}; ` +
+      `against Armour, ${power} ${timesWord(VOLLEY_SWINGS)} can be nothing.`,
     pool:
       'Elves and humans: Relays to stand at the right end, and Volley bodies that swing ' +
-      'twice as the hero does. Dwarves are rare.',
+      `${timesWord(VOLLEY_SWINGS)} as the hero does. Dwarves are rare.`,
   },
   mage: {
     id: 'mage',

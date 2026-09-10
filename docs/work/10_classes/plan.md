@@ -33,7 +33,7 @@ Save and replay compatibility is a contract, so `RunLog.classId` is optional and
 
 `contentForClass` derives a content that lists one class and starts as it. Without the single-entry list, a derived content would start as the Knight whatever class it was derived for, and `--class` would silently measure the Knight three times.
 
-## Three sessions, three commits
+## Four sessions, four commits
 
 A later reader will find three commits and should know why.
 
@@ -42,6 +42,8 @@ A later reader will find three commits and should know why.
 - `8b4177c` "Classes: Volley and Scorch as resolver verbs, a run started as a class, and the gates for both" - the second worker, on branch `worktree-agent-a5b3c70c8b60a7b3a`. It finished the engine (Scorch became its own effect kind), corrected the run plumbing, restored `src/sim/runmeasure.ts` to main and gave it `--class` alone, and wrote the 769 lines of tests that are this unit's gates. It also died to a rate limit, before proving any of those gates could go red and before the plan, the measurements or the devlog existed.
 
 This document, the red proofs in `docs/learning/gate-proofs.md` and the per-class measurements are the third session, which changed no behaviour.
+
+The fourth session closed the independent review, on branch `worktree-agent-a2039c8da0f15808d` cut from `2781bab`. It is the first of the four to change behaviour that a player sees.
 
 ## Acceptance criteria
 
@@ -54,7 +56,8 @@ This document, the red proofs in `docs/learning/gate-proofs.md` and the per-clas
 - [x] Every load-bearing claim above has been made to go red by reintroducing its defect - 19 mutations in `docs/learning/gate-proofs.md`, entry of 2026-09-10, covering every mutation the two files name for themselves and eight more.
 - [x] Each class measured on its own and reported - `npm run measure:run -- --class <id>`, 1000 seeds each, in Outcome below.
 - [x] `npm run gates` passes and `npm run verify` is unchanged.
-- [ ] Independent review of the resolver's ordering changes, which `AGENTS.md` makes high-risk. Commissioned by the coordinator against `8b4177c`; not part of this session.
+- [x] Independent review of the resolver's ordering changes, which `AGENTS.md` makes high-risk. Commissioned by the coordinator against `8b4177c`. It found the resolver **sound** — all 22 mutations the test files claim to catch go red, deaths stay batched, ordering intact, mutual damage takes no new special case — and found four things in the surfaces the new verbs feed.
+- [x] The review's findings closed, each with a gate watched going red. Session four, below.
 - [ ] Merged to main. The coordinator owns integration.
 
 ## Implementation steps
@@ -89,3 +92,23 @@ Per `docs/policies/local-rules.md` these are measurements of the options, not de
 **One interaction the numbers create.** `npm run verify:run` runs the Knight and stays green, but the same command pointed at the Mage exits non-zero - `node src/sim/runmeasure.ts --verify --seeds 200 --check-seeds 20 --class mage` fails its eighth check, "the instrument can see a difference", because no run in 200 seeds was won. That is the gate working as designed: it is a statement about the seed window's power to detect a change, and a 0% arm has none. It is recorded here so that a later session pointing `--verify` at a class does not read it as a code failure. The gate's own message already draws the distinction, and the 1000-seed run settles it: the Mage's zero is not a seed-window artefact.
 
 **Not done here.** The independent review of the resolver's ordering changes, which `AGENTS.md` makes high-risk, and the merge to main. Both belong to the coordinator. Until the merge, this work is on branch `worktree-agent-aa48bc3f62599eab6`.
+
+## Session four — the review's findings, closed
+
+**Verified at** branch `worktree-agent-a2039c8da0f15808d`, cut from `2781bab`. `npm run gates` passes: **195 tests, 195 pass, 0 fail**, up from 189. Node v24.18.1. `npm run verify` and `npm run verify:run` print tables byte-identical to the base — every number, every hash — which is the evidence that none of this moved an outcome. Fourteen mutations in `docs/learning/gate-proofs.md`, all the colour they were meant to be.
+
+**F1 — the class-pick screen had no test and no probe.** `test/classes.test.ts` built its own `renderClassPick` call and never touched `src/ui/runapp.ts`, so dropping the Mage from what the screen is handed left the suite green. That was not a sample: at `2781bab` **no file under `test/` named `runapp` at all**, so nothing inside it could be gated. The two decisions are now `PICKABLE_CLASSES`/`classPickHtml` and `pickableClassId`, exported and DOM-free, and both callers of a class id from outside the app — `?class=` and the clicked button — go through the one guard. `tools/ui-probe/pick.ts` is new and is the visual half.
+
+The probe found something on its first run: **`tools/ui-probe/run.ts` had been broken for a whole unit.** It waited for `#run-map svg` and the class pick now stands in front of that, so the repo's own instrument for playing a run through the browser had been dying on a timeout with nothing saying so. It clicks the Knight now, and seed 7 plays through and hashes `3d135f5e12b240ea`, identical to headless.
+
+**F2 — the render layer hardcoded Volley's number** while its header said it derives it. `VOLLEY_SWINGS` was never imported under `src/render/`; "twice" was typed in four places. All four are now built from `timesWord(VOLLEY_SWINGS)`, and `src/sim/runbots.ts`'s third copy is `card.power * (VOLLEY_SWINGS - 1)` — identical at 2, following the constant at 3. The gate measures the swings off a real drain and looks the word up in a table the test file owns, because a test asserting `VOLLEY_SWINGS === 2` is repaired by editing the test.
+
+**F3 — the odds understated a Mage's turn fourfold.** Scorch was absent from `src/render/odds.ts` entirely, and `swingsOf`'s use there was ungated. `IncomingOdds` gains `scorchers` and `burnOn`; the intent line adds "Your Scorch burns N more across the line, whatever the rolls", or says the Armour stopped it. Both gates compare the promise against a resolved phase rather than against themselves, and the corpus now walks all three class heroes.
+
+**F4 — an act keeps resolving after its own blow ended the fight, and the commit was inconsistent about it.** Measured at 43 stray `fizzled` in 499 Ranger wins and 62 stray `damaged` in 491 Mage wins, over 500 `trivial` seeds with append-right placement, driven through `src/ui/session.ts`'s `beginRound`/`commitRound` — the shipped seam, the same one `test/render-view.test.ts` walks. Nothing in that probe re-implements combat or targeting. **The probe itself is scratch under the ignored `.probe/`, so this table cannot be re-run from a clean checkout;** the rule it measured is gated by "an act that ended the fight finishes, and says nothing it did not do", and promoting the probe to `tools/` is the integration owner's call rather than this session's — `AGENTS.md` names three simulation runners and adding a fourth is an edit to a file this session was told to touch on one line only. **The rule chosen: the act finishes, and the resolver announces every change it makes and nothing it does not.** So an attack with no legal target says nothing — matching the Scorch rule that was already there — while a burn that lands is still announced, because the board really did change, and a *spell* into an empty line still fizzles, because energy was spent on it. Stopping the queue instead would have been a change to the resolution contract and would have dropped board changes the view had already been told about. The rule is in the resolver's header and in `ARCHITECTURE.md`; the Ranger's stray fizzles are 0 after it and the win counts are unchanged.
+
+**F5 — the documents that own these rules.** `ARCHITECTURE.md` now lists the effect vocabulary and records `scorch` as **authorised by the coordinator**, which its own point 8 requires; it also states the F4 rule. `docs/design/game.md` gains the Mage's rider and the Volley death rule, both marked agent-decided and open to the owner, each with a walked example — and both examples are gated in `test/hero-attacks.test.ts`, number for number. `AGENTS.md` gained `--class` on one line of its Gates section, outside the canon block; `npm run sync-canon` from `../fleet` reports 27 repos current.
+
+**F6 — bounds.** Stated in each gate's own header: the Scorch/Wake test builds all four units on one side and is blind to a side-order reversal (`test/resolver-order.test.ts` is where that lives); `verify:run`'s eight invariants run the Knight alone, and pointing `--verify` at the Mage fails its eighth check for a reason that is not a code failure.
+
+**Not done here.** The merge to main, which belongs to the coordinator, and a re-review of these changes — the resolver's `attack` case was touched, which `AGENTS.md` makes high-risk. Until the merge, this work is on branch `worktree-agent-a2039c8da0f15808d`.

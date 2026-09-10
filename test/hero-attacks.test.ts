@@ -34,6 +34,21 @@
 //   order IS the observable, and one test searches a small seed window for a
 //   roll that makes it observable in Health too, and says so if none is found.
 //
+//   **Board order here is one line's order, never the two lines' order.** "two
+//   Wake units answering one Scorch gain Power in board order" builds all four
+//   units on the enemy side, because a rider only reaches one side. So it
+//   covers `checkStateBased`'s inner loop - left to right within a line - and
+//   is blind to its outer one: swapping `['player', 'enemy']` for
+//   `['enemy', 'player']` there leaves every assertion in this file true. The
+//   side order is gated by "two deaths at one checkpoint are announced player
+//   line first, then enemy line" in `test/resolver-order.test.ts`, and that is
+//   the only place it is.
+//
+//   "an act that ended the fight finishes, and says nothing it did not do" is
+//   one fixture at one seed, with targeting forced. How often a real fight
+//   reaches it is not this file's to say; the 500-seed sweep that measured it
+//   is in `docs/work/10_classes/plan.md`, session four.
+//
 //   Nothing here says either class is worth playing. `npm run measure:run --
 //   --class <id>` is the instrument for that, and its numbers are information
 //   for the player, not a target - `docs/policies/local-rules.md`.
@@ -275,6 +290,49 @@ test('the second swing lands before any reaction to the first: a woken Guard ret
   assert.ok(found, 'no seed in 1..24 sent the second swing at the waker, so the Health half of this gate did not run');
 });
 
+test('an act that ended the fight finishes, and says nothing it did not do', () => {
+  // The product-surface rule in `src/engine/resolver.ts`'s header, at the
+  // entity a player met it on. A Ranger's first swing kills the exposed enemy
+  // hero; the second swing is already queued, finds an empty pool, and used to
+  // emit `fizzled` - so the screen read "the Warchief dies", then "has no legal
+  // target - the attack fizzles", with a floating "no target" over the hero
+  // that had just won the fight.
+  //
+  // Both halves matter. The act still FINISHES - the trace still holds both
+  // attacks and the `afterAct` - because clearing the queue at the checkpoint
+  // would be a change to the resolution contract. What changed is only what is
+  // said.
+  //
+  // Bound: one fixture, one seed, targeting forced by there being exactly one
+  // enemy entity. It says nothing about the frequency of this in real fights;
+  // that measurement is in `docs/work/10_classes/plan.md`, session four.
+  const f = fixture({ name: 'Ranger', power: 1, traits: ['volley'] }, { health: 1 });
+  const hero = heroOf(f.state, 'player');
+  const enemyHero = heroOf(f.state, 'enemy');
+
+  const { events, trace } = drain(f.state, [{ kind: 'act', uid: hero.uid }], makeRng(12, 'combat'));
+  assert.deepEqual(trace.map((e) => e.kind), ['act', 'attack', 'attack', 'afterAct'], 'the act finished');
+  assert.deepEqual(kinds(events), ['acted', 'attacked', 'died', 'afterActed']);
+  assert.equal(
+    events.some((e) => e.kind === 'fizzled'),
+    false,
+    'the second swing changed nothing, so it said nothing - a fizzle here lands under the ' +
+      'death that ended the fight and contradicts it',
+  );
+  assert.equal(enemyHero.alive, false);
+
+  // The Mage's half of the same rule, and the reason it is not symmetrical: a
+  // rider that BURNS still announces it, because the board really did change
+  // and the view is derived from these events. Only a rider with nothing to
+  // burn is silent, which is the rule `scorch` already carried.
+  const g = fixture({ name: 'Mage', power: 1, traits: ['scorch'] }, { health: 1 });
+  const mage = heroOf(g.state, 'player');
+  const mook = g.add('enemy', card('test:mook', 0, 5, 0));
+  const burnt = drain(g.state, [{ kind: 'act', uid: mage.uid }], makeRng(13, 'combat'));
+  assert.deepEqual(kinds(burnt.events), ['acted', 'attacked', 'died', 'damaged', 'afterActed']);
+  assert.equal(mook.health, 4, 'the burn landed, so the burn is announced');
+});
+
 // ------------------------------------------------------------------ Scorch
 
 test('Scorch: after the swing, every enemy unit takes SCORCH_DAMAGE less its Armour, the hero is untouched, nothing hits back', () => {
@@ -390,6 +448,76 @@ test('Volley and Scorch on one entity: the swings, then the burn, then the after
 
   const { trace } = drain(f.state, [{ kind: 'act', uid: both.uid }], makeRng(10, 'combat'));
   assert.deepEqual(trace.map((e) => e.kind), ['act', 'attack', 'attack', 'scorch', 'afterAct']);
+});
+
+// ------------------------------------------- the design's two play examples
+
+test('the two play examples in docs/design/game.md walk exactly as written', () => {
+  // `AGENTS.md`: a change to `docs/design/` restates the affected rule as a
+  // concrete play example, "because a mechanic that cannot be walked through by
+  // hand is not yet specified". An example nothing runs is prose, and prose
+  // drifts - so both are walked here, number for number, and the assertion
+  // messages quote the document.
+  //
+  // Bound: it holds the two examples to the engine, not the engine to the
+  // design. If a rule changes deliberately, this goes red and the document is
+  // what has to be edited.
+
+  // "The Mage's rider is a Scorch" - Mage hero Power 1, against an Orc
+  // Shieldwall (1/5, Armour 1, Guard) and two Goblin Wolfriders (2/1).
+  {
+    const f = fixture({ name: 'Mage', power: 1, traits: ['scorch'] });
+    const wall = f.add('enemy', card('ex:shieldwall', 1, 5, 1, ['guard']));
+    const wolfA = f.add('enemy', card('ex:wolfrider-a', 2, 1, 0));
+    const wolfB = f.add('enemy', card('ex:wolfrider-b', 2, 1, 0));
+    const mage = heroOf(f.state, 'player');
+    const enemyHero = heroOf(f.state, 'enemy');
+
+    const { events } = drain(f.state, [{ kind: 'act', uid: mage.uid }], makeRng(14, 'combat'));
+    assert.deepEqual(attacks(events), [{ targetUid: wall.uid, raw: 1, dealt: 0 }], 'step 1: "it deals 0"');
+    assert.equal(mage.health, 30, 'step 1: "the Mage is untouched"');
+    assert.deepEqual(
+      burns(events),
+      [
+        { targetUid: wall.uid, raw: 1, dealt: 0 },
+        { targetUid: wolfA.uid, raw: 1, dealt: 1 },
+        { targetUid: wolfB.uid, raw: 1, dealt: 1 },
+      ],
+      'step 2: "the Shieldwall takes 1 - 1 = 0, each Wolfrider takes 1 - 0 = 1"',
+    );
+    assert.deepEqual(
+      events.filter((e) => e.kind === 'died').map((e) => e.uid),
+      [wolfA.uid, wolfB.uid],
+      'step 3: "announced dead together, left to right"',
+    );
+    assert.equal(wall.health, 5, 'the board after: "Shieldwall 5/5"');
+    assert.equal(enemyHero.health, 30, 'the board after: "enemy hero untouched"');
+  }
+
+  // "A Volley body killed by its first swing does not swing again" - an Elf
+  // Archer (1/2, Volley, Relay) left of a Human Squire (1/2), into a Guard with
+  // Power 5 and Health 20.
+  {
+    const f = fixture();
+    const archer = f.add('player', card('ex:archer', 1, 2, 0, ['volley', 'relay']));
+    const squire = f.add('player', card('ex:squire', 1, 2, 0));
+    const wall = f.add('enemy', card('ex:wall', 5, 20, 0, ['guard']));
+
+    const { events } = drain(f.state, [{ kind: 'act', uid: archer.uid }], makeRng(15, 'combat'));
+    assert.deepEqual(attacks(events), [{ targetUid: wall.uid, raw: 1, dealt: 1 }], 'step 1: one swing landed');
+    assert.equal(wall.health, 19, 'step 1 and 3: "the wall stays on 19"');
+    assert.equal(archer.alive, false, 'step 2: "it dies and leaves the board"');
+    assert.deepEqual(kinds(events), ['acted', 'attacked', 'retaliated', 'died'], 'step 3: the second swing said nothing');
+    assert.equal(power(squire), 1, 'step 4: "the Squire gets no +2 and swings for its printed 1"');
+
+    // "The same Ranger hero into the same wall loses nothing."
+    const g = fixture({ name: 'Ranger', power: 1, traits: ['volley'] });
+    const gWall = g.add('enemy', card('ex:wall', 5, 20, 0, ['guard']));
+    const ranger = heroOf(g.state, 'player');
+    drain(g.state, [{ kind: 'act', uid: ranger.uid }], makeRng(16, 'combat'));
+    assert.equal(gWall.health, 18, '"the wall goes 20 -> 19 -> 18"');
+    assert.equal(ranger.health, 30);
+  }
 });
 
 // ---------------------------------------------------------- the plain hero

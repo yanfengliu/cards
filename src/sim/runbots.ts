@@ -18,6 +18,7 @@
 // about routing rather than about the fights.
 
 import { type Rng, makeRng, mixSeeds, nextInt } from '../engine/rng.ts';
+import { VOLLEY_SWINGS } from '../engine/resolver.ts';
 import type { PlacementPolicy } from '../engine/fight.ts';
 import type { UnitCard } from '../engine/state.ts';
 import type { RunAgent } from '../run/run.ts';
@@ -64,10 +65,16 @@ function placementFor(style: PlacementStyle, seed: number): PlacementPolicy {
  */
 function cardValue(card: UnitCard): number {
   const body = card.power + 0.7 * card.health + 1.5 * card.armour;
-  // A Volley body swings twice, so its Power is counted twice; a starting
-  // guess like the rest, and the same for every class so the per-class
-  // measurement compares content rather than three different bots.
-  const volley = card.traits.includes('volley') ? card.power : 0;
+  // A Volley body swings `VOLLEY_SWINGS` times, so its Power counts that many
+  // times. The extra swings are read from the resolver's own constant rather
+  // than written as `+ card.power`, which was a third copy of "Volley is two"
+  // beside the resolver's and the tooltip's and would have stopped following it.
+  //
+  // Everything AROUND it is still a starting guess - the 0.7, the 1.5, the +1
+  // below - and deliberately the same guess for every class, so the per-class
+  // measurement compares content rather than three different bots. What is not
+  // a guess is the swing count.
+  const volley = card.traits.includes('volley') ? card.power * (VOLLEY_SWINGS - 1) : 0;
   const trait = card.traits.includes('guard') ? 2 : 0;
   return (body + volley + trait) / (card.cost + 1);
 }

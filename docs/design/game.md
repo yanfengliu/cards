@@ -104,6 +104,37 @@ Three rules the mutual version needs, each decided here rather than left to the 
 
 **Health, plus a small class-flavoured attack [owner].** The Knight swings for 2, the Ranger for 1 twice, the Mage for 1 with a rider. The hero always contributes something, and equipment amplifies an attack that already exists rather than switching one on.
 
+The sentence above is the owner's. The two rules under it are **not**: what the rider is, and what happens to a Volley body that dies mid-attack, were decided by an agent while the classes were built, and the owner may change either. Both are gated in `test/hero-attacks.test.ts`.
+
+#### The Mage's rider is a Scorch
+
+**After the hero's swing, every enemy *unit* takes 1, less its own Armour.** It is spell damage: nothing hits back, Guard does not narrow it, and it never reaches the enemy hero. It resolves after the swing rather than with it, so a unit the swing kills is not burned.
+
+1 is a starting guess with a reason: it kills a 1-Health body in one turn, a 2-Health body in two, and does nothing at all to anything carrying Armour 1. That is the shape of a class that answers **width** and not thickness — the counterpart of the Knight, whose one 2-Power blow answers thickness and not width.
+
+*Played out.* A Mage hero (Power 1, Scorch) faces a line of an Orc Shieldwall (Power 1, Health 5, **Armour 1**, Guard) and two Goblin Wolfriders (Power 2, Health 1) with an enemy hero behind them. The hero acts last, as always.
+
+1. **The swing.** A Guard is alive, so the pool narrows to the Shieldwall. The Mage strikes it for 1; Armour 1 takes the whole point, so it deals **0**. A hero takes nothing back on its own swing, so the Mage is untouched.
+2. **The rider.** One effect, every enemy unit, in board order: the Shieldwall takes `1 − 1 = 0`, each Wolfrider takes `1 − 0 = 1`. The enemy hero is not in it.
+3. **One checkpoint.** Both Wolfriders are at 0 Health and are announced dead together, left to right — not interleaved with the damage, because the burn is one effect.
+
+The board after: Shieldwall 5/5, both Wolfriders gone, enemy hero untouched. A hero that "deals 1" removed two bodies and did nothing whatever to the one wearing Armour.
+
+#### A Volley body killed by its first swing does not swing again
+
+**Each Volley swing is its own attack.** It picks its own target from the board as the previous swing left it, and on a unit it draws its own retaliation. The state-based checkpoint runs between the two swings, so a body that died to the first swing's answer is off the board when the second comes up — and an effect naming an entity that has left the board is skipped, which is the rule that was already there. Its after-acting trait does not fire either: it acted, it did not finish acting. **A hero takes no retaliation, so a hero never loses its second swing this way.**
+
+*Played out.* An Elf Archer (Power 1, Health 2, Volley, Relay) stands immediately left of a Human Squire (Power 1, Health 2). Facing them, one enemy Guard with Power 5 and Health 20.
+
+1. **First swing.** Guard narrows the pool to the wall. The Archer strikes for 1 → the wall is on **19**. Simultaneously the wall deals its 5 back → the Archer is on `2 − 5`.
+2. **Checkpoint.** The Archer is at or below 0. It dies and leaves the board.
+3. **Second swing.** It names the Archer, who is no longer there, so it is skipped. The wall stays on **19**.
+4. **Relay never fires.** `afterAct` names the same missing entity. The Squire gets no +2 and swings for its printed **1**.
+
+The board after: wall 19/20, Archer dead, Squire on Power 1 — one swing's worth of damage from a two-swing body, and a Relay that was paid for and never landed. Fragility costs a Volley unit more than it costs anything else, and that is the whole trade the trait offers.
+
+The same Ranger *hero* into the same wall loses nothing: it takes no retaliation, so both swings land and the wall goes 20 → 19 → **18**.
+
 Hero health **persists across the whole run** — it is the run's life bar, healed at rest nodes. A fight is won by reducing the enemy hero to zero.
 
 ## The cascade

@@ -32,8 +32,8 @@
  */
 
 import { CARD_POOL } from '../content/cards.ts';
-import { CLASSES, classById } from '../content/classes.ts';
-import type { UnitCard } from '../engine/state.ts';
+import { type ClassDef, CLASSES, classById } from '../content/classes.ts';
+import type { CardPool, UnitCard } from '../engine/state.ts';
 import { RUN_CONTENT } from '../run/content.ts';
 import { resolveDeckCard, runPool } from '../run/deck.ts';
 import { pathSpread } from '../run/map.ts';
@@ -110,6 +110,57 @@ const FORGE_WORDS: Readonly<Record<ForgeMode, string>> = {
   cost: `−1 ${STAT_TERMS.cost.name}`,
 };
 
+/**
+ * The classes this app offers, and the one gate on a class named from outside
+ * it. Both are up here, exported, rather than inline in `startRunApp`, and that
+ * is the point rather than tidiness.
+ *
+ * `startRunApp` needs a document, so nothing inside it can be reached by
+ * `node --test`. An independent review found what that costs: the screen was
+ * handed `CLASSES` at one call site and no test touched this file, so removing
+ * the Mage from what the screen is offered left the whole suite green, and so
+ * did deleting the guard that refuses an unknown `?class=`. A wiring nobody can
+ * test is a wiring nobody is checking.
+ *
+ * So the two decisions live in two functions with no DOM in them, and
+ * `test/classes.test.ts` calls exactly what the screen calls. Gated by "the
+ * screen is handed every class the game has" and "a class named from outside
+ * the app is refused unless it is one of the three".
+ */
+export const PICKABLE_CLASSES: readonly ClassDef[] = CLASSES;
+
+/** The class-pick screen as the app builds it, with the classes the app offers. */
+export function classPickHtml(opts: {
+  seed: number;
+  pool: CardPool;
+  mount: boolean;
+  hatch: boolean;
+}): string {
+  return renderClassPick({
+    seed: opts.seed,
+    classes: PICKABLE_CLASSES,
+    pool: opts.pool,
+    mount: opts.mount,
+    hatch: opts.hatch,
+  });
+}
+
+/**
+ * A class id from outside the app - a `?class=` in the address bar, or the
+ * `data-class` of whatever was clicked - narrowed to one this app offers, or
+ * null.
+ *
+ * Null rather than a throw, and rather than a fallback to the Knight: an
+ * address naming a class that does not exist should put the pick screen up and
+ * let the player choose, not silently start a run as something else. Every
+ * caller that does start a run passes the result to `createRunController`,
+ * which refuses an unknown class by name.
+ */
+export function pickableClassId(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined) return null;
+  return PICKABLE_CLASSES.some((c) => c.id === raw) ? raw : null;
+}
+
 /** The three permanent bonuses on a deck card, as short marks. Empty when none. */
 function bonusMarks(dc: DeckCard): string {
   const marks: string[] = [];
@@ -147,13 +198,12 @@ export function startRunApp(): void {
    * run carries its own class and never asks. Otherwise the class-pick screen
    * is up and the controller below is a placeholder that is never rendered.
    */
-  const classParam = params.get('class');
-  const classNamed = classParam !== null && CLASSES.some((c) => c.id === classParam);
-  let picking = !classNamed;
+  const classParam = pickableClassId(params.get('class'));
+  let picking = classParam === null;
   let ctl: RunController = createRunController(
     RUN_CONTENT,
     startSeed,
-    classNamed ? { classId: classParam } : {},
+    classParam === null ? {} : { classId: classParam },
   );
   // `?fresh=1` ignores a saved run; otherwise a run in progress on this seed
   // is replayed from its log and picks up where it stood between nodes.
@@ -610,9 +660,8 @@ export function startRunApp(): void {
     dom.subtitle.textContent = `Choose a class · seed ${ctl.seed}`;
     dom.status.innerHTML =
       `<span class="hud__stat hud__stat--seed" title="The run's seed. The same seed and the same choices replay the same run.">seed ${ctl.seed}</span>`;
-    dom.node.innerHTML = renderClassPick({
+    dom.node.innerHTML = classPickHtml({
       seed: ctl.seed,
-      classes: CLASSES,
       pool: CARD_POOL,
       mount: screen.mount(),
       hatch: screen.hatch(),
@@ -709,8 +758,9 @@ export function startRunApp(): void {
   }
 
   /** The pick was made: start the run as that class, on the seed already chosen. */
-  function pickClass(classId: string): void {
-    if (!picking || !CLASSES.some((c) => c.id === classId)) return;
+  function pickClass(raw: string): void {
+    const classId = pickableClassId(raw);
+    if (!picking || classId === null) return;
     ctl = createRunController(RUN_CONTENT, ctl.seed, { classId });
     picking = false;
     opened = 'fresh';

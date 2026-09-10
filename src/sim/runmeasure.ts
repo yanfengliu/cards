@@ -22,6 +22,17 @@
 // content, and it ends in a spread of places", which is what makes the run
 // measurable at all. They do not say the run is fun, well paced, or thirty
 // minutes long.
+//
+// **`npm run verify:run` is one class's gate, and that class is the Knight.**
+// The script names no `--class`, so all eight invariants run against the
+// default - `startRun` with no class named is the Knight - and a Ranger or a
+// Mage whose replay diverged would not turn it red. The other two classes are
+// gated by `test/classes.test.ts` instead, over seeds 1..6 rather than 200.
+// Pointing `--verify` at a class is expected to be useful and is not always
+// meaningful: the eighth invariant asks whether the seed window can see a
+// difference at all, and a class that wins no run in 200 seeds has no such
+// power, so `--verify --class mage` exits non-zero for a reason that is not a
+// code failure. Its message says which.
 
 import { pathToFileURL } from 'node:url';
 
