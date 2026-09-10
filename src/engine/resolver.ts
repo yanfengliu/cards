@@ -34,6 +34,15 @@
 // afterwards announces whichever of them died. Neither hit can cancel the
 // other, because neither is checked until both have landed, and both are
 // computed from Power read before either lands.
+//
+// Two class traits arrived with classes - Volley and Scorch - and neither is a
+// new site of mutation or a new ordering rule. Both are continuations of an
+// `act`: Volley makes it spawn a second `attack`, and Scorch makes it spawn a
+// `scorch`, which is `damageAll`'s loop under its own name. Everything an act
+// spawns queues ahead of any reaction to its first swing, which is the rule
+// already stated above, and the checkpoint runs between the two swings, which
+// is what decides that a Volley body killed by its first swing's retaliation
+// never takes the second.
 
 import { type Rng, pick } from './rng.ts';
 import {
@@ -60,6 +69,13 @@ export type Effect =
   // something and the loop trace stays one shape.
   | { kind: 'damageOne'; uid: number; amount: number }
   | { kind: 'damageAll'; uid: number; side: Side; amount: number }
+  /**
+   * The Mage's rider: every unit on `side` takes `amount`, less its Armour, as
+   * spell damage. It is `damageAll`'s loop under its own name, and the one
+   * difference is stated at the loop - a rider with nothing to burn says
+   * nothing, where a spell cast into an empty line fizzles.
+   */
+  | { kind: 'scorch'; uid: number; side: Side; amount: number }
   | { kind: 'buffAll'; uid: number; side: Side; amount: number }
   | { kind: 'equip'; uid: number; item: EquipmentCard };
 
@@ -108,19 +124,23 @@ export type TriggerRule = (
 export const RELAY_POWER = 2;
 export const WAKE_POWER = 2;
 /**
- * What Scorch deals to every enemy unit after the scorching entity's swing.
- * A starting guess: 1 kills a Goblin in two turns and does nothing to anything
- * with Armour, which is the whole shape of the class that carries it.
+ * The two class traits' numbers, beside Relay's and Wake's. `docs/design/game.md`:
+ * "the Ranger for 1 twice, the Mage for 1 with a rider". Volley's count is the
+ * design's own. Scorch's damage is a starting guess: 1 kills a Goblin in two
+ * turns and does nothing to anything with Armour, which is the whole shape of
+ * the class that carries it.
  */
+export const VOLLEY_SWINGS = 2;
 export const SCORCH_DAMAGE = 1;
 export const DEFAULT_MAX_ITERATIONS = 4096;
 
 /**
- * How many attacks one act spawns for `e`: two for Volley, one for anything
- * else. Exported so the odds shown before commit can count a second swing.
+ * How many attacks one act spawns for `e`: `VOLLEY_SWINGS` for Volley, one for
+ * anything else. Exported so the odds shown before commit can count a second
+ * swing.
  */
 export function swingsOf(e: Entity): number {
-  return e.traits.includes('volley') ? 2 : 1;
+  return e.traits.includes('volley') ? VOLLEY_SWINGS : 1;
 }
 
 /**
@@ -186,26 +206,29 @@ function apply(
     /**
      * An act: the entity's action, then its after-acting hook.
      *
-     * The action is one attack by default, and the two class traits change
-     * what it is - for a hero and a unit alike, because the resolver does not
-     * know what a class is:
+     * The action is one attack by default. The two class traits change what it
+     * is, for a hero and a unit alike, because the resolver does not know what
+     * a class is - `docs/design/game.md`: "The Knight swings for 2, the Ranger
+     * for 1 twice, the Mage for 1 with a rider." The Knight is the default
+     * branch.
      *
-     *   - **Volley** spawns two attacks instead of one. Each is its own
-     *     `attack` effect, so each picks its own target and, for a unit, draws
-     *     its own retaliation. A unit that dies to the first swing's
-     *     retaliation never reaches the second: `attack` skips a dead entity,
-     *     the same rule that stops a dead Relay body from firing.
-     *   - **Scorch** spawns a `damageAll` against the other side after the
-     *     swing(s). It is spell damage, so it takes nothing back and never
-     *     reaches the enemy hero, and it is one effect, so every unit it hits
-     *     dies at one checkpoint in board order.
+     *   - **Volley** spawns `VOLLEY_SWINGS` attacks instead of one. Each is its
+     *     own `attack` effect, so each picks its own target from the board as
+     *     the previous swing left it and, for a unit, draws its own
+     *     retaliation, and the checkpoint runs between them. A unit that dies
+     *     to the first swing's retaliation never reaches the second: `attack`
+     *     skips an entity that has left the board, the same rule that stops a
+     *     dead Relay body from firing. A hero takes no retaliation, so a hero's
+     *     second swing is never lost that way.
+     *   - **Scorch** spawns a `scorch` against the other side after the swing.
+     *     It is spell damage - nothing hits back, Guard does not narrow it, the
+     *     enemy hero is not in it - and it is one effect, so every unit it
+     *     kills dies at one checkpoint in board order.
      *
      * Everything spawned here is a continuation of the act, so it all queues
      * ahead of any reaction to the first swing: a Volley's second swing lands
-     * before a Wake answering the first swing's death grants its Power.
-     *
-     * `docs/design/game.md`: "The Knight swings for 2, the Ranger for 1 twice,
-     * the Mage for 1 with a rider." The Knight is the default branch.
+     * before a Wake answering the first swing's kill gains its Power, and a
+     * Scorch burns before it too. Gated in `test/hero-attacks.test.ts`.
      */
     case 'act': {
       const e = findEntity(state, effect.uid);
@@ -213,12 +236,7 @@ function apply(
       const spawned: Effect[] = [];
       for (let i = 0; i < swingsOf(e); i++) spawned.push({ kind: 'attack', uid: e.uid });
       if (e.traits.includes('scorch')) {
-        spawned.push({
-          kind: 'damageAll',
-          uid: e.uid,
-          side: otherSide(e.side),
-          amount: SCORCH_DAMAGE,
-        });
+        spawned.push({ kind: 'scorch', uid: e.uid, side: otherSide(e.side), amount: SCORCH_DAMAGE });
       }
       spawned.push({ kind: 'afterAct', uid: e.uid });
       return { events: [{ kind: 'acted', uid: e.uid }], spawned };
@@ -355,8 +373,17 @@ function apply(
      *
      * Armour still applies, per target, so the design's "concentrate against
      * armour, spread against a swarm" inversion survives contact with spells.
+     *
+     * `scorch` - the Mage's rider - is this same loop, and shares it rather than
+     * copying it so the three properties above hold for both by construction.
+     * The two differ in one line, at the bottom: a spell cast into an empty
+     * line fizzles, because energy was spent on nothing and the screen says so;
+     * a Scorch is a rider on a swing that has already landed, so with nothing
+     * to burn it says nothing. A `fizzled` there would follow an `attacked`
+     * from the same hero and contradict it on screen.
      */
-    case 'damageAll': {
+    case 'damageAll':
+    case 'scorch': {
       const e = findEntity(state, effect.uid);
       if (e === null || !e.alive) return { events: [], spawned: [] };
       const events: GameEvent[] = [];
@@ -366,7 +393,7 @@ function apply(
         t.health -= dealt;
         events.push({ kind: 'damaged', uid: e.uid, targetUid: t.uid, raw: effect.amount, dealt });
       }
-      if (events.length === 0) {
+      if (events.length === 0 && effect.kind === 'damageAll') {
         return { events: [{ kind: 'fizzled', uid: e.uid }], spawned: [] };
       }
       return { events, spawned: [] };

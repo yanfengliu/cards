@@ -70,15 +70,33 @@ import type {
 export const RUN_STREAM = 'run';
 
 /**
- * The class a run is when none is named, and the only class a content with no
- * class list offers. It is the class every run was before classes existed,
- * which is what lets a log written then replay unchanged: `replayRun` reads a
- * missing `classId` as this one.
+ * The one class a content with no class list offers, made of its own hero,
+ * deck and pool. It is the class every run was before classes existed, which
+ * is what lets a log written then replay unchanged: `replayRun` reads a
+ * missing `classId` as `defaultClassId(content)`, and for the shipped content
+ * that is this one.
  */
 export const DEFAULT_CLASS_ID = 'knight';
 
 /**
- * The class `classId` names on `content`, or the content's implicit one.
+ * The class `content` starts as when none is named: the first it lists, or
+ * `DEFAULT_CLASS_ID` for a content that lists none.
+ *
+ * First-listed is what makes `contentForClass` self-describing. A content
+ * derived for one class lists that class alone and so starts as it, and
+ * nothing that takes a content - `runRun`, `checkRuns`, `calibrateEncounters`
+ * - has to be told a class to measure one. It is also what an old log relies
+ * on: the shipped content lists the Knight first, and `test/classes.test.ts`
+ * holds it there, because a log with no class must replay as the Knight it
+ * was.
+ */
+export function defaultClassId(content: RunContent): string {
+  const first = content.classes?.[0];
+  return first === undefined ? DEFAULT_CLASS_ID : first.id;
+}
+
+/**
+ * The class `classId` names on `content`, or the content's default one.
  *
  * A content without a class list has exactly one class, made of its own hero,
  * deck and pool and called `DEFAULT_CLASS_ID`; a fixture with one hero and one
@@ -86,7 +104,7 @@ export const DEFAULT_CLASS_ID = 'knight';
  * listed content for a class it does not list, is an error that names the
  * classes it does offer.
  */
-export function classOf(content: RunContent, classId: string = DEFAULT_CLASS_ID): RunClass {
+export function classOf(content: RunContent, classId: string = defaultClassId(content)): RunClass {
   const classes = content.classes;
   if (classes === undefined || classes.length === 0) {
     if (classId !== DEFAULT_CLASS_ID) {
@@ -116,12 +134,19 @@ export function classOf(content: RunContent, classId: string = DEFAULT_CLASS_ID)
 /**
  * `content` as a run of `classId` plays it: the class's hero, starting deck
  * and pool in the content's own three fields, so nothing inside the loop
- * reads a class. The class list stays, so a derived content can be asked for
- * another class again.
+ * reads a class, and that class alone in its list, so the derived content
+ * starts as it when no class is named. Asking the derived content for another
+ * class is refused by name, as for any content that does not list it.
  */
-export function contentForClass(content: RunContent, classId: string = DEFAULT_CLASS_ID): RunContent {
+export function contentForClass(content: RunContent, classId: string = defaultClassId(content)): RunContent {
   const cls = classOf(content, classId);
-  return { ...content, hero: cls.hero, startingDeck: cls.startingDeck, rewards: cls.rewards };
+  return {
+    ...content,
+    hero: cls.hero,
+    startingDeck: cls.startingDeck,
+    rewards: cls.rewards,
+    classes: [cls],
+  };
 }
 
 /**
@@ -168,7 +193,7 @@ function requirePick(value: number, count: number, what: string, allowSkip: bool
 export function startRun(
   content: RunContent,
   seed: number,
-  classId: string = DEFAULT_CLASS_ID,
+  classId: string = defaultClassId(content),
 ): RunState {
   const cls = classOf(content, classId);
   const active = contentForClass(content, classId);
@@ -401,7 +426,7 @@ export function runRun(
   content: RunContent,
   seed: number,
   agent: RunAgent,
-  classId: string = DEFAULT_CLASS_ID,
+  classId: string = defaultClassId(content),
 ): { run: RunState; log: RunLog } {
   const run = startRun(content, seed, classId);
   const nodes: NodeRecord[] = [];
@@ -426,11 +451,12 @@ export function runRun(
  * diverge quietly, which is the exact failure the invariant exists to forbid.
  *
  * The class is the one thing read from the log before the first node, and a
- * log with no `classId` - one written before classes existed - is the default
- * class, which is the only class it could have been.
+ * log with no `classId` - one written before classes existed - is the
+ * content's default class, which for the shipped content is the Knight: the
+ * only class such a run could have been.
  */
 export function replayRun(content: RunContent, log: RunLog): RunState {
-  const run = startRun(content, log.seed, log.classId ?? DEFAULT_CLASS_ID);
+  const run = startRun(content, log.seed, log.classId ?? defaultClassId(content));
 
   for (const record of log.nodes) {
     if (run.result !== 'ongoing') break;

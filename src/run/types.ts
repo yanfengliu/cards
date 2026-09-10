@@ -224,9 +224,11 @@ export type RunContent = {
   /** Card ids the run starts with. Instances are minted from these. */
   readonly startingDeck: readonly string[];
   /**
-   * The classes a run may be started as. Optional so a fixture with one hero
-   * and one deck needs no class list: `startRun` treats such a content as
-   * offering the default class alone.
+   * The classes a run may be started as. The first listed is the class a run
+   * starts as when none is named, and `contentForClass` derives a content
+   * listing one class for that reason. Optional so a fixture with one hero and
+   * one deck needs no class list: `startRun` treats such a content as offering
+   * the default class alone.
    */
   readonly classes?: readonly RunClass[];
   readonly acts: readonly ActContent[];

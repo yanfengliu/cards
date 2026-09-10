@@ -53,9 +53,9 @@ import {
   shopStock,
 } from '../run/nodes.ts';
 import {
-  DEFAULT_CLASS_ID,
   classOf,
   cloneRunState,
+  defaultClassId,
   fightSetupFor,
   replayRun,
   travelOptions,
@@ -238,14 +238,14 @@ export function createRunController(
 ): RunController {
   const nodes: NodeRecord[] = [];
   const resume = options.resume;
-  let classId = options.classId ?? DEFAULT_CLASS_ID;
+  let classId = options.classId ?? defaultClassId(content);
   if (resume !== undefined) {
     if (resume.seed !== seed) {
       throw new Error(
         `run: cannot resume a run seeded ${resume.seed} as seed ${seed}. A log replays only on its own seed.`,
       );
     }
-    const logged = resume.classId ?? DEFAULT_CLASS_ID;
+    const logged = resume.classId ?? defaultClassId(content);
     if (options.classId !== undefined && options.classId !== logged) {
       throw new Error(
         `run: cannot resume a run started as the ${logged} as the ${options.classId}. A log replays ` +
