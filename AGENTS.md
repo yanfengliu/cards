@@ -8,6 +8,8 @@ Non-goals: multiplayer, live-service economy, real-money purchases, and a collec
 
 Stack: TypeScript on Node 24 (`.nvmrc`), browser front end. Node runs the `.ts` sources directly by stripping their types, so there is no build step and no compiled artifact to fall out of sync. What exists today is a headless deterministic prototype of one fight (`src/engine/`, `src/sim/`) and an SVG heraldry renderer driven by blazon strings (`src/render/`); there is no UI layer yet. Gates below say what exists today; each grows its real command in the same commit that introduces the tool, and a Gate is never written ahead of the command that satisfies it.
 
+This repo's own rules live in [docs/policies/local-rules.md](docs/policies/local-rules.md). They add repository constraints consistent with the Fleet Orchestration Policy below.
+
 <!-- FLEET-CANON:BEGIN sha=bafdd66f8299 generated from ../fleet/FLEET.md by `npm run sync-canon` — do not edit inside this block; this repo's own rules go in docs/policies/local-rules.md -->
 ## Fleet constitution
 
