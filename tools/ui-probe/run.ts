@@ -20,9 +20,14 @@
  * kind of screen the first time it appears - map per act, the map with a node
  * hovered, the fight as it opens and as it ends, reward, forge, shop, event,
  * rest, the act break, and the end - so a review binds to the bytes inspected.
+ * Sigils add four: the hero sigil offer after an elite, a shelf holding a
+ * card sigil, the attach screen, and the fight with a sigilled card in the
+ * line, hovered so its panel is open.
  *
  *   node tools/ui-probe/run.ts <seed> <light|dark>      play one seed
  *   node tools/ui-probe/run.ts find-win [max]           headless: seeds the bot wins
+ *   node tools/ui-probe/run.ts find-sigil [max]         headless: seeds where act 1
+ *                                                       attaches a card sigil
  */
 
 import { type Page } from 'playwright-core';
@@ -155,6 +160,16 @@ async function playRun(page: Page, seed: number, theme: string): Promise<void> {
             const slots = page.locator('#player-row .slot');
             await slots.nth((await slots.count()) - 1).click();
           }
+          // A sigilled card in the line, the first time one is placed: shoot
+          // it, then hover it so the panel that explains the sigil is open.
+          if (!taken.has('fight-sigil') && (await page.locator('#player-row .pip--sigil').count()) > 0) {
+            await shoot(page, dir, 'fight-sigil', taken);
+            const card = page.locator('#player-row .pip--sigil').first().locator('xpath=ancestor::*[@data-uid][1]');
+            await card.hover();
+            await page.waitForSelector('#inspect:not([hidden])');
+            await shoot(page, dir, 'fight-sigil-hover', taken);
+            await page.mouse.move(2, 2);
+          }
           await page.locator('#commit').click();
           await page.locator('#skip').click().catch(() => undefined);
           await page.waitForFunction(
@@ -171,12 +186,51 @@ async function playRun(page: Page, seed: number, theme: string): Promise<void> {
         mirror.finishFight({ fight: expect.fight, rounds: expect.log });
         break;
       }
+      case 'sigil': {
+        await page.waitForSelector('[data-run="sigil"]');
+        await shoot(page, dir, 'sigil-offer', taken);
+        const shownIds: string[] = await page.evaluate(() =>
+          Array.from(document.querySelectorAll('[data-run="sigil"][data-sigil-id]')).map(
+            (el) => (el as HTMLElement).dataset['sigilId'] ?? '',
+          ),
+        );
+        const wantIds = phase.offer.map((s) => s.id);
+        if (shownIds.join(',') !== wantIds.join(',')) {
+          throw new Error(`seed ${seed}: the screen offers hero sigils [${shownIds.join(',')}] and the run offers [${wantIds.join(',')}]`);
+        }
+        const pick = agent.sigil(mirror.state, phase.offer);
+        await page.locator(`[data-run="sigil"][data-pick="${pick}"]`).click();
+        mirror.pickSigil(pick);
+        break;
+      }
       case 'reward': {
         await page.waitForSelector('[data-run="reward"]');
-        await shoot(page, dir, 'reward', taken);
+        const hasSigil = phase.offer.some((o) => o.kind === 'sigil');
+        await shoot(page, dir, hasSigil ? 'reward-sigil' : 'reward', taken);
+        const shownSigils = await page.locator('[data-run="reward"][data-sigil-id]').count();
+        if (shownSigils !== phase.offer.filter((o) => o.kind === 'sigil').length) {
+          throw new Error(`seed ${seed}: the shelf shows ${shownSigils} sigil(s) and the run offers ${hasSigil ? 1 : 0}`);
+        }
         const pick = agent.reward(mirror.state, phase.offer);
         await page.locator(`[data-run="reward"][data-pick="${pick}"]`).click();
         mirror.pickReward(pick);
+        break;
+      }
+      case 'attach': {
+        await page.waitForSelector('[data-run="attach"]');
+        await shoot(page, dir, 'attach', taken);
+        const shown: number[] = await page.evaluate(() =>
+          Array.from(document.querySelectorAll('[data-run="attach"]:not([disabled])')).map((el) =>
+            Number.parseInt((el as HTMLElement).dataset['index'] ?? '', 10),
+          ),
+        );
+        if (shown.join(',') !== phase.offers.join(',')) {
+          throw new Error(`seed ${seed}: the attach shelf enables [${shown.join(',')}] and the run offers [${phase.offers.join(',')}]`);
+        }
+        const at = agent.attach(mirror.state, phase.sigil, phase.offers);
+        const deckIndex = phase.offers[at]!;
+        await page.locator(`[data-run="attach"][data-index="${deckIndex}"]`).click();
+        mirror.attach(deckIndex);
         break;
       }
       case 'forge': {
@@ -259,6 +313,23 @@ async function main(): Promise<void> {
       if (run.result === 'won') wins.push(seed);
     }
     console.log(`[find-win] greedy route, append-right placement, seeds 1..${max}: won ${wins.length} - ${wins.join(', ') || 'none'}`);
+    return;
+  }
+  if (args[0] === 'find-sigil') {
+    // Seeds where the bot attaches a card sigil inside act 1 and takes a hero
+    // sigil there too, so one run photographs every sigil screen early.
+    const max = Number.parseInt(args[1] ?? '300', 10);
+    const hits: string[] = [];
+    for (let seed = 1; seed <= max; seed++) {
+      const { run, log } = runRun(RUN_CONTENT, seed, makeRunAgent({ route: 'greedy', placement: 'right', seed }));
+      const act1 = log.nodes.filter((n) => n.act === 0);
+      const attach = act1.findIndex((n) => n.choices.some((c) => c.kind === 'attach'));
+      const hero = act1.findIndex((n) => n.choices.some((c) => c.kind === 'sigil' && c.pick >= 0));
+      if (attach >= 0 && hero >= 0) {
+        hits.push(`${seed} (attach at node ${attach + 1}, hero sigil at node ${hero + 1}, ${run.result})`);
+      }
+    }
+    console.log(`[find-sigil] seeds 1..${max} with a card sigil attached and a hero sigil taken in act 1: ${hits.length}\n  ${hits.join('\n  ') || 'none'}`);
     return;
   }
   const seed = Number.parseInt(args[0] ?? '7', 10);

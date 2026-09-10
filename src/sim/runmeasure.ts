@@ -34,6 +34,7 @@ import { hashMaps, hashRun } from '../run/hash.ts';
 import { branchingTypes, mapProblems } from '../run/map.ts';
 import { drawDistinctCards, fightSeedFor } from '../run/nodes.ts';
 import { replayRun, runRun, startRun } from '../run/run.ts';
+import { sigilProblems } from '../run/sigils.ts';
 import type {
   NodeType,
   RunContent,
@@ -94,6 +95,11 @@ export type RunOutcome = {
   readonly forges: number;
   readonly gold: number;
   readonly heroHealth: number;
+  /** Hero sigils taken and card sigils attached, in this run. */
+  readonly heroSigils: number;
+  readonly cardSigils: number;
+  /** Sigil id -> times granted in this run. */
+  readonly sigilIds: readonly string[];
   readonly hash: string;
   readonly log: RunLog;
 };
@@ -119,8 +125,51 @@ function outcomeOf(content: RunContent, seed: number, run: RunState, log: RunLog
     forges: run.forgesApplied,
     gold: run.gold,
     heroHealth: run.hero.health,
+    heroSigils: run.sigils.filter((g) => g.target === 'hero').length,
+    cardSigils: run.sigils.filter((g) => g.target !== 'hero').length,
+    sigilIds: run.sigils.map((g) => g.sigilId),
     hash: hashRun(run),
     log,
+  };
+}
+
+export type SigilReport = {
+  readonly meanHero: number;
+  readonly meanCard: number;
+  /** Runs that took at least one sigil of either kind. */
+  readonly runsWithAny: number;
+  /** Sigil id -> runs that took it at least once, and total grants. */
+  readonly byId: readonly { readonly id: string; readonly runs: number; readonly grants: number }[];
+};
+
+/**
+ * What one arm did with sigils. Grants, not offers: the log records picks and
+ * not shelves, so "pick rate" here is grants per run rather than grants per
+ * offer. A bot's preferences, and evidence about the bot.
+ */
+export function sigilReport(arm: RunArm, content: RunContent = RUN_CONTENT): SigilReport {
+  const n = Math.max(1, arm.outcomes.length);
+  let hero = 0;
+  let card = 0;
+  let any = 0;
+  const runsBy = new Map<string, number>();
+  const grantsBy = new Map<string, number>();
+  for (const o of arm.outcomes) {
+    hero += o.heroSigils;
+    card += o.cardSigils;
+    if (o.sigilIds.length > 0) any++;
+    for (const id of new Set(o.sigilIds)) runsBy.set(id, (runsBy.get(id) ?? 0) + 1);
+    for (const id of o.sigilIds) grantsBy.set(id, (grantsBy.get(id) ?? 0) + 1);
+  }
+  return {
+    meanHero: hero / n,
+    meanCard: card / n,
+    runsWithAny: any,
+    byId: content.sigils.map((s) => ({
+      id: s.id,
+      runs: runsBy.get(s.id) ?? 0,
+      grants: grantsBy.get(s.id) ?? 0,
+    })),
   };
 }
 
@@ -272,7 +321,10 @@ export type RunInstrument = {
   readonly mapsChecked: number;
   readonly meanBranchingTypes: number;
   readonly streamSeparation: string[];
+  /** Grants across the checked runs, both kinds. Zero means the sigil path did not run. */
   readonly sigilsGranted: number;
+  /** Ledger-versus-deck disagreements, unknown ids, duplicate holds. Empty is the claim. */
+  readonly sigilProblems: string[];
   readonly detail: string[];
 };
 
@@ -299,12 +351,14 @@ export function checkRuns(
   let mapsChecked = 0;
   let branchingTotal = 0;
   let sigilsGranted = 0;
+  const sigilTrouble: string[] = [];
 
   for (const seed of seeds) {
     const first = runRun(content, seed, makeRunAgent({ route, placement, seed }));
     const firstHash = hashRun(first.run);
     hashes.add(firstHash);
     sigilsGranted += first.run.sigils.length;
+    for (const p of sigilProblems(first.run)) sigilTrouble.push(`seed ${seed}: ${p}`);
 
     for (let t = 1; t < trials; t++) {
       const again = runRun(content, seed, makeRunAgent({ route, placement, seed }));
@@ -346,6 +400,7 @@ export function checkRuns(
     meanBranchingTypes: mapsChecked === 0 ? 0 : branchingTotal / mapsChecked,
     streamSeparation: checkStreamSeparation(seeds, content),
     sigilsGranted,
+    sigilProblems: sigilTrouble,
     detail,
   };
 }
@@ -749,6 +804,25 @@ function main(): void {
     console.log('');
   }
 
+  console.log('## Sigils');
+  console.log('');
+  console.log(
+    'Grants per run, by arm. The log records picks and not shelves, so these are what the bot ' +
+      'took, not how often each was offered. A bot preference, and evidence about the bot.',
+  );
+  console.log('');
+  console.log('| arm | runs with a sigil | mean hero sigils | mean card sigils | ' +
+    content.sigils.map((s) => s.id).join(' | ') + ' |');
+  console.log('|---|---|---|---|' + content.sigils.map(() => '---').join('|') + '|');
+  for (const a of arms) {
+    const r = sigilReport(a, content);
+    console.log(
+      `| ${a.name} | ${r.runsWithAny}/${a.outcomes.length} | ${r.meanHero.toFixed(2)} | ` +
+        `${r.meanCard.toFixed(2)} | ${r.byId.map((b) => `${b.grants} in ${b.runs}`).join(' | ')} |`,
+    );
+  }
+  console.log('');
+
   const checkSeeds = seeds.slice(0, Math.min(Number.parseInt(arg('check-seeds', '30'), 10), n));
   const inst = checkRuns(checkSeeds, 3, 'greedy', 'lookahead', content);
   const agree = checkRouteAgreement(checkSeeds, content);
@@ -779,8 +853,10 @@ function main(): void {
       `${agree.shared - agree.disagreed}/${agree.shared} shared fight seeds.`,
   );
   console.log(
-    `- Sigils stay out of scope: ${inst.sigilsGranted === 0 ? 'PASS' : 'FAIL'}; ` +
-      `${inst.sigilsGranted} granted across ${checkSeeds.length} runs.`,
+    `- Sigils are live and consistent: ${inst.sigilsGranted > 0 && inst.sigilProblems.length === 0 ? 'PASS' : 'FAIL'}; ` +
+      `${inst.sigilsGranted} granted across ${checkSeeds.length} runs, ` +
+      `${inst.sigilProblems.length} ledger/deck disagreement(s). A run that granted none did not ` +
+      `exercise the path, and a path that did not run cannot be reported as passing.`,
   );
   const degen = degeneracy(armGL);
   console.log(
@@ -792,6 +868,7 @@ function main(): void {
   for (const d of inst.detail.slice(0, 5)) console.log(`  - ${d}`);
   for (const p of inst.mapProblems.slice(0, 5)) console.log(`  - ${p}`);
   for (const p of inst.streamSeparation.slice(0, 5)) console.log(`  - ${p}`);
+  for (const p of inst.sigilProblems.slice(0, 5)) console.log(`  - ${p}`);
 
   const elapsed = Number(process.hrtime.bigint() / 1000000n) - started;
   console.log('');
@@ -811,6 +888,13 @@ function main(): void {
     //   Bound   to bots. Every win rate printed above is evidence about the
     //           router and the placement bot, not about a person, and none of
     //           them is gated for that reason.
+    //   Proves  that the sigil path ran - at least one grant across the check
+    //           seeds - and that every grant is consistent: the ledger names an
+    //           id the content defines, a card grant's trait is on the deck
+    //           card it names, and no hero sigil is held twice. It does not
+    //           gate how many sigils a run takes or which: those are the bot's
+    //           preferences, printed above, and a band around them would go
+    //           red on a content change that made a sigil worth taking.
     //   Misses  a balance drift that keeps the run winnable and losable. This
     //           gate catches a run that has become a fixed point, not one that
     //           has quietly got harder; the printed tables are for that.
@@ -847,10 +931,16 @@ function main(): void {
           `routes through the same seed`,
       );
     }
-    if (inst.sigilsGranted > 0) {
+    if (inst.sigilsGranted === 0) {
       failures.push(
-        `${inst.sigilsGranted} sigil(s) were granted; sigils are out of scope for this unit and ` +
-          `the seam must stay inert until the unit that owns them lands`,
+        `no sigil was granted across ${checkSeeds.length} runs, so the sigil path did not run ` +
+          `and cannot be reported as passing. Either the content offers none or no bot took one.`,
+      );
+    }
+    if (inst.sigilProblems.length > 0) {
+      failures.push(
+        `${inst.sigilProblems.length} sigil grant(s) disagree with the run they are in: ` +
+          `${inst.sigilProblems[0]}`,
       );
     }
     for (const d of degen) failures.push(d);

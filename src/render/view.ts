@@ -38,6 +38,12 @@ export type EntityView = {
   readonly maxHealth: number;
   readonly armour: number;
   readonly traits: readonly Trait[];
+  /**
+   * The traits in `traits` a sigil granted rather than the card printing
+   * them, off `UnitCard.sigilTraits`. Optional and read as empty when absent,
+   * so every view literal written before sigils existed still compiles.
+   */
+  readonly sigilTraits?: readonly Trait[];
   readonly cost: number;
   alive: boolean;
   /** Presentation only. Never round-trips into `GameState`. */
@@ -129,6 +135,7 @@ function viewOf(e: Entity, pool: CardPool): EntityView {
     maxHealth: e.maxHealth,
     armour: e.armour,
     traits: e.traits.slice(),
+    ...(card.sigilTraits !== undefined ? { sigilTraits: card.sigilTraits.slice() } : {}),
     cost: card.cost,
     alive: e.alive,
     acting: false,
@@ -154,6 +161,7 @@ export function cardEntityView(card: UnitCard, side: Side = 'player'): EntityVie
     maxHealth: card.health,
     armour: card.armour,
     traits: card.traits,
+    ...(card.sigilTraits !== undefined ? { sigilTraits: card.sigilTraits } : {}),
     cost: card.cost,
     alive: true,
     acting: false,

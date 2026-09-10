@@ -59,7 +59,9 @@ export type IconName =
   | 'boss'
   // The run's two readouts that are not a node.
   | 'gold'
-  | 'deck';
+  | 'deck'
+  // A sigil, on a card or on the hero. `render/sigil-terms.ts` binds it.
+  | 'sigil';
 
 interface IconDef {
   readonly d: string;
@@ -311,6 +313,14 @@ const ICONS: Readonly<Record<IconName, IconDef>> = {
     shape: 'two overlapping cards',
     fillRule: 'nonzero',
     d: 'M4.5 3.5 H15 V17.5 H4.5 Z M9 6.5 H19.5 V20.5 H9 Z',
+  },
+  // A seal: a ring with a lozenge set in it. A mark pressed onto something
+  // that stays pressed, which is what a sigil is. Neither the ring nor the
+  // lozenge is used alone anywhere else, so the pair reads as one shape.
+  sigil: {
+    shape: 'a ring with a lozenge set in it',
+    fillRule: 'evenodd',
+    d: circle(12, 12, 10.2) + circle(12, 12, 7.4) + ' M12 7.2 L16.8 12 L12 16.8 L7.2 12 Z',
   },
 };
 

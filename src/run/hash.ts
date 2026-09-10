@@ -4,10 +4,12 @@
 // of things for the same reason: a replay that agrees on the hero's Health
 // while disagreeing on the run generator's position has not reproduced the run,
 // it has coincided with it. So the digest carries the generator state and draw
-// count, the deck instance by instance with its permanent upgrades, the map
-// every act was routed through, and the sigil list - which is empty in every
-// run this unit can produce, and is in the digest so that stops being true
-// loudly rather than quietly the day sigils land.
+// count, the deck instance by instance with its permanent upgrades and the
+// sigils attached to it, the map every act was routed through, and the ledger
+// of every sigil granted. The ledger was in the digest for a unit before any
+// run could fill it, so that the day sigils landed the hash would move loudly
+// rather than agree with itself; the per-instance list beside it is what makes
+// two runs that attached the same sigil to different Squires hash apart.
 //
 // `hashString` is the engine's. Sharing it is the point: two digests produced
 // by the same function are comparable, and a run digest that quoted a fight
@@ -16,9 +18,17 @@
 import { hashString } from '../engine/hash.ts';
 import type { ActMap, DeckCard, RunState } from './types.ts';
 
+/**
+ * A deck card's sigils are appended only when it has some, so an instance with
+ * none canonicalises to exactly the string it did before sigils existed.
+ */
 function deckToCanonical(deck: readonly DeckCard[]): string {
   return deck
-    .map((d) => `${d.instanceId}+${d.powerBonus}/${d.healthBonus}/${d.costDelta}`)
+    .map(
+      (d) =>
+        `${d.instanceId}+${d.powerBonus}/${d.healthBonus}/${d.costDelta}` +
+        (d.sigils.length > 0 ? `~${d.sigils.map((s) => `${s.id}=${s.trait}`).join('~')}` : ''),
+    )
     .join(',');
 }
 

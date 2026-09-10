@@ -43,26 +43,33 @@ import { cloneDeck, makeDeckCard, runPool, applyForge } from './deck.ts';
 import { generateAct } from './map.ts';
 import {
   addCard,
+  attachCardSigil,
+  attachOffers,
   drawEvent,
   encounterFor,
   fightSeedFor,
   forgeOffers,
   goldFor,
+  grantHeroSigil,
+  handSizeFor,
+  heroRules,
+  heroSigilOffer,
   applyEventEffect,
   healHero,
   restAmount,
   rewardOffer,
   shopStock,
 } from './nodes.ts';
-import type {
-  ActMap,
-  MapNode,
-  NodeRecord,
-  RunAgentChoice,
-  RunChoice,
-  RunContent,
-  RunLog,
-  RunState,
+import {
+  type ActMap,
+  type MapNode,
+  type NodeRecord,
+  type RunAgentChoice,
+  type RunChoice,
+  type RunContent,
+  type RunLog,
+  type RunState,
+  RUN_LOG_FORMAT,
 } from './types.ts';
 
 /** The stream name the run's own generator is derived on. */
@@ -156,18 +163,32 @@ export function travelOptions(run: RunState): MapNode[] {
   return here.next.map((id) => map.nodes[id]!);
 }
 
-/** The fight setup this node produces, deck and hero Health as they stand now. */
+/**
+ * The fight setup this node produces: deck, hero Health and hero sigils as
+ * they stand now.
+ *
+ * Hero sigils reach the fight through two seams the engine already had. The
+ * rule amounts go on the hero's `SideRules`, so a Relay on the player's line
+ * hands what the run's sigils say and the enemy's hand the default. The hand
+ * size goes on the pool, which is where the engine reads it from anyway. A
+ * run holding no hero sigil hands the fight exactly the setup it did before
+ * sigils existed: no `rules` key, the pool's own hand size.
+ */
 export function fightSetupFor(run: RunState, node: MapNode): FightSetup {
   const enc = encounterFor(run, node);
+  const pool = runPool(run.content.pool, run.deck);
+  const handSize = handSizeFor(run);
+  const rules = heroRules(run);
+  const bent = rules.relayPower !== undefined || rules.wakePower !== undefined;
   return {
     seed: fightSeedFor(run, node),
-    pool: runPool(run.content.pool, run.deck),
+    pool: handSize === pool.handSize ? pool : { ...pool, handSize },
     playerDeck: run.deck.map((d) => d.instanceId),
     enemyDeck: enc.enemyDeck,
     enemyOpening: enc.opening,
     // Hero Health persists across the whole run; the fight is handed the bar as
     // it stands, and whatever is left of it is carried out again below.
-    playerHero: { ...run.content.hero, health: run.hero.health },
+    playerHero: { ...run.content.hero, health: run.hero.health, ...(bent ? { rules } : {}) },
     enemyHero: enc.enemyHero,
     maxRounds: run.content.maxRounds,
   };
@@ -212,13 +233,51 @@ function visit(run: RunState, node: MapNode, driver: Driver): NodeRecord {
       }
 
       run.gold += goldFor(run, node);
-      // The seam sigils will land in: a won elite or boss is where a hero sigil
-      // is granted in the design. Nothing is granted here - sigils are their own
-      // unit - and `run.sigils` stays empty, which `test/run.test.ts` asserts.
-      const offer = rewardOffer(run);
+
+      // A won elite or boss offers a hero sigil first. `docs/design/game.md`:
+      // "boss and event rewards are hero sigils" - this is where relics went.
+      // The offer draws from the run stream before the card shelf does, so the
+      // shelf a replay recomputes is the shelf the player saw, in that order.
+      // Nothing on offer - every hero sigil already held, or a content set with
+      // none - asks no choice, the way an empty deck asks no forge.
+      if (node.type === 'elite' || node.type === 'boss') {
+        const sigils = heroSigilOffer(run);
+        if (sigils.length > 0) {
+          const pick = requirePick(driver.choose.sigil(run, sigils), sigils.length, 'sigil', true);
+          choices.push({ kind: 'sigil', pick });
+          if (pick >= 0) grantHeroSigil(run, sigils[pick]!);
+        }
+      }
+
+      // Then the shelf: cards, and at an ordinary fight sometimes a card sigil
+      // beside them. "Card or sigil?" is one pick, and a sigil pick asks one
+      // more question - which deck card it goes on.
+      const offer = rewardOffer(run, node);
       const pick = requirePick(driver.choose.reward(run, offer), offer.length, 'reward', true);
       choices.push({ kind: 'reward', pick });
-      if (pick >= 0) addCard(run, offer[pick]!);
+      if (pick >= 0) {
+        const chosen = offer[pick]!;
+        if (chosen.kind === 'card') {
+          addCard(run, chosen.cardId);
+        } else {
+          const targets = attachOffers(run, chosen.sigil);
+          if (targets.length === 0) {
+            throw new Error(
+              `run: "${chosen.sigil.id}" was on the shelf and no deck card can take it; ` +
+                `rewardOffer must only offer a card sigil with somewhere to go`,
+            );
+          }
+          const at = requirePick(
+            driver.choose.attach(run, chosen.sigil, targets),
+            targets.length,
+            'attach',
+            false,
+          );
+          const deckIndex = targets[at]!;
+          choices.push({ kind: 'attach', deckIndex });
+          attachCardSigil(run, deckIndex, chosen.sigil);
+        }
+      }
       break;
     }
 
@@ -340,7 +399,7 @@ export function runRun(
     if (record === null) break;
     nodes.push(record);
   }
-  return { run, log: { seed, nodes } };
+  return { run, log: { seed, format: RUN_LOG_FORMAT, nodes } };
 }
 
 /**
@@ -355,6 +414,18 @@ export function runRun(
  * diverge quietly, which is the exact failure the invariant exists to forbid.
  */
 export function replayRun(content: RunContent, log: RunLog): RunState {
+  // A log from another format is refused before a single node is replayed. Its
+  // choices are indices into shelves this code no longer draws in the same
+  // order, so replaying it would not fail - it would quietly produce a
+  // different run under the same seed. `RUN_LOG_FORMAT` says what changed.
+  const format = (log as { format?: unknown }).format ?? 1;
+  if (format !== RUN_LOG_FORMAT) {
+    throw new Error(
+      `run replay: this log was written in format ${String(format)} and this code replays ` +
+        `format ${RUN_LOG_FORMAT}. The choices in it index shelves that are drawn differently ` +
+        `now, so it cannot be resumed; start a new run on seed ${log.seed}.`,
+    );
+  }
   const run = startRun(content, log.seed);
 
   for (const record of log.nodes) {
@@ -388,7 +459,20 @@ export function replayRun(content: RunContent, log: RunLog): RunState {
           }
           return at;
         },
+        sigil: () => take('sigil').pick,
         reward: () => take('reward').pick,
+        attach: (_run, sigil, targets) => {
+          const wanted = take('attach').deckIndex;
+          const at = targets.indexOf(wanted);
+          if (at < 0) {
+            throw new Error(
+              `run replay: the log attaches "${sigil.id}" to deck index ${wanted}, which is not ` +
+                `one of the cards that can take ${sigil.trait} now [${targets.join(', ')}]. ` +
+                `The deck did not regenerate identically.`,
+            );
+          }
+          return at;
+        },
         forge: (_run, offers) => {
           const wanted = take('forge');
           const at = offers.findIndex(

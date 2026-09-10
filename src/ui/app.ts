@@ -39,7 +39,9 @@ import {
   cloneFight,
   applyPlacements,
 } from '../engine/fight.ts';
-import { heroOf, type CardPool, type GameState, type UnitCard } from '../engine/state.ts';
+import { heroOf, type CardPool, type GameState, type SideRules, type UnitCard } from '../engine/state.ts';
+import { sideRulesOf } from '../engine/resolver.ts';
+import { traitTerm } from '../render/sigil-terms.ts';
 import {
   CARD_POOL,
   ENCOUNTERS,
@@ -110,6 +112,12 @@ export type FightHooks = {
    * the fight's own pool is asked next.
    */
   readonly resolveCard?: (id: string) => UnitCard | null;
+  /**
+   * The rules the run's hero sigils have bent, for explaining a card shown
+   * outside a fight at the numbers its next fight will use. Inside a fight the
+   * hero on the board carries them and this is not asked.
+   */
+  readonly playerRules?: () => SideRules | null;
 };
 
 export type FightScreen = {
@@ -143,12 +151,13 @@ export type FightScreen = {
  * keyed by the engine's `Trait` union and reads `RELAY_POWER`/`WAKE_POWER` out
  * of the resolver, so a trait that is deleted from the engine stops compiling
  * here rather than lingering as a sentence about a rule the game no longer has.
+ * `rules` is the player's side's, so a Relay placed under a hero sigil is
+ * explained at the amount it will actually hand.
  */
-function traitRule(trait: string): string | null {
-  const term = (TRAIT_TERMS as Readonly<Record<string, { name: string; line: string } | undefined>>)[
-    trait
-  ];
-  return term === undefined ? null : `<b>${term.name}</b> — ${term.line}`;
+function traitRule(trait: string, rules: SideRules | null): string | null {
+  if (!(trait in TRAIT_TERMS)) return null;
+  const term = traitTerm(trait as keyof typeof TRAIT_TERMS, rules);
+  return `<b>${term.name}</b> — ${term.line}`;
 }
 
 export function need<T extends HTMLElement>(id: string): T {
@@ -607,7 +616,8 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
       return;
     }
     const card = fight.pool.card(cardId);
-    const rules = card.traits.map(traitRule).filter((s): s is string => s !== null);
+    const side = sideRulesOf(fight.state, 'player');
+    const rules = card.traits.map((t) => traitRule(t, side)).filter((s): s is string => s !== null);
     dom.hint.innerHTML =
       `Placing <b>${card.name}</b>. ${rules.join(' ')}` +
       (rules.length === 0 ? ' No trait — where it stands changes only who gets hit.' : '');
@@ -1129,11 +1139,19 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
     // incoming Relay; a card in a line has both, and they are the two things a
     // player is reading the panel to compare.
     const onBoard = cardId === undefined;
+    // The rules a trait is explained at: the hero of the card's own side while
+    // a fight is up, else whatever the run says its hero sigils have bent.
+    const rules: SideRules | null = onBoard
+      ? sideRulesOf(fight.state, entity.side)
+      : mode === 'idle'
+        ? (hooks.playerRules?.() ?? null)
+        : sideRulesOf(fight.state, 'player');
     dom.inspect.innerHTML = explainCard(entity, cardViewOf(entity), {
       chance: onBoard ? chanceFor(entity.uid, entity.side) : null,
       pendingPower: onBoard ? (pendingPowerNow.get(entity.uid) ?? 0) : 0,
       hatch,
       pct,
+      rules,
     });
     dom.inspect.hidden = false;
     // The panel does not always land beside the card it describes - it lands

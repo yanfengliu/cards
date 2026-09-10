@@ -20,8 +20,19 @@
 import { type Rng, makeRng, mixSeeds, nextInt } from '../engine/rng.ts';
 import type { PlacementPolicy } from '../engine/fight.ts';
 import type { UnitCard } from '../engine/state.ts';
+import { resolveDeckCard } from '../run/deck.ts';
 import type { RunAgent } from '../run/run.ts';
-import type { ForgeOffer, MapNode, NodeType, RunEventDef, RunState, ShopItem } from '../run/types.ts';
+import type {
+  CardSigilDef,
+  ForgeOffer,
+  HeroSigilDef,
+  MapNode,
+  NodeType,
+  RewardOption,
+  RunEventDef,
+  RunState,
+  ShopItem,
+} from '../run/types.ts';
 import { DEFAULT_LOOKAHEAD, appendRightPlacer, lookaheadPlacer, randomPlacer } from './bots.ts';
 
 export type RouteStyle = 'greedy' | 'random';
@@ -35,7 +46,7 @@ export type RunBotOptions = {
 };
 
 /** Which decision is being made. Keeps one node's draws off each other. */
-const DECISION = { travel: 1, reward: 2, forge: 3, shop: 4, event: 5 } as const;
+const DECISION = { travel: 1, reward: 2, forge: 3, shop: 4, event: 5, sigil: 6, attach: 7 } as const;
 
 function rngFor(run: RunState, seed: number, decision: number): Rng {
   return makeRng(
@@ -110,17 +121,85 @@ function greedyTravel(run: RunState, options: readonly MapNode[]): number {
   return best;
 }
 
-function greedyReward(run: RunState, offer: readonly string[]): number {
+/**
+ * What a card sigil on the shelf is worth to the greedy bot, on the same scale
+ * as `cardValue`, which runs about 1.5 to 3 across the shipped pool. A trait
+ * on a body the deck already fields is priced as a card that costs nothing
+ * to play, which is what it is. A starting guess, like every number in this
+ * file: it is a bot's preference, and the measurement's job is to report
+ * what it does with it.
+ */
+const CARD_SIGIL_VALUE: Readonly<Record<CardSigilDef['trait'], number>> = {
+  relay: 2.6,
+  wake: 2.2,
+  guard: 2.4,
+};
+
+/**
+ * Which hero sigil the greedy bot reaches for first. Health is the run's life
+ * bar and is what ends most runs, so it comes first; the two Power amounts
+ * feed the cascade the placement bot is searching over; a wider hand is worth
+ * the least to a bot that already spends all its energy most turns.
+ */
+const HERO_SIGIL_VALUE: Readonly<Record<HeroSigilDef['effect']['kind'], number>> = {
+  maxHealth: 4,
+  relayPower: 3,
+  wakePower: 2,
+  handSize: 1,
+};
+
+function greedyReward(run: RunState, offer: readonly RewardOption[]): number {
   let best = 0;
   let bestScore = -Infinity;
   for (let i = 0; i < offer.length; i++) {
-    const score = cardValue(run.content.pool.card(offer[i]!));
+    const option = offer[i]!;
+    const score =
+      option.kind === 'card'
+        ? cardValue(run.content.pool.card(option.cardId))
+        : CARD_SIGIL_VALUE[option.sigil.trait];
     if (score > bestScore) {
       bestScore = score;
       best = i;
     }
   }
   return offer.length === 0 ? -1 : best;
+}
+
+function greedySigil(_run: RunState, offer: readonly HeroSigilDef[]): number {
+  let best = 0;
+  let bestScore = -Infinity;
+  for (let i = 0; i < offer.length; i++) {
+    const score = HERO_SIGIL_VALUE[offer[i]!.effect.kind];
+    if (score > bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  }
+  return offer.length === 0 ? -1 : best;
+}
+
+/**
+ * Where a card sigil goes. A Relay is worth most on a body that survives its
+ * own swing to hand the +2 forward, so Health and Armour; a Guard on the
+ * biggest body, since the Guard is what the enemy will be forced to hit; Wake
+ * on the highest Power, since the +2 is a swing at a number that is already
+ * above the armour line.
+ */
+function greedyAttach(run: RunState, sigil: CardSigilDef, offers: readonly number[]): number {
+  let best = 0;
+  let bestScore = -Infinity;
+  for (let i = 0; i < offers.length; i++) {
+    const card = resolveDeckCard(run.content.pool, run.deck[offers[i]!]!);
+    let score: number;
+    if (sigil.trait === 'relay') score = card.health + 2 * card.armour;
+    else if (sigil.trait === 'guard') score = card.health + 2 * card.armour + 0.5 * card.power;
+    else score = card.power + 0.3 * card.health;
+    if (score > bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  }
+  return best;
 }
 
 /**
@@ -198,8 +277,11 @@ function greedyEvent(run: RunState, def: RunEventDef): number {
 function randomAgentChoices(seed: number): Omit<RunAgent, 'placement'> {
   return {
     travel: (run, options) => nextInt(rngFor(run, seed, DECISION.travel), options.length),
+    sigil: (run, offer) =>
+      offer.length === 0 ? -1 : nextInt(rngFor(run, seed, DECISION.sigil), offer.length + 1) - 1,
     reward: (run, offer) =>
       offer.length === 0 ? -1 : nextInt(rngFor(run, seed, DECISION.reward), offer.length + 1) - 1,
+    attach: (run, _sigil, offers) => nextInt(rngFor(run, seed, DECISION.attach), offers.length),
     forge: (run, offers) => nextInt(rngFor(run, seed, DECISION.forge), offers.length),
     shop: (run, stock) => {
       const affordable: number[] = [];
@@ -213,7 +295,9 @@ function randomAgentChoices(seed: number): Omit<RunAgent, 'placement'> {
 
 const GREEDY_CHOICES: Omit<RunAgent, 'placement'> = {
   travel: greedyTravel,
+  sigil: greedySigil,
   reward: greedyReward,
+  attach: greedyAttach,
   forge: greedyForge,
   shop: greedyShop,
   event: greedyEvent,

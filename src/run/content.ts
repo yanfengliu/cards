@@ -15,6 +15,7 @@
 // invented here, because inventing cards is unit 4's job.
 
 import { CARD_POOL, ENEMY_CARDS, PLAYER_CARDS, PLAYER_HERO } from '../content/cards.ts';
+import { SIGIL_CONTENT } from '../content/sigils.ts';
 import type { HeroSpec } from '../engine/state.ts';
 import type {
   ActContent,
@@ -362,6 +363,7 @@ export const RUN_CONTENT: RunContent = {
   mapShape: MAP_SHAPE,
   rewards: REWARD_TABLE,
   events: EVENTS,
+  ...SIGIL_CONTENT,
   rewardOffers: 3,
   shopStock: 3,
   shopBasePrice: 30,
