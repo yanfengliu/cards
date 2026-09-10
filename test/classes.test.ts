@@ -57,7 +57,7 @@ import {
   startRun,
   travelOptions,
 } from '../src/run/run.ts';
-import type { RunContent, RunLog } from '../src/run/types.ts';
+import { type RunContent, type RunLog, RUN_LOG_FORMAT } from '../src/run/types.ts';
 import { makeRunAgent } from '../src/sim/runbots.ts';
 import { renderClassPick } from '../src/ui/classpick.ts';
 import { PICKABLE_CLASSES, classPickHtml, pickableClassId } from '../src/ui/runapp.ts';
@@ -218,7 +218,11 @@ test('a log written before classes existed has no class and replays as the Knigh
 
   for (const seed of SEEDS) {
     const knight = runRun(RUN_CONTENT, seed, agentFor(seed), 'knight');
-    const old: RunLog = { seed: knight.log.seed, nodes: knight.log.nodes };
+    // `format` is carried because the *class* is what this test drops, and a
+    // log with no class is still a log this code writes. A log with no
+    // `format` either is unit 9's business: `test/sigils.test.ts` replays two
+    // of those through `migrateRunLog`.
+    const old: RunLog = { seed: knight.log.seed, format: RUN_LOG_FORMAT, nodes: knight.log.nodes };
     assert.equal('classId' in old, false, 'the fixture is the old shape');
     const replayed = replayRun(RUN_CONTENT, old);
     assert.equal(replayed.classId, 'knight');
@@ -307,7 +311,11 @@ test('createRunController starts as the class it is given, records it, and refus
     /cannot resume a run started as the ranger as the mage/,
   );
 
-  const old: RunLog = { seed: 5, nodes: runRun(RUN_CONTENT, 5, agentFor(5), 'knight').log.nodes };
+  const old: RunLog = {
+    seed: 5,
+    format: RUN_LOG_FORMAT,
+    nodes: runRun(RUN_CONTENT, 5, agentFor(5), 'knight').log.nodes,
+  };
   assert.equal(createRunController(RUN_CONTENT, 5, { resume: old }).classId, 'knight', 'an old log resumes as the Knight');
 });
 

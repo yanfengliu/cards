@@ -35,6 +35,7 @@
 import type { Trait } from '../engine/state.ts';
 import { classTermFor } from './class-terms.ts';
 import { type EntityView, power } from './view.ts';
+import { CARD_SIGIL_TERMS } from './sigil-terms.ts';
 import { type CardView, renderCard } from './heraldry/card.ts';
 import { parseBlazon } from './heraldry/blazon.ts';
 import { hexOf } from './heraldry/tinctures.ts';
@@ -67,6 +68,13 @@ export interface InspectContext {
   readonly hatch: boolean;
   /** Formats a probability the way the board does, so the two never disagree. */
   readonly pct: (p: number) => string;
+  /**
+   * The sigils on this hero, each already in words, for the hero's own panel.
+   * The run owns them, so the screen hands them in; absent or empty means the
+   * panel says nothing about sigils, which is every hero outside a run and
+   * every enemy hero.
+   */
+  readonly heroSigils?: readonly Term[];
 }
 
 function esc(s: string): string {
@@ -116,9 +124,16 @@ function channel(icon: IconName | 'swatch', swatchHex: string, name: string, val
   );
 }
 
-function traitRule(trait: Trait): string {
+/**
+ * One trait's row. When a sigil granted it rather than the card printing it,
+ * the row is named as that sigil too, with the sigil's own sentence after the
+ * rule. `TRAIT_TERMS` is the only source of the rule either way.
+ */
+function traitRule(trait: Trait, sigil: boolean): string {
   const term = TRAIT_TERMS[trait];
-  return rule(term.icon, term.name, term.line, 'xp__rule--trait');
+  if (!sigil) return rule(term.icon, term.name, term.line, 'xp__rule--trait');
+  const s = CARD_SIGIL_TERMS[trait];
+  return rule(term.icon, `${term.name} · ${s.name}`, `${term.line} ${s.line}`, 'xp__rule--trait xp__rule--sigil');
 }
 
 /**
@@ -184,12 +199,20 @@ export function explainCard(e: EntityView, card: CardView, ctx: InspectContext):
   // trait rows: the class sentence already says what the hero's trait does,
   // written from the hero's own printed Power, and a second row saying it
   // again would cost 54px the panel does not have. Everything else - a unit,
-  // or a hero that is not a class - lists its traits as before.
+  // or a hero that is not a class - lists its traits as before, and a trait a
+  // sigil granted is named as that sigil too.
   const cls = e.isHero ? classTermFor(e.name) : null;
+  const sigilTraits = e.sigilTraits ?? [];
   if (cls !== null) {
     rules.push(rule(cls.icon, cls.name, cls.swing(e.basePower), 'xp__rule--class'));
   } else {
-    for (const t of e.traits) rules.push(traitRule(t));
+    for (const t of e.traits) rules.push(traitRule(t, sigilTraits.includes(t)));
+  }
+  // A hero's sigils are the run's. The hero's panel lists each in the words the
+  // offer used - the numbers on its chips already include them - and says
+  // nothing when there are none.
+  if (e.isHero) {
+    for (const s of ctx.heroSigils ?? []) rules.push(rule(s.icon, s.name, s.line, 'xp__rule--sigil'));
   }
   if (cls === null && e.traits.length === 0) {
     rules.push(

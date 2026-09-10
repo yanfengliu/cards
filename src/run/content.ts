@@ -16,6 +16,7 @@
 
 import { CARD_POOL, ENEMY_CARDS, PLAYER_CARDS } from '../content/cards.ts';
 import { CLASSES, classById, DEFAULT_CLASS } from '../content/classes.ts';
+import { SIGIL_CONTENT } from '../content/sigils.ts';
 import type { ActContent, MapShape, RunContent, RunEncounter, RunEventDef } from './types.ts';
 
 /**
@@ -321,6 +322,7 @@ export const RUN_CONTENT: RunContent = {
   mapShape: MAP_SHAPE,
   rewards: DEFAULT.rewards,
   events: EVENTS,
+  ...SIGIL_CONTENT,
   rewardOffers: 3,
   shopStock: 3,
   shopBasePrice: 30,

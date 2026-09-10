@@ -39,7 +39,8 @@ import {
   cloneFight,
   applyPlacements,
 } from '../engine/fight.ts';
-import { heroOf, type CardPool, type GameState, type UnitCard } from '../engine/state.ts';
+import { heroOf, type CardPool, type GameState, type Trait, type UnitCard } from '../engine/state.ts';
+import { CARD_SIGIL_TERMS } from '../render/sigil-terms.ts';
 import {
   CARD_POOL,
   ENCOUNTERS,
@@ -61,6 +62,7 @@ import {
   type Beat,
   type BoardView,
   type EntityView,
+  type SigilTraitsOf,
   cardEntityView,
   findView,
   snapshot,
@@ -76,7 +78,7 @@ import {
   renderRow,
 } from '../render/board.ts';
 import { explainCard } from '../render/inspect.ts';
-import { STAT_TERMS, TRAIT_TERMS, tribeTerm } from '../render/glossary.ts';
+import { STAT_TERMS, TRAIT_TERMS, type Term, tribeTerm } from '../render/glossary.ts';
 import { burnTotal, incomingOdds, pct, projectOwnPhase } from '../render/odds.ts';
 import { type Playback, type Step, play, schedule } from '../render/anim.ts';
 import { makeFx } from '../render/fx.ts';
@@ -110,6 +112,19 @@ export type FightHooks = {
    * the fight's own pool is asked next.
    */
   readonly resolveCard?: (id: string) => UnitCard | null;
+  /**
+   * Which of a card's traits a sigil granted rather than the card printing.
+   * Asked of every card the fight screen draws, on the board or in the hand,
+   * so a pip and a panel can say where a trait came from. Absent outside a
+   * run, where nothing grants anything.
+   */
+  readonly sigilTraitsOf?: SigilTraitsOf;
+  /**
+   * The run's hero sigils, already in words, for the hero's own panel. The
+   * hero's numbers already include them - `heroSpecFor` in `src/run/nodes.ts`
+   * put them there - so this is the naming, not the arithmetic.
+   */
+  readonly heroSigils?: () => readonly Term[];
 };
 
 export type FightScreen = {
@@ -143,12 +158,15 @@ export type FightScreen = {
  * keyed by the engine's `Trait` union and reads `RELAY_POWER`/`WAKE_POWER` out
  * of the resolver, so a trait that is deleted from the engine stops compiling
  * here rather than lingering as a sentence about a rule the game no longer has.
+ * A trait a sigil granted is named as that sigil first, out of the table that
+ * is keyed by the same union, so the hint and the hover panel agree.
  */
-function traitRule(trait: string): string | null {
-  const term = (TRAIT_TERMS as Readonly<Record<string, { name: string; line: string } | undefined>>)[
-    trait
-  ];
-  return term === undefined ? null : `<b>${term.name}</b> — ${term.line}`;
+function traitRule(trait: string, sigil: boolean): string | null {
+  if (!(trait in TRAIT_TERMS)) return null;
+  const term = TRAIT_TERMS[trait as Trait];
+  if (!sigil) return `<b>${term.name}</b> — ${term.line}`;
+  const s = CARD_SIGIL_TERMS[trait as Trait];
+  return `<b>${s.name}</b> — ${term.name}: ${term.line}`;
 }
 
 export function need<T extends HTMLElement>(id: string): T {
@@ -238,6 +256,14 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
   let playback: Playback | null = null;
   let instant = false;
   let view: BoardView = { player: [], enemy: [] };
+  /**
+   * Which of a card's traits a sigil granted. Every snapshot and every loose
+   * card view on this screen goes through it, so a sigilled card is marked
+   * wherever it is drawn rather than only where somebody remembered to ask.
+   * Outside a run the hook is absent and the answer is always empty.
+   */
+  const granted: SigilTraitsOf = (cardId) => hooks.sigilTraitsOf?.(cardId) ?? [];
+  const snap = (state: GameState, pool: CardPool): BoardView => snapshot(state, pool, granted);
   let frozen: { player: number; enemy: number } | null = null;
   let theme: Theme = 'light';
   let mount = false;
@@ -364,7 +390,7 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
      * after it would be worse than not forecasting at all.
      */
     const projected = projectOwnPhase(p.state, 'player');
-    const previewView = snapshot(p.state, fight.pool);
+    const previewView = snap(p.state, fight.pool);
     const pendingPower = new Map<number, number>();
     const liveBonus = new Map(p.state.board.player.map((e) => [e.uid, e.bonusPower] as const));
     for (const e of projected.board.player) {
@@ -443,8 +469,8 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
     const pool = fight.pool;
     const heroView = view.player[view.player.length - 1];
     const foeView = view.enemy[view.enemy.length - 1];
-    const hero = heroView?.isHero === true ? heroView : snapshot(fight.state, pool).player.at(-1)!;
-    const foe = foeView?.isHero === true ? foeView : snapshot(fight.state, pool).enemy.at(-1)!;
+    const hero = heroView?.isHero === true ? heroView : snap(fight.state, pool).player.at(-1)!;
+    const foe = foeView?.isHero === true ? foeView : snap(fight.state, pool).enemy.at(-1)!;
     const foeName = foe.name;
     dom.subtitle.textContent =
       `round ${fight.round} of ${fight.maxRounds} · ` +
@@ -627,7 +653,10 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
       return;
     }
     const card = fight.pool.card(cardId);
-    const rules = card.traits.map(traitRule).filter((s): s is string => s !== null);
+    const fromSigil = granted(cardId);
+    const rules = card.traits
+      .map((t) => traitRule(t, fromSigil.includes(t)))
+      .filter((s): s is string => s !== null);
     dom.hint.innerHTML =
       `Placing <b>${card.name}</b>. ${rules.join(' ')}` +
       (rules.length === 0 ? ' No trait — where it stands changes only who gets hit.' : '');
@@ -864,7 +893,7 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
       enemy: fitWidth(rowWidth(dom.enemyRow), maxEnemy),
     };
 
-    view = snapshot(committed.stateAtStart, fight.pool);
+    view = snap(committed.stateAtStart, fight.pool);
     logLine(
       `Round ${fight.round} committed — ${chosen.length} card${chosen.length === 1 ? '' : 's'} placed.`,
       'is-head',
@@ -885,7 +914,7 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
       index++;
 
       if (segment.kind === 'spawns') {
-        view = snapshot(segment.stateAfter, fight.pool);
+        view = snap(segment.stateAfter, fight.pool);
         renderRows();
         if (segment.uids.length > 0) {
           logLine(
@@ -910,7 +939,7 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
         'is-head',
       );
 
-      const beats = buildBeats(snapshot(viewSourceState(committed, index - 1), fight.pool), segment.events);
+      const beats = buildBeats(snap(viewSourceState(committed, index - 1), fight.pool), segment.events);
       const sched = schedule(beats);
       playback = play(
         sched,
@@ -925,7 +954,7 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
               );
               console.error('render view drifted from engine state', drift);
             }
-            view = snapshot(segment.stateAfter, fight.pool);
+            view = snap(segment.stateAfter, fight.pool);
             renderRows();
             globalThis.setTimeout(runSegment, instant ? 0 : 260 / speed);
           },
@@ -1173,7 +1202,10 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
       // A run screen's card first - a reward on offer, a deck card at the
       // forge - then the fight's own pool, which is the hand's.
       const card = hooks.resolveCard?.(cardId) ?? safeCard(fight.pool, cardId);
-      if (card !== null) entity = cardEntityView(card);
+      // `cardId` is the deck instance id inside a run, which is the key the
+      // run answers `sigilTraitsOf` on, so a card off the board is marked the
+      // same way one on it is.
+      if (card !== null) entity = cardEntityView(card, 'player', granted(cardId));
     } else {
       const uid = Number.parseInt(target.dataset['uid'] ?? '', 10);
       if (Number.isFinite(uid)) entity = findView(view, uid);
@@ -1187,11 +1219,17 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
     // incoming Relay; a card in a line has both, and they are the two things a
     // player is reading the panel to compare.
     const onBoard = cardId === undefined;
+    // A hero's sigils are the run's, so they are listed on the player's hero
+    // and on nothing else - not on the enemy's hero, and not outside a run,
+    // where the hook is absent.
+    const heroSigils =
+      entity.isHero && entity.side === 'player' ? (hooks.heroSigils?.() ?? []) : [];
     dom.inspect.innerHTML = explainCard(entity, cardViewOf(entity), {
       chance: onBoard ? chanceFor(entity.uid, entity.side) : null,
       pendingPower: onBoard ? (pendingPowerNow.get(entity.uid) ?? 0) : 0,
       hatch,
       pct,
+      heroSigils,
     });
     dom.inspect.hidden = false;
     // The panel does not always land beside the card it describes - it lands

@@ -6,6 +6,46 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-10 — sigils: eleven mutations, a check whose first draft could not fail, and a red that was a crash
+
+Taken on branch `worktree-agent-a8f54ea252ca36f0b`, cut from `a974d04`; the suite is **218 tests** here, 199 at the base. Eleven mutations, each applied to the shipped tree, run against the shipped command, reverted, and the file's digest read back. All eleven came back red for their own reason. No anchor was broken, and the runner refuses to report a result when an anchor matches zero times or more than once — the CRLF trap this repo has hit twice is a silent no-op that reads as a green gate.
+
+The runner is `.probe/mutate.mjs`-shaped, under the ignored scratch path: it normalises the anchor to the file's own line ending, asserts exactly one match, asserts the replacement is not a no-op, restores the file, and compares the restored bytes with the original before printing anything.
+
+**A non-zero exit is a claim about the command.** M11's first version wrote `heldHeroSigils(run).length` into `fightSetupFor`, and `run.ts` does not import that function: `npm run verify:run` exited 1 with `ReferenceError: heldHeroSigils is not defined`, having measured nothing at all. The runner reported "RED" and printed no failure lines, because its filter matched none — which is exactly the shape of a red that is not a gate. It now prints the raw tail whenever nothing matches a known failure shape, and calls that case `NON-ZERO, REASON UNCONFIRMED` rather than red. The ten entries below all printed a real failure message under the original filter, so none of them is that case.
+
+Digests after the last revert: `src/run/deck.ts` `f7f0af8f…`, `src/run/nodes.ts` `5e36ebab…`, `src/run/run.ts` `6d9f444c…`, `src/run/hash.ts` `31d4cd24…`, `src/run/sigils.ts` `4aa96bf2…`, `src/render/board.ts` `9a7c8233…`, `src/render/sigil-terms.ts` `5e10fe43…`, `src/sim/runmeasure.ts` `6aba828b…`, `test/sigils.test.ts` `34a15eb2…`.
+
+### The check that could not fail, and how that was found
+
+`fightSigilProblems` in `src/run/sigils.ts` is the live replacement for `verify:run`'s inert "a sigil was granted while sigils are out of scope". Its claim: **every granted sigil is in the fight setup the run hands the engine, and nothing that was never granted is.**
+
+Its first draft compared `[...printed, ...grantedTraits(base, dc)]` against `runPool(base, deck).card(id).traits`. `runPool` calls `resolveDeckCard`, which computes `[...card.traits, ...grantedTraits(base, dc)]`. The two sides were the same expression, so no state could separate them — which is how it surfaced: the red-proof could not be written. It is now built from `run.sigils` and `content.sigils` with its own loop, so the ledger is the input and `runPool`/`heroSpecFor` are the subject. That is the difference between M1 (a state-independent source mutation, red) and a gate that would have passed it.
+
+The hero half still reads `run.sigils`, as `heroSpecFor` does, and that is correct — the ledger is the input to both. Its red-proofs are therefore source mutations (M2, M3), and `test/sigils.test.ts` says so in the test that exercises the other half by moving state.
+
+### The gate, and the bound in its own header
+
+`fightSigilProblems` reads the **setup**, not a resolved fight: it proves the fight was *handed* the sigil, not that the card carrying it was ever drawn. The drawing half is `a sigil-granted Relay hands Power exactly as a printed one does`, which fights both and compares the `powerGained` events. `verify:run`'s bound stays "the shipped `RUN_CONTENT`, as the Knight, over the check seeds"; it gates neither how many sigils a run takes nor which.
+
+| # | mutation | site | command | the failure |
+|---|---|---|---|---|
+| M1 | `...(granted.length > 0 ? { traits: ... } : {})` → `...(false ? ... : {})`, so a sigil's trait never reaches the resolved card | `resolveDeckCard`, `src/run/deck.ts` | `npm run verify:run` | *seed 1: the fight resolves `u_ironguard#12` with traits [guard] and the ledger says it should be [guard, relay]* — exit 1 |
+| M2 | `armour: hero.armour + armour` → `armour: hero.armour`, so an Armour sigil is summed and dropped | `heroSpecFor`, `src/run/nodes.ts` | `npm run verify:run` | *seed 1: the fight's hero wears 0 Armour, and the content's 0 plus every Armour sigil in the ledger make it 1* — exit 1 |
+| M3 | the enemy hero handed the player's Power delta | `fightSetupFor`, `src/run/run.ts` | `npm run verify:run` | *seed 2: the enemy hero fights at 3 Power / 0 Armour and its encounter prints 2 / 0 — a hero sigil reached the other side* — exit 1 |
+| M4 | `run.hero.maxHealth += sigil.effect.amount` → `+= 0` | `grantHeroSigil`, `src/run/nodes.ts` | `npm test` | five red, including *each hero sigil reaches a fight through its seam* and *sigilProblems sees a ledger that drifted from the deck* |
+| M5 | `[travel, decline, ...rest]` → `[decline, travel, ...rest]`, the upgrade inserting the decline in the wrong place | `migrateRunLog`, `src/run/run.ts` | `npm test` | *the two golden format 1 logs replay to the runs they recorded* |
+| M6 | `sigilRng(run, node, TAG_CARD_SIGIL)` → `run.rng`, so the card-sigil roll takes run draws | `rewardOffer`, `src/run/nodes.ts` | `npm test` | *a fight shelf at chance 1 took extra run draws for its sigil*, **and** the goldens stop replaying — which is the point of the node-keyed rule |
+| M7 | the ledger push deleted, so an attached sigil is on the deck card and in no record | `attachCardSigil`, `src/run/nodes.ts` | `npm test` | five red, including *fightSigilProblems compares the ledger with the fight, in both directions* and *the run hash moves with a sigil, and with which card it went on* |
+| M8 | the per-instance `~id=trait` clause dropped from the canonical deck | `deckToCanonical`, `src/run/hash.ts` | `npm test` | *the run hash moves with a sigil, and with which card it went on* — the same sigil on two different Squires hashes the same |
+| M9 | the `volley` entry deleted from `CARD_SIGIL_TERMS` | `src/render/sigil-terms.ts` | `npm run typecheck` | `TS2741: Property 'volley' is missing in type … from type 'Readonly<Record<Trait, Term>>'` — exit 2 |
+| M10 | `const sigil = sigilTraits.includes(t)` → `const sigil = false`, so no pip is ever marked | `traitPipsOf`, `src/render/board.ts` | `npm test` | *a sigilled card says so on the board and in the panel* |
+| M11 | the fight's pool handed `handSize + <hero sigils held>`, the shared-number trap the comment names | `fightSetupFor`, `src/run/run.ts` | `npm run verify:run` | *seed 1: the fight is handed a hand of 8 and 3 Energy where the content's pool is 5 and 3 — both are read for both sides, so moving one arms the enemy too* — exit 1 |
+
+M9 is the compile-time half of "nothing hardcoded that a type could derive": adding `volley` and `scorch` to the engine's `Trait` union is what stopped this unit's own render layer compiling until they had words. `CARD_SIGIL_VALUE` in `src/sim/runbots.ts` is total over the same union for the same reason and would fail the same way.
+
+M6 is the one worth reading twice. It turns two tests red for two different reasons: the direct one, and the goldens, which are logs written by code that had no concept of a sigil. A gate whose fixture predates the feature is the only kind that can catch "the offer moved a draw it should not have moved" without being written from the same idea.
+
 ## 2026-09-10 — a second review of the class layer: the rule that was written down, the log's last wrong word, and a gate that recorded dequeuing
 
 Taken on branch `worktree-agent-ac92c8ed9709f58e2`, cut from `8a37fcf`; the suite is **199 tests** here, 195 at the base. Seventeen mutations below — fourteen defect mutations and three instrument checks — each applied to the shipped tree, run against the shipped test command, and reverted with its digest compared. All seventeen came back red, which is the colour each was meant to be. No anchor was broken.
