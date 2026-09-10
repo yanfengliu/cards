@@ -32,6 +32,8 @@ Volley's half was already computed through `swingsOf` and simply had no test: re
 
 **Chosen: the act finishes, and the resolver announces every change it makes and nothing it does not.**
 
+> **Corrected 2026-09-10, later the same day.** The sentence in bold above is not the rule the engine implements, and a second independent review measured the gap: the `scorch` loop pushes `damaged` for every living non-hero including `dealt === 0`, so 163 zero-change announcements survived the fight-ending `died` and the screen played every one. The code was right and the sentence was wrong. The rule as it actually stands — **the resolver announces every effect that REACHED a target and nothing about one that found none**, 0 included — is in `ARCHITECTURE.md`, in `src/engine/resolver.ts`'s header and in `docs/policies/local-rules.md`, and what a player is shown is `src/render/view.ts`'s. The three bullets below are left as they were written, with the second one wrong; see `docs/devlog/detailed/2026-09-10-review-closed-2.md`.
+
 - An attack that finds no legal target changes nothing, so it emits nothing. The only board on which an attack finds no target is one whose hero is already dead — `legalTargets` returns the living entities of the defending side and a hero is always among them while it lives — so an attack's `fizzled` could only ever be printed under the announcement of the death that ended the fight.
 - A Scorch that *does* burn is still announced, dead hero or not, because the board really did change.
 - A **spell** cast into an empty line still fizzles. Energy was spent on it and the screen owes the player that; an attack costs no energy.

@@ -16,13 +16,21 @@
  * played through the browser's controls must hash identically to the same run
  * played headlessly**, which is the determinism invariant crossing the DOM.
  *
- * Shots go to `.probe-ui/run-<seed>-<theme>/` with a sha256 manifest, one per
- * kind of screen the first time it appears - map per act, the map with a node
- * hovered, the fight as it opens and as it ends, reward, forge, shop, event,
- * rest, the act break, and the end - so a review binds to the bytes inspected.
+ * Shots go to `.probe-ui/run-<seed>-<class>-<theme>/` with a sha256 manifest,
+ * one per kind of screen the first time it appears - map per act, the map with
+ * a node hovered, the fight as it opens and as it ends, reward, forge, shop,
+ * event, rest, the act break, and the end - so a review binds to the bytes
+ * inspected.
  *
- *   node tools/ui-probe/run.ts <seed> <light|dark>      play one seed
- *   node tools/ui-probe/run.ts find-win [max]           headless: seeds the bot wins
+ * **The class is a parameter, and `all` is the default.** It was the Knight,
+ * hardcoded, for the whole unit that added the other two - so the Ranger and
+ * the Mage, whose Volley and Scorch are the only two things the unit put in the
+ * resolver, were never once played through the DOM. Every class plays the same
+ * run structure, so one class proves the wiring; it proves nothing about the
+ * two classes whose own verbs draw their own beats.
+ *
+ *   node tools/ui-probe/run.ts <seed> <light|dark> [knight|ranger|mage|all]
+ *   node tools/ui-probe/run.ts find-win [max] [class]   headless: seeds the bot wins
  */
 
 import { type Page } from 'playwright-core';
@@ -79,12 +87,17 @@ async function look(page: Page): Promise<{ subtitle: string; screen: string; rea
   });
 }
 
-async function playRun(page: Page, seed: number, theme: string): Promise<void> {
-  const dir = path.join(OUT, `run-${seed}-${theme}`);
+async function playRun(page: Page, seed: number, theme: string, classId: string): Promise<void> {
+  const dir = path.join(OUT, `run-${seed}-${classId}-${theme}`);
   const taken = new Set<string>();
   const agent = makeRunAgent({ route: 'greedy', placement: 'right', seed });
-  const mirror = createRunController(RUN_CONTENT, seed);
-  const headless = runRun(RUN_CONTENT, seed, makeRunAgent({ route: 'greedy', placement: 'right', seed }));
+  const mirror = createRunController(RUN_CONTENT, seed, { classId });
+  const headless = runRun(
+    RUN_CONTENT,
+    seed,
+    makeRunAgent({ route: 'greedy', placement: 'right', seed }),
+    classId,
+  );
 
   await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1`);
   await page.evaluate(() => document.fonts.ready);
@@ -94,12 +107,12 @@ async function playRun(page: Page, seed: number, theme: string): Promise<void> {
   // playing a run stopped working with nothing saying so.
   //
   // The class is clicked rather than named in the address, for the reason at
-  // the top of this file. It is the Knight because the headless mirror is:
-  // `createRunController` with no class named is the Knight, and the hash
-  // comparison at the end only means something while the two are the same run.
+  // the top of this file. Whichever one is clicked, the headless mirror and the
+  // headless run are started as the same one - the hash comparison at the end
+  // means nothing unless all three are the same run.
   await page.waitForSelector('[data-class-card]');
   await shoot(page, dir, 'class-pick', taken);
-  await page.locator('[data-run="pick-class"][data-class="knight"]').click();
+  await page.locator(`[data-run="pick-class"][data-class="${classId}"]`).click();
   await page.waitForSelector('#run-map svg');
 
   let steps = 0;
@@ -179,6 +192,19 @@ async function playRun(page: Page, seed: number, theme: string): Promise<void> {
         }
         await page.waitForSelector('.banner');
         await shoot(page, dir, expect.fight.result === 'playerWin' ? 'fight-won' : 'fight-lost', taken);
+        // The last thing the player reads. A screenshot only shows the log's
+        // scrolled viewport, and the lines this run was changed for - the tail
+        // of an act that ended the fight - are the ones that scroll off it. So
+        // they are printed as well as photographed. This is a read-out, not an
+        // assertion: "for 0" is CORRECT mid-fight, where a blow Armour ate is
+        // exactly what the player has to see, and only after the fight is
+        // decided is it dropped.
+        const tail: string[] = await page.evaluate(() =>
+          Array.from(document.querySelectorAll('#log p'))
+            .slice(-8)
+            .map((el) => (el.textContent ?? '').trim()),
+        );
+        console.log(`   [log tail] ${classId} fight ${mirror.state.fightsFought + 1}: ${tail.join(' | ')}`);
         await page.locator('[data-run="finish-fight"]').click();
         mirror.finishFight({ fight: expect.fight, rounds: expect.log });
         break;
@@ -236,11 +262,16 @@ async function playRun(page: Page, seed: number, theme: string): Promise<void> {
   const expected = hashRun(headless.run);
   const mirrored = mirror.hash();
   console.log(
-    `[run] seed ${seed} ${theme}: ${mirror.state.result} after ${mirror.state.nodesVisited} nodes, ` +
-      `${mirror.state.fightsFought} fights; page hash ${shown}, headless ${expected}, mirror ${mirrored}`,
+    `[run] seed ${seed} ${classId} ${theme}: ${mirror.state.result} after ` +
+      `${mirror.state.nodesVisited} nodes, ${mirror.state.fightsFought} fights; ` +
+      `page hash ${shown}, headless ${expected}, mirror ${mirrored}`,
   );
   if (shown !== expected || mirrored !== expected) {
-    throw new Error(`seed ${seed}: the run played through the browser did not hash to the headless run`);
+    throw new Error(
+      `seed ${seed} as the ${classId}: the run played through the browser hashed ${shown}, ` +
+        `the headless run ${expected} and the mirror ${mirrored}. All three must agree, or the ` +
+        `DOM is playing a different fight from the engine.`,
+    );
   }
 }
 
@@ -261,20 +292,44 @@ async function manifest(): Promise<number> {
   return Object.keys(files).length;
 }
 
+/** The classes named on the command line, or all of them. */
+function classesFrom(arg: string | undefined): string[] {
+  const all = (RUN_CONTENT.classes ?? []).map((c) => c.id);
+  if (arg === undefined || arg === 'all') return all;
+  if (!all.includes(arg)) {
+    throw new Error(
+      `tools/ui-probe/run.ts: "${arg}" is not a class this content offers. ` +
+        `Pass one of ${all.join(', ')}, or "all" for every one of them.`,
+    );
+  }
+  return [arg];
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args[0] === 'find-win') {
     const max = Number.parseInt(args[1] ?? '300', 10);
-    const wins: number[] = [];
-    for (let seed = 1; seed <= max; seed++) {
-      const { run } = runRun(RUN_CONTENT, seed, makeRunAgent({ route: 'greedy', placement: 'right', seed }));
-      if (run.result === 'won') wins.push(seed);
+    for (const classId of classesFrom(args[2])) {
+      const wins: number[] = [];
+      for (let seed = 1; seed <= max; seed++) {
+        const { run } = runRun(
+          RUN_CONTENT,
+          seed,
+          makeRunAgent({ route: 'greedy', placement: 'right', seed }),
+          classId,
+        );
+        if (run.result === 'won') wins.push(seed);
+      }
+      console.log(
+        `[find-win] ${classId}, greedy route, append-right placement, seeds 1..${max}: ` +
+          `won ${wins.length} - ${wins.join(', ') || 'none'}`,
+      );
     }
-    console.log(`[find-win] greedy route, append-right placement, seeds 1..${max}: won ${wins.length} - ${wins.join(', ') || 'none'}`);
     return;
   }
   const seed = Number.parseInt(args[0] ?? '7', 10);
   const theme = args[1] ?? 'light';
+  const classes = classesFrom(args[2]);
   await mkdir(OUT, { recursive: true });
   const browser = await launch();
   try {
@@ -284,7 +339,7 @@ async function main(): Promise<void> {
       if (m.type() === 'error') console.error(`[page error] ${m.text()}`);
     });
     page.on('pageerror', (e) => console.error(`[page crash] ${e.message}`));
-    await playRun(page, seed, theme);
+    for (const classId of classes) await playRun(page, seed, theme, classId);
     await ctx.close();
   } finally {
     await browser.close();

@@ -701,7 +701,23 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
         break;
       }
       case 'fizzle':
-        logLine('has no legal target — the attack fizzles.');
+        // Only a spell can fizzle. An attack that finds no legal target says
+        // nothing at all - `src/engine/resolver.ts`'s header - so the three
+        // producers left are `damageOne`, `damageAll` and `buffAll`, every one
+        // of them cast from a card that cost energy. This line used to say "the
+        // attack fizzles", which was true when it was written and became wrong
+        // in the same commit that removed the attack's `fizzled`.
+        //
+        // It names the caster because a spell is not an `act`: there is no
+        // "X acts." line above it to carry the subject, the way there is for a
+        // swing. Unreachable through the app today - nothing casts through
+        // `src/ui/session.ts` - and gated by "the log calls a fizzle what a
+        // fizzle is: only a spell can produce one" in `test/explain.test.ts`,
+        // which measures the producer set off the resolver and then reads this
+        // block as text, because `node --test` has no DOM to draw it in.
+        logLine(
+          `<b>${nameOf(beat.uid)}</b>’s spell has no legal target — it fizzles, and the energy is spent.`,
+        );
         break;
       case 'spell': {
         const bits: string[] = [];

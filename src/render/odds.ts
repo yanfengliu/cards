@@ -28,6 +28,14 @@
  * about to deal 1 and then burn 3 more. Volley is counted through `swingsOf`,
  * Scorch through `scorchers` and `burnOn`, and both are read off the traits the
  * resolver reads rather than off a list of class names.
+ *
+ * **Everything here that subtracts Armour subtracts `armourOf`**, which is the
+ * rule `engine/state.ts` states at that function: a worn shield covers a spell
+ * exactly as it covers a swing. A `damageIfHit` map used to sit beside `burnOn`
+ * reading `e.armour` instead; it had no caller anywhere and was deleted rather
+ * than repaired, because a second wrong number nobody draws is still a second
+ * number to keep true. Gated by "the odds read Armour the way every damage site
+ * must" in `test/explain.test.ts`, which is a text check and says why.
  */
 
 import { SCORCH_DAMAGE, legalTargets, swingsOf } from '../engine/resolver.ts';
@@ -93,8 +101,6 @@ export type IncomingOdds = {
   readonly attackers: number;
   /** Their total current Power, a Volley body's counted once per swing. */
   readonly totalPower: number;
-  /** uid -> damage one *average* attack would deal it after its armour. */
-  readonly damageIfHit: ReadonlyMap<number, number>;
   /** Living entities on the attacking side carrying Scorch. */
   readonly scorchers: number;
   /**
@@ -152,22 +158,12 @@ export function incomingOdds(state: GameState, side: Side): IncomingOdds {
     }
   }
 
-  // One attacker's damage against one defender is `power - armour`, floored at
-  // zero. With several attackers the useful single number is the average, and
-  // it is labelled as such on screen.
-  const average = attackers === 0 ? 0 : totalPower / attackers;
-  const damageIfHit = new Map<number, number>();
-  for (const e of living) {
-    damageIfHit.set(e.uid, Math.max(0, average - e.armour));
-  }
-
   return {
     chance,
     poolSize: targets.length,
     guarded,
     attackers,
     totalPower,
-    damageIfHit,
     scorchers,
     burnOn,
   };

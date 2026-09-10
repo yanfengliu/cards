@@ -45,7 +45,7 @@
 // never takes the second.
 //
 // AN ACT THAT ENDED THE FIGHT STILL FINISHES, AND THE RESOLVER ANNOUNCES EVERY
-// CHANGE IT MAKES AND NOTHING IT DOES NOT.
+// EFFECT THAT REACHED A TARGET AND NOTHING ABOUT ONE THAT FOUND NONE.
 //
 // An act spawns its continuations up front, so the swings and the rider are
 // already queued when the first swing kills the enemy hero; `resolvePhase`
@@ -54,21 +54,46 @@
 // contract, and it would drop board changes the view has already been told
 // about. So the act finishes, and the rule is about what is SAID:
 //
-//   - A second swing that finds no legal target changes nothing, so it says
-//     nothing. It is not a `fizzled`. The only board on which an attack finds
-//     no target is one whose hero is already dead, so an attack's `fizzled`
-//     could only ever be printed under the announcement of the death that ended
-//     the fight - "the Warchief dies" followed by "no legal target".
-//   - A Scorch with nothing to burn likewise says nothing, which is the rule
-//     `damageAll`/`scorch` already carried and the reason this one is written
-//     the same way.
-//   - A Scorch that DOES burn still announces it, dead hero or not, because the
-//     board really did change and the view is derived from these events.
+//   - A second swing that finds no legal target reached nobody, so it says
+//     nothing. It is not a `fizzled`.
+//   - A Scorch with nothing to burn likewise reached nobody and says nothing,
+//     which is the rule `damageAll`/`scorch` already carried and the reason
+//     this one is written the same way.
+//   - An effect that DID reach a target announces it, dead hero or not, and
+//     announces it at 0 when the target's Armour ate the whole point. **Reached
+//     a target is not changed the board**, and that is deliberate: the two come
+//     apart exactly where Armour is at least the damage, and a defender with
+//     0 Power hitting back for 0 is a blow that bounced rather than a blow that
+//     never came. `test/hero-attacks.test.ts` pins `{raw: 1, dealt: 0}` as the
+//     correct report for a burn a Shieldwall's Armour stopped.
 //   - A SPELL cast into an empty line still fizzles. Energy was spent on it and
-//     the screen owes the player that; an attack costs no energy.
+//     the screen owes the player that.
+//
+// WHAT DISCRIMINATES THE FIZZLE IS THE ENERGY, NOT REACHABILITY. The empty-pool
+// case is reachable for a spell and for a swing alike - `damageOne` calls the
+// same `legalTargets` as `attack`, on the same boards - so "an attack can only
+// hit this after a hero died" is an observation about *frequency*, not a reason.
+// The reason is that a spell was paid for: the player spent energy, the card
+// left the hand, and nothing happened, so the screen says so. A swing costs
+// nothing and is not owed a receipt. Two spells in one round can therefore
+// print `fizzled` under a `died` - `fight.ts` runs every cast in `applyCasts`
+// before `settleResult`, with no result check between them, so a `damageOne`
+// that kills the enemy hero is followed by the next spell fizzling into the
+// empty line. That is correct and is left alone: the second spell's energy was
+// spent whatever the first one did. No shipped content reaches it, because the
+// run deals only units and nothing casts through `src/ui/session.ts`.
+//
+// WHAT A PLAYER IS SHOWN IS A SEPARATE QUESTION, AND IT IS NOT THIS FILE'S.
+// The engine reports; the view decides what is worth narrating. `buildBeats` in
+// `src/render/view.ts` drops a blow that moved no Health once a hero is down,
+// so "the Warchief dies" is not followed by "scorches the Shieldwall for 0",
+// and `src/render/odds.ts` already answers the same way on the forecast side -
+// a unit taking nothing is absent from the burn rather than present at zero.
 //
 // Gated by "an attack that finds no target says nothing, and a spell cast into
-// the same empty line still fizzles" in `test/rules.test.ts`.
+// the same empty line still fizzles" in `test/rules.test.ts`, and on the view
+// side by "once the fight is decided the screen stops narrating blows that
+// moved nothing" in `test/render-view.test.ts`.
 
 import { type Rng, pick } from './rng.ts';
 import {
@@ -181,9 +206,10 @@ export function swingsOf(e: Entity): number {
  * emptied this pool entirely and made your whole side untargetable for the rest
  * of the fight, which two cheap cards could buy on turn one.
  *
- * An empty pool is still reachable and still fizzles, because a side can have
- * no living entity at all in the instant between a lethal hit and the next
- * checkpoint.
+ * An empty pool is still reachable, because a side can have no living entity at
+ * all in the instant between a lethal hit and the next checkpoint. What the
+ * caller does with it differs by caller and not by board: `damageOne` fizzles
+ * because energy was spent on it, `attack` says nothing.
  */
 export function legalTargets(state: GameState, attacker: Entity): Entity[] {
   const defenders = state.board[otherSide(attacker.side)];
@@ -305,11 +331,15 @@ function apply(
      * feed one.
      *
      * **An attack with no legal target says nothing**, where a spell into the
-     * same empty line fizzles. See the rule in this file's header: the only
-     * board on which an attack finds no target is one whose hero is already
-     * dead, so the `fizzled` this used to emit could only ever appear under the
-     * announcement of the death that ended the fight. It is still not an error,
+     * same empty line fizzles. The rule is in this file's header and the
+     * discriminator is the energy, not the board: `damageOne` asks the same
+     * `legalTargets` and finds the same empty pool on the same boards, and what
+     * separates them is that the spell was paid for. It is still not an error,
      * and still draws no retaliation - only the event is gone.
+     *
+     * **An attack that DOES find a target announces it, at 0 if Armour ate the
+     * whole point.** Reaching a target is what is reported; whether the Health
+     * bar moved is not this function's question.
      */
     case 'attack': {
       const e = findEntity(state, effect.uid);
@@ -438,6 +468,19 @@ function apply(
      * hero is the rightmost entity of its own line, not a back rank.
      *
      * Like every other buff it lasts until the owner's next `startTurn`.
+     *
+     * **The fizzle below cannot be reached by any spell this game ships, and it
+     * is kept anyway.** `cast.ts`'s `spellQueue` aims `buffAll` at the caster's
+     * own side, and the caster is alive past the guard three lines up, so the
+     * loop always finds at least the caster and always emits at least one
+     * event. It is reachable through the effect vocabulary rather than through
+     * a card - an effect aimed at a side whose hero is dead and whose units are
+     * gone finds nobody - and that is the case the branch answers correctly:
+     * energy was spent, so the screen says so. Deleting it would make the first
+     * card that aims a buff anywhere else fail silently. Gated at the vocabulary
+     * by "an attack that finds no target says nothing, and a spell cast into the
+     * same empty line still fizzles" in `test/rules.test.ts`, which reaches it
+     * by queueing the effect directly; no shipped card covers it.
      */
     case 'buffAll': {
       const e = findEntity(state, effect.uid);

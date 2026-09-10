@@ -47,7 +47,15 @@
 //   "an act that ended the fight finishes, and says nothing it did not do" is
 //   one fixture at one seed, with targeting forced. How often a real fight
 //   reaches it is not this file's to say; the 500-seed sweep that measured it
-//   is in `docs/work/10_classes/plan.md`, session four.
+//   is in `docs/work/10_classes/plan.md`, session four. What the SCREEN does
+//   with the tail of such an act is not here either: the resolver reports every
+//   effect that reached a target, 0 included, and dropping the 0 once a hero is
+//   down is `src/render/view.ts`'s, gated in `test/render-view.test.ts`.
+//
+//   "the two play examples in docs/design/game.md walk exactly as written"
+//   reads the document and builds its fixtures from it, so it is red in both
+//   directions. It binds the numbers its patterns capture and not the prose
+//   around them; the patterns are the list of what is bound.
 //
 //   Nothing here says either class is worth playing. `npm run measure:run --
 //   --class <id>` is the instrument for that, and its numbers are information
@@ -55,6 +63,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 import { castSpell } from '../src/engine/cast.ts';
 import { stateToCanonical } from '../src/engine/hash.ts';
@@ -322,9 +332,11 @@ test('an act that ended the fight finishes, and says nothing it did not do', () 
   assert.equal(enemyHero.alive, false);
 
   // The Mage's half of the same rule, and the reason it is not symmetrical: a
-  // rider that BURNS still announces it, because the board really did change
-  // and the view is derived from these events. Only a rider with nothing to
-  // burn is silent, which is the rule `scorch` already carried.
+  // rider that REACHED a unit still announces it, dead hero or not, and would
+  // announce it at 0 if that unit's Armour had eaten the point. Only a rider
+  // that reached nobody is silent, which is the rule `scorch` already carried.
+  // Whether a 0 is worth putting on screen is the view's question and is
+  // answered in `src/render/view.ts`, not here.
   const g = fixture({ name: 'Mage', power: 1, traits: ['scorch'] }, { health: 1 });
   const mage = heroOf(g.state, 'player');
   const mook = g.add('enemy', card('test:mook', 0, 5, 0));
@@ -452,70 +464,203 @@ test('Volley and Scorch on one entity: the swings, then the burn, then the after
 
 // ------------------------------------------- the design's two play examples
 
+/** `docs/design/game.md`, read once. The examples below are built out of it. */
+const DESIGN_PATH = 'docs/design/game.md';
+const DESIGN = readFileSync(path.join(import.meta.dirname, '..', DESIGN_PATH), 'utf8');
+
+/** The text under one `####` heading, up to the next heading of any level. */
+function designSection(heading: string): string {
+  const at = DESIGN.indexOf(`#### ${heading}`);
+  assert.notEqual(
+    at,
+    -1,
+    `${DESIGN_PATH} has no "#### ${heading}" section. The play example this gate walks was ` +
+      'renamed or deleted; a rule with no walked example is not specified.',
+  );
+  const rest = DESIGN.slice(at + heading.length + 5);
+  const end = rest.search(/\r?\n#{1,4} /);
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
+/**
+ * The numbers one sentence of the document states, as numbers.
+ *
+ * Every number in the two walks below comes through here, so the document is
+ * the source and the engine is what is checked against it. Transcribing them
+ * into the test instead makes the gate one-way: the engine drifting goes red,
+ * the document drifting stays green, and the claim that the example still walks
+ * is then a claim about a copy of the example.
+ */
+function stated(section: string, what: string, re: RegExp): number[] {
+  const m = re.exec(section);
+  assert.ok(
+    m !== null,
+    `${DESIGN_PATH} no longer states ${what} in the shape this gate reads.\n\n  looked for: ` +
+      `${re.source}\n\nEdit the walk to match the document, never the other way round.`,
+  );
+  const out = m.slice(1).map((g) => Number(g));
+  assert.ok(
+    out.length > 0 && out.every((n) => Number.isFinite(n)),
+    `${DESIGN_PATH}: ${what} matched but captured no number`,
+  );
+  return out;
+}
+
 test('the two play examples in docs/design/game.md walk exactly as written', () => {
   // `AGENTS.md`: a change to `docs/design/` restates the affected rule as a
   // concrete play example, "because a mechanic that cannot be walked through by
   // hand is not yet specified". An example nothing runs is prose, and prose
-  // drifts - so both are walked here, number for number, and the assertion
-  // messages quote the document.
+  // drifts - so both are walked here, number for number.
   //
-  // Bound: it holds the two examples to the engine, not the engine to the
-  // design. If a rule changes deliberately, this goes red and the document is
-  // what has to be edited.
+  // **It reads the document rather than quoting it, and that is the whole of
+  // the fix.** This test used to transcribe the numbers, which made it one-way:
+  // an engine change went red, an edit to `game.md` did not, and the plan and
+  // the devlog both claimed it held in both directions. Now every number the
+  // fixtures are built from is parsed out of the file by `stated`, which fails
+  // loudly when the sentence it reads is no longer there - so a reworded
+  // example goes red saying which sentence moved, rather than passing.
+  //
+  // Bound: it binds the numbers, not the prose around them. A sentence this
+  // gate does not parse can still drift, and the parse patterns are what say
+  // which sentences those are. It also says nothing about how often a real
+  // fight reaches either shape.
 
-  // "The Mage's rider is a Scorch" - Mage hero Power 1, against an Orc
-  // Shieldwall (1/5, Armour 1, Guard) and two Goblin Wolfriders (2/1).
+  // ---- "The Mage's rider is a Scorch"
   {
-    const f = fixture({ name: 'Mage', power: 1, traits: ['scorch'] });
-    const wall = f.add('enemy', card('ex:shieldwall', 1, 5, 1, ['guard']));
-    const wolfA = f.add('enemy', card('ex:wolfrider-a', 2, 1, 0));
-    const wolfB = f.add('enemy', card('ex:wolfrider-b', 2, 1, 0));
+    const doc = designSection("The Mage's rider is a Scorch");
+    const [rider] = stated(doc, "the rider's damage", /every enemy \*unit\* takes (\d+), less its own Armour/);
+    assert.equal(
+      SCORCH_DAMAGE,
+      rider,
+      `${DESIGN_PATH} says a rider deals ${rider}; SCORCH_DAMAGE is ${SCORCH_DAMAGE}`,
+    );
+
+    const [magePower] = stated(doc, "the Mage hero's Power", /A Mage hero \(Power (\d+), Scorch\)/);
+    const [wallPower, wallHealth, wallArmour] = stated(
+      doc,
+      "the Orc Shieldwall's numbers",
+      /an Orc Shieldwall \(Power (\d+), Health (\d+), \*\*Armour (\d+)\*\*, Guard\)/,
+    );
+    const [wolfPower, wolfHealth] = stated(
+      doc,
+      "the Goblin Wolfriders' numbers",
+      /two Goblin Wolfriders \(Power (\d+), Health (\d+)\)/,
+    );
+    const [swingDealt] = stated(doc, 'what the swing deals', /so it deals \*\*(\d+)\*\*/);
+    const [wallBurnRaw, wallBurnOff, wallBurnDealt] = stated(
+      doc,
+      "the Shieldwall's share of the burn",
+      /the Shieldwall takes `(\d+) − (\d+) = (\d+)`/,
+    );
+    const [wolfBurnRaw, wolfBurnOff, wolfBurnDealt] = stated(
+      doc,
+      "each Wolfrider's share of the burn",
+      /each Wolfrider takes `(\d+) − (\d+) = (\d+)`/,
+    );
+    const [wallAfter, wallMax] = stated(doc, 'the board after', /Shieldwall (\d+)\/(\d+)/);
+    assert.equal(wallBurnOff, wallArmour, `${DESIGN_PATH}: the burn subtracts a different Armour than the card carries`);
+    assert.equal(wolfBurnOff, 0, `${DESIGN_PATH}: a Wolfrider is written with Armour`);
+    assert.equal(wallMax, wallHealth, `${DESIGN_PATH}: the board after gives the Shieldwall a different maximum`);
+
+    const f = fixture({ name: 'Mage', power: magePower!, traits: ['scorch'] });
+    const wall = f.add('enemy', card('ex:shieldwall', wallPower!, wallHealth!, wallArmour!, ['guard']));
+    const wolfA = f.add('enemy', card('ex:wolfrider-a', wolfPower!, wolfHealth!, 0));
+    const wolfB = f.add('enemy', card('ex:wolfrider-b', wolfPower!, wolfHealth!, 0));
     const mage = heroOf(f.state, 'player');
     const enemyHero = heroOf(f.state, 'enemy');
+    const heroHealth = enemyHero.health;
 
     const { events } = drain(f.state, [{ kind: 'act', uid: mage.uid }], makeRng(14, 'combat'));
-    assert.deepEqual(attacks(events), [{ targetUid: wall.uid, raw: 1, dealt: 0 }], 'step 1: "it deals 0"');
+    assert.deepEqual(
+      attacks(events),
+      [{ targetUid: wall.uid, raw: magePower!, dealt: swingDealt! }],
+      `step 1: "it deals ${swingDealt}"`,
+    );
     assert.equal(mage.health, 30, 'step 1: "the Mage is untouched"');
     assert.deepEqual(
       burns(events),
       [
-        { targetUid: wall.uid, raw: 1, dealt: 0 },
-        { targetUid: wolfA.uid, raw: 1, dealt: 1 },
-        { targetUid: wolfB.uid, raw: 1, dealt: 1 },
+        { targetUid: wall.uid, raw: wallBurnRaw!, dealt: wallBurnDealt! },
+        { targetUid: wolfA.uid, raw: wolfBurnRaw!, dealt: wolfBurnDealt! },
+        { targetUid: wolfB.uid, raw: wolfBurnRaw!, dealt: wolfBurnDealt! },
       ],
-      'step 2: "the Shieldwall takes 1 - 1 = 0, each Wolfrider takes 1 - 0 = 1"',
+      `step 2: "the Shieldwall takes ${wallBurnRaw} − ${wallBurnOff} = ${wallBurnDealt}, ` +
+        `each Wolfrider takes ${wolfBurnRaw} − ${wolfBurnOff} = ${wolfBurnDealt}"`,
     );
     assert.deepEqual(
       events.filter((e) => e.kind === 'died').map((e) => e.uid),
       [wolfA.uid, wolfB.uid],
       'step 3: "announced dead together, left to right"',
     );
-    assert.equal(wall.health, 5, 'the board after: "Shieldwall 5/5"');
-    assert.equal(enemyHero.health, 30, 'the board after: "enemy hero untouched"');
+    assert.equal(wall.health, wallAfter, `the board after: "Shieldwall ${wallAfter}/${wallMax}"`);
+    assert.equal(enemyHero.health, heroHealth, 'the board after: "enemy hero untouched"');
   }
 
-  // "A Volley body killed by its first swing does not swing again" - an Elf
-  // Archer (1/2, Volley, Relay) left of a Human Squire (1/2), into a Guard with
-  // Power 5 and Health 20.
+  // ---- "A Volley body killed by its first swing does not swing again"
   {
+    const doc = designSection('A Volley body killed by its first swing does not swing again');
+    const [archerPower, archerHealth] = stated(
+      doc,
+      "the Elf Archer's numbers",
+      /An Elf Archer \(Power (\d+), Health (\d+), Volley, Relay\)/,
+    );
+    const [squirePower, squireHealth] = stated(
+      doc,
+      "the Human Squire's numbers",
+      /a Human Squire \(Power (\d+), Health (\d+)\)/,
+    );
+    const [wallPower, wallHealth] = stated(
+      doc,
+      "the enemy Guard's numbers",
+      /one enemy Guard with Power (\d+) and Health (\d+)/,
+    );
+    const [strikesFor, wallAfterOne] = stated(
+      doc,
+      'the first swing',
+      /The Archer strikes for (\d+) → the wall is on \*\*(\d+)\*\*/,
+    );
+    const [dealsBack] = stated(doc, "the wall's answer", /the wall deals its (\d+) back/);
+    const [archerBefore, archerTook] = stated(doc, 'the Archer after it', /the Archer is on `(\d+) − (\d+)`/);
+    const [wallStays] = stated(doc, 'the second swing', /The wall stays on \*\*(\d+)\*\*/);
+    const [squireAfter] = stated(doc, "the Squire's Power", /swings for its printed \*\*(\d+)\*\*/);
+    const [rangerFrom, rangerMid, rangerTo] = stated(
+      doc,
+      "the Ranger hero's two swings",
+      /the wall goes (\d+) → (\d+) → \*\*(\d+)\*\*/,
+    );
+    assert.equal(strikesFor, archerPower, `${DESIGN_PATH}: the Archer strikes for something other than its Power`);
+    assert.equal(dealsBack, wallPower, `${DESIGN_PATH}: the wall answers with something other than its Power`);
+    assert.equal(archerBefore, archerHealth, `${DESIGN_PATH}: the Archer starts step 1 on something else`);
+    assert.equal(archerTook, wallPower, `${DESIGN_PATH}: the Archer takes something other than the wall's Power`);
+    assert.equal(wallStays, wallAfterOne, `${DESIGN_PATH}: step 3 leaves the wall somewhere step 1 did not`);
+    assert.equal(rangerFrom, wallHealth, `${DESIGN_PATH}: the Ranger faces a wall on different Health`);
+
     const f = fixture();
-    const archer = f.add('player', card('ex:archer', 1, 2, 0, ['volley', 'relay']));
-    const squire = f.add('player', card('ex:squire', 1, 2, 0));
-    const wall = f.add('enemy', card('ex:wall', 5, 20, 0, ['guard']));
+    const archer = f.add('player', card('ex:archer', archerPower!, archerHealth!, 0, ['volley', 'relay']));
+    const squire = f.add('player', card('ex:squire', squirePower!, squireHealth!, 0));
+    const wall = f.add('enemy', card('ex:wall', wallPower!, wallHealth!, 0, ['guard']));
 
     const { events } = drain(f.state, [{ kind: 'act', uid: archer.uid }], makeRng(15, 'combat'));
-    assert.deepEqual(attacks(events), [{ targetUid: wall.uid, raw: 1, dealt: 1 }], 'step 1: one swing landed');
-    assert.equal(wall.health, 19, 'step 1 and 3: "the wall stays on 19"');
+    assert.deepEqual(
+      attacks(events),
+      [{ targetUid: wall.uid, raw: archerPower!, dealt: strikesFor! }],
+      'step 1: one swing landed',
+    );
+    assert.equal(wall.health, wallAfterOne, `steps 1 and 3: "the wall stays on ${wallStays}"`);
     assert.equal(archer.alive, false, 'step 2: "it dies and leaves the board"');
     assert.deepEqual(kinds(events), ['acted', 'attacked', 'retaliated', 'died'], 'step 3: the second swing said nothing');
-    assert.equal(power(squire), 1, 'step 4: "the Squire gets no +2 and swings for its printed 1"');
+    assert.equal(
+      power(squire),
+      squireAfter,
+      `step 4: "the Squire gets no +2 and swings for its printed ${squireAfter}"`,
+    );
 
     // "The same Ranger hero into the same wall loses nothing."
-    const g = fixture({ name: 'Ranger', power: 1, traits: ['volley'] });
-    const gWall = g.add('enemy', card('ex:wall', 5, 20, 0, ['guard']));
+    const g = fixture({ name: 'Ranger', power: archerPower!, traits: ['volley'] });
+    const gWall = g.add('enemy', card('ex:wall', wallPower!, wallHealth!, 0, ['guard']));
     const ranger = heroOf(g.state, 'player');
     drain(g.state, [{ kind: 'act', uid: ranger.uid }], makeRng(16, 'combat'));
-    assert.equal(gWall.health, 18, '"the wall goes 20 -> 19 -> 18"');
+    assert.equal(gWall.health, rangerTo, `"the wall goes ${rangerFrom} → ${rangerMid} → ${rangerTo}"`);
     assert.equal(ranger.health, 30);
   }
 });

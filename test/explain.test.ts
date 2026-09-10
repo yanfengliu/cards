@@ -328,6 +328,114 @@ test('Volley’s count in words is the count the resolver swings', () => {
   }
 });
 
+test('the log calls a fizzle what a fizzle is: only a spell can produce one', () => {
+  // `src/ui/app.ts`'s log said "has no legal target — the attack fizzles". That
+  // was true when it was written and became wrong in the same commit that took
+  // the attack's `fizzled` away: after it, the three producers left are
+  // `damageOne`, `damageAll` and `buffAll`, and every one of them is a card
+  // that cost energy. Two neighbouring strings in the same file were reworded
+  // in that commit and this post-hoc one was missed.
+  //
+  // Written the way the Volley gate above is: the producer set is MEASURED
+  // against the resolver, and the words are then checked against what was
+  // measured. Asserting the sentence alone is repaired by editing the sentence,
+  // and asserting the resolver alone says nothing about what the player reads.
+  //
+  // Bound: the sentence is checked as source text, because `src/ui/app.ts`
+  // needs a DOM and `node --test` has none - so this proves the string in the
+  // file, not a line in a browser. It is also unreachable in the shipped app
+  // today: nothing casts a spell through `src/ui/session.ts`, so no fight the
+  // screen plays can emit `fizzled` at all.
+  const state: GameState = { board: { player: [], enemy: [] }, nextUid: 1 };
+  state.board.player.push(makeHero(state, 'player', { name: 'H', health: 30, power: 1, armour: 0 }));
+  state.board.enemy.push(makeHero(state, 'enemy', { name: 'E', health: 30, power: 1, armour: 0 }));
+  const caster = heroOf(state, 'enemy');
+  const mark = heroOf(state, 'player');
+  mark.health = 0;
+  mark.alive = false;
+
+  const fizzles = (effect: Parameters<typeof drain>[1][number]): boolean =>
+    drain(state, [effect], makeRng(4, 'combat')).events.some((e) => e.kind === 'fizzled');
+
+  assert.equal(fizzles({ kind: 'damageOne', uid: caster.uid, amount: 3 }), true);
+  assert.equal(fizzles({ kind: 'damageAll', uid: caster.uid, side: 'player', amount: 3 }), true);
+  assert.equal(fizzles({ kind: 'buffAll', uid: caster.uid, side: 'player', amount: 2 }), true);
+  assert.equal(
+    fizzles({ kind: 'attack', uid: caster.uid }),
+    false,
+    'an attack emitted a fizzle, so the log calling it an attack would be right and this gate ' +
+      'is the thing that is wrong - check src/engine/resolver.ts first',
+  );
+
+  // The block, not a scan for a quoted string: `app.ts` is full of template
+  // literals, and a `\`[^\`]*fizzle[^\`]*\`` scan matches the gap BETWEEN two of
+  // them the moment `case 'fizzle':` sits in that gap. It came back green on
+  // the fixed file and red on nothing - measuring the wrong thing, confidently.
+  const app = codeOf('src/ui/app.ts');
+  const blocks = app
+    .split("case 'fizzle':")
+    .slice(1)
+    .map((rest) => rest.split('break;')[0] ?? '');
+  assert.ok(
+    blocks.length > 0,
+    "src/ui/app.ts no longer handles a `fizzle` beat at all. If the beat was removed, remove " +
+      'this gate with it; if it was renamed, this gate has stopped watching anything.',
+  );
+  // There is one block per switch - one draws the beat, one writes the log -
+  // and only the second one speaks to the player.
+  const spoken = blocks.filter((b) => b.includes('logLine('));
+  assert.equal(
+    spoken.length,
+    1,
+    `${spoken.length} of the ${blocks.length} fizzle blocks in src/ui/app.ts write a log line; ` +
+      'this gate reads exactly the one that does.',
+  );
+  for (const said of blocks) {
+    assert.ok(
+      !/\battack\b/i.test(said),
+      `src/ui/app.ts tells the player a fizzle is an attack:\n\n${said}\nOnly a spell fizzles, ` +
+        'and the three effects that can are all cast from a card that cost energy.',
+    );
+  }
+  assert.ok(
+    /\bspell\b/i.test(spoken[0]!),
+    `src/ui/app.ts does not say what fizzled:\n\n${spoken[0]!}\nThe player spent energy on a ` +
+      'card and nothing happened; the line is the receipt for that.',
+  );
+});
+
+test('the odds read Armour the way every damage site must: through armourOf', () => {
+  // `src/engine/state.ts` on `armourOf`: "Every damage site reads this, never
+  // `e.armour`, so a worn shield covers an attack and a spell alike."
+  // `src/render/odds.ts` is a second implementation of the engine's damage
+  // arithmetic - it is what the player reads before committing - and it had a
+  // `damageIfHit` map built from `e.armour`. It had no consumers anywhere and
+  // was deleted rather than fixed; this is what stops the read coming back.
+  //
+  // Bound: **this is a text check, and it is a text check because no board can
+  // tell the two apart today.** Equipment is the only thing that makes
+  // `armourOf` differ from `.armour`, `apply`'s `equip` case skips any entity
+  // with no slots - every unit - and the burn never reaches a hero. So a
+  // behavioural gate here would pass under either reading, and would report
+  // that as proof. The day a unit can wear something, replace this with one.
+  const odds = codeOf('src/render/odds.ts');
+  // The offending LINE, not the match object: `assert.equal(exec(...), null)`
+  // prints the whole RegExpExecArray, which is the entire file plus its own
+  // `input` field, and buries the one line that matters in it.
+  const offending = odds
+    .split(/\r?\n/)
+    .filter((l) => /\.armour\b/.test(l))
+    .join('\n');
+  assert.equal(
+    offending,
+    '',
+    `src/render/odds.ts reads \`.armour\` off an entity:\n\n${offending}\n\nEvery damage site ` +
+      'reads `armourOf`, or the number on screen stops matching the blow the moment a worn ' +
+      'shield is in play.',
+  );
+  assert.ok(odds.includes('armourOf('), 'src/render/odds.ts no longer computes damage at all');
+});
+
 test('the "race carries no rule" claim is still true of the resolver', () => {
   // `RACE_HAS_NO_RULE` tells the player that nothing reads a unit's race. That
   // is a claim about `engine/resolver.ts`, and the day a Kindle-style trait

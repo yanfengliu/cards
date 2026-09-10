@@ -278,24 +278,43 @@ test('Guard is the only rule that narrows the pool: nothing else removes an enti
 
 test('an attack that finds no target says nothing, and a spell cast into the same empty line still fizzles', () => {
   // `src/engine/resolver.ts`'s header rule: an act that ended the fight still
-  // finishes, and the resolver announces every change it makes and nothing it
-  // does not. An attack into an empty pool changes nothing, so it says nothing;
-  // a spell into the same pool fizzles, because energy was spent on it.
+  // finishes, and the resolver announces every effect that reached a target and
+  // nothing about one that found none. An attack into an empty pool reached
+  // nobody, so it says nothing; a spell into the same pool fizzles, because
+  // energy was spent on it. The discriminator is the energy, not the board -
+  // `damageOne` asks the same `legalTargets` and finds the same empty pool.
   //
   // The only way to empty the pool now that Ward is gone: a side with nothing
   // alive on it. That is the state after a lethal hit on a hero - a dead hero
-  // stays on the board and legalTargets skips it - which is why the event this
-  // used to emit could only ever be printed under the `died` that ended the
-  // fight. A Volley second swing is exactly that case and is where a player met
-  // it: "the Warchief dies", then "no legal target".
+  // stays on the board and legalTargets skips it. A Volley second swing is
+  // where a player met it: "the Warchief dies", then "no legal target".
   //
-  // Both halves are asserted together on purpose. The attack half alone is
-  // satisfied by an `apply` that returns nothing for every kind, and the spell
-  // half is what says the fizzle vocabulary still exists.
+  // **The control arm is not decoration.** Asserting the trace was `['attack']`
+  // proves the effect was DEQUEUED, not that it was applied: `drain` pushes to
+  // `trace` before it calls `apply`, so replacing the whole `attack` case with
+  // `return { events: [], spawned: [] }` left every assertion in the empty-pool
+  // arm passing. So the same effect is run once against a board that has a
+  // target, and the `attacked` that comes back is what says the case exists at
+  // all. `[]` from the empty pool then means "it ran and found nobody".
   //
-  // Bound: one hand-built board with one dead hero. It says nothing about which
-  // boards can reach an empty pool in a real fight; that is
-  // `legalTargets`'s own gates above.
+  // Bound: two hand-built boards, one with a dead hero and one with a live
+  // target. It says nothing about which boards can reach an empty pool in a
+  // real fight; that is `legalTargets`'s own gates above.
+  const control = fixture(0);
+  const swinger = control.add('enemy', card('att', 5, 5, 0));
+  const mark = control.add('player', card('mark', 0, 9, 0));
+  const live = drain(
+    control.state,
+    [{ kind: 'attack', uid: swinger.uid }],
+    makeRng(2, 'combat'),
+  );
+  assert.deepEqual(
+    live.events.map((e) => e.kind),
+    ['attacked', 'retaliated'],
+    'the control: the same effect on a board with a target really does apply the attack case',
+  );
+  assert.equal(mark.health, 4, 'and the control really did move Health');
+
   const f = fixture(0);
   const attacker = f.add('enemy', card('att', 5, 5, 0));
   const hero = heroOf(f.state, 'player');
@@ -309,8 +328,8 @@ test('an attack that finds no target says nothing, and a spell cast into the sam
     [{ kind: 'attack', uid: attacker.uid }],
     makeRng(2, 'combat'),
   );
-  assert.deepEqual(trace.map((e) => e.kind), ['attack'], 'the effect was applied, not skipped');
-  assert.deepEqual(events, [], 'an attack that changed nothing says nothing');
+  assert.deepEqual(trace.map((e) => e.kind), ['attack'], 'the effect was dequeued, not skipped');
+  assert.deepEqual(events, [], 'an attack that reached nobody says nothing');
   assert.equal(attacker.health, 5, 'and it draws no retaliation either');
 
   // The same empty line, reached by a spell rather than a swing.
@@ -326,6 +345,16 @@ test('an attack that finds no target says nothing, and a spell cast into the sam
     makeRng(2, 'combat'),
   );
   assert.deepEqual(wipe.events.map((e) => e.kind), ['fizzled']);
+  // `buffAll`'s fizzle, which no shipped spell can reach: `cast.ts` aims a buff
+  // at the caster's own side and the caster is alive, so the loop always finds
+  // it. Aimed at the empty side it is the same rule as the two above, and this
+  // is the only thing that holds the branch.
+  const buff = drain(
+    f.state,
+    [{ kind: 'buffAll', uid: attacker.uid, side: 'player', amount: 2 }],
+    makeRng(2, 'combat'),
+  );
+  assert.deepEqual(buff.events.map((e) => e.kind), ['fizzled'], 'a buff that reached nobody was still paid for');
   // And the rider, which is the case the attack now matches.
   const rider = drain(
     f.state,

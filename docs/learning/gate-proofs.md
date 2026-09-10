@@ -6,6 +6,95 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-10 — a second review of the class layer: the rule that was written down, the log's last wrong word, and a gate that recorded dequeuing
+
+Taken on branch `worktree-agent-ac92c8ed9709f58e2`, cut from `8a37fcf`; the suite is **199 tests** here, 195 at the base. Seventeen mutations below — fourteen defect mutations and three instrument checks — each applied to the shipped tree, run against the shipped test command, and reverted with its digest compared. All seventeen came back red, which is the colour each was meant to be. No anchor was broken.
+
+`src/engine/resolver.ts` hashes `f261d12b…`, `src/render/view.ts` `cbde6d77…`, `src/render/odds.ts` `459616a4…`, `src/ui/app.ts` `eb3fcbc9…`, `docs/design/game.md` `db48c37e…` and `test/render-view.test.ts` `67bfc905…` after the last mutation was reverted. The runner is `.probe/mutate2.mjs`, under an ignored path; it is `.probe/mutate.mjs`'s driver with a new list, so it keeps that driver's guards — CRLF anchors, an anchor that must occur exactly once, and a digest compared before and after.
+
+### The finding the previous round's own evidence contains
+
+The entry below this one records the rule as "**the resolver announces every change it makes and nothing it does not**". That is not the rule the engine implements, and the same entry's F5 row proves it: the Mage example's expected burn is `{targetUid: wall, raw: 1, dealt: 0}`, an announcement of a change that did not happen. The `scorch` loop pushes `damaged` for every living non-hero, `dealt === 0` included, and mutating `if (!e.isHero)` to `if (!e.isHero && dealtBack > 0)` in the `attack` case turns "a 0-Power defender retaliates for 0" red — so the convention is deliberate and already gated in the other direction.
+
+Measured through the shipped pipeline — `beginRound`/`commitRound` plus `buildBeats`, per segment, the way `src/ui/app.ts` runs it — **215 zero-change beats survived the fight-ending `died` over 4500 fights** (knight/ranger/mage × trivial/even/hard × 500 seeds): 67 `attack`, 148 `spell`, 0 `retaliate`. After the change: **0**, with the decided-fight counts unchanged (500/499/491 at `trivial`, 416/329/160 at `even`, 151/62/15 at `hard`). The probe is `.probe/f1-probe.ts`, scratch under the ignored path, and it re-implements no combat, targeting or beat building.
+
+**The trade case the corpus cannot reach.** Those 4500 fights produced **0** orphan retaliations, so the pairing rule in `buildBeats` — an attack and the answer it drew are kept or dropped together — has no corpus behind it and would have been an unproven claim. `a trade after the fight is decided is drawn whole or not at all` is its fixture, and F1d below is what makes it necessary rather than decorative.
+
+### F-1 — the epilogue rule (`test/render-view.test.ts`)
+
+| mutation | site | the failure |
+|---|---|---|
+| the `attacked` case's suppression block deleted | `buildBeats` | *ranger seed 1/even round 10 player phase: the fight was already decided and the screen still narrates a attack on uid 30 that moved no Health*; and the fixture: *nothing in the trade moved Health, so neither half is drawn* — `['attack','retaliate']` against `[]` |
+| `if (decided && ev.dealt === 0) break;` deleted from `damaged` | `buildBeats` | *mage seed 10/even round 7 player phase: the fight was already decided and the screen still narrates a spell on uid 21 that moved no Health* |
+| `decided &&` dropped from both, so every zero-dealt blow is dropped | `buildBeats` | *knight seed 1/even round 8 player phase: a attack that Armour ate was dropped while the fight was still live - that is the blow a player needs to see, drawn at 0* |
+| `if (back !== null) i++;` deleted, so a suppressed swing leaves its answer behind | `buildBeats` | *nothing in the trade moved Health, so neither half is drawn* — `['retaliate']` against `[]` |
+| `if (dying !== null) decided = true;` — any death decides the fight | `buildBeats` | *a attack that Armour ate was dropped while the fight was still live* |
+
+The third is the arm that stops this being satisfied by a view that drops every zero-dealt beat, and it is the reason the rule is bounded by "once a hero is down" rather than written as "never draw a zero". The fifth is the plausible bug rather than a straw one: reading "a death" for "a hero's death" costs nothing to write and silences a live fight.
+
+### F-2 — what the log calls a fizzle (`test/explain.test.ts`)
+
+`src/ui/app.ts` said "has no legal target — the attack fizzles". Two neighbouring strings in the same file were reworded when the attack's `fizzled` was removed and this post-hoc one was missed. The gate is written like the Volley one: the producer set is **measured** off the resolver — `damageOne`, `damageAll` and `buffAll` fizzle into an empty line, `attack` does not — and only then is the sentence read.
+
+| mutation | the failure |
+|---|---|
+| the old sentence restored | *src/ui/app.ts tells the player a fizzle is an attack: `logLine('has no legal target — the attack fizzles.');`* |
+| the attack's `fizzled` restored in the resolver | *an attack emitted a fizzle, so the log calling it an attack would be right and this gate is the thing that is wrong - check src/engine/resolver.ts first*; plus `test/rules.test.ts` and `test/hero-attacks.test.ts` |
+
+**The gate's own first draft was measuring the wrong thing and came back green.** It scanned `src/ui/app.ts` for a quoted string containing "fizzle". `app.ts` is full of template literals, and the gap *between* two of them contains `case 'fizzle':` — so the scan matched a region bounded by two unrelated backticks, and the assertion about "the sentence" was reading fifteen blank lines and a switch label. It is now the `case 'fizzle':` block up to its `break;`, and it asserts that exactly one such block writes a log line, so a gate watching nothing cannot report green.
+
+### F-4 — a gate that recorded dequeuing (`test/rules.test.ts`)
+
+`assert.deepEqual(trace.map((e) => e.kind), ['attack'], 'the effect was applied, not skipped')`. `drain` pushes to `trace` **before** calling `apply`.
+
+| mutation | the failure |
+|---|---|
+| the whole `attack` case replaced with `return { events: [], spawned: [] }` | *the control: the same effect on a board with a target really does apply the attack case* — `[]` against `['attacked','retaliated']` |
+
+Run with `--test-name-pattern` against that one test, the control is the **first** assertion to fail and every assertion the old version had still passes: the trace is still `['attack']`, the events are still `[]`, the attacker is still on 5 Health, and `legalTargets` is still empty. So the old test was green under this mutation, exactly as the review said, and the new arm is what catches it.
+
+### F-6 — the design-doc gate, now red in both directions (`test/hero-attacks.test.ts`)
+
+The two play examples used to be transcribed. They are now built from numbers parsed out of `docs/design/game.md`.
+
+| mutation | direction | the failure |
+|---|---|---|
+| the Shieldwall written as `**Armour 2**` | document | *docs/design/game.md: the burn subtracts a different Armour than the card carries* — `1 !== 2` |
+| `the wall goes 20 → 19 → **17**` | document | *"the wall goes 20 → 19 → 17"* — `18 !== 17` |
+| the Archer's line reworded to `An Elf Archer, Power 1 and Health 2, with Volley and Relay,` | document | *docs/design/game.md no longer states the Elf Archer's numbers in the shape this gate reads. looked for: `An Elf Archer \(Power (\d+), Health (\d+), Volley, Relay\)`. Edit the walk to match the document, never the other way round.* |
+| the rider ignores Armour | engine | the Mage example's *step 2: "the Shieldwall takes 1 − 1 = 0, each Wolfrider takes 1 − 0 = 1"* |
+
+The third is the one that matters most, because a reworded example is how a doc gate silently stops reading anything. A parse that misses now names the pattern it was looking for.
+
+### F-7 and F-9 — the two small ones
+
+| mutation | site | the failure |
+|---|---|---|
+| `SCORCH_DAMAGE - armourOf(t)` back to `SCORCH_DAMAGE - t.armour` | `src/render/odds.ts` | *src/render/odds.ts reads `.armour` off an entity: `const each = Math.max(0, SCORCH_DAMAGE - t.armour);`* |
+| `buffAll`'s fizzle branch deleted | `src/engine/resolver.ts` | *a buff that reached nobody was still paid for* — `[]` against `['fizzled']` |
+
+`damageIfHit` was deleted rather than repaired: it had no consumer anywhere, and a second wrong number nobody draws is still a second number to keep true. Its gate is a **text check and says so in its own header**: equipment is the only thing that makes `armourOf` differ from `.armour`, `apply`'s `equip` case skips every entity with no slots — every unit — and the burn never reaches a hero, so no board can tell the two readings apart today and a behavioural gate would pass under either and report that as proof.
+
+### Instrument checks — the counters two headers point at
+
+These mutate a **test**, not the source. They exist because both new bounds are claims about populations, and a gate that cannot tell "passed" from "did not run" reports the second as the first.
+
+| mutation | the failure |
+|---|---|
+| `skippedForDecided++` removed from the odds corpus | *no phase in this corpus ended a fight, so the exclusion this gate is blind to never ran and the note above about the epilogue rule is describing nothing* |
+| `tailZeroBurns++` removed | *no burn after a fight-ending death moved nothing, so the Mage tail this rule was written for was never reached and arm 1 did not run for spell damage* |
+| `liveZeroBlows++` removed | *no blow was stopped by Armour while a fight was still live, so arm 2 - the half that stops this being satisfied by dropping every zero-dealt beat - did not run* |
+
+### Seen on screen
+
+`tools/ui-probe/run.ts` took the class as a parameter for the first time and played seed 7 as all three, light, through the real controls. All three page hashes matched their own headless runs. The three log tails at a banner, read out of `#log` rather than photographed, because the lines this round is about are the ones that scroll off the log's viewport:
+
+- Mage, fight 1: *Mage acts. | strikes Goblin Raiders for 1. | Goblin Raiders dies. | scorches Goblin for 1 — spell damage, nothing hits back. | scorches Goblin for 1 — spell damage, nothing hits back. | Goblin dies. | Goblin dies. | The enemy hero falls. You win.* — the epilogue still says what it did, because the burn moved Health.
+- Ranger, fight 7: *strikes Stone Troll for 0 (1 stopped by armour). | Stone Troll hits back for 3. | Human Squire dies. | Ranger acts. | strikes Stone Troll for 0 (1 stopped by armour). | strikes Ogre Kin for 1. | Ogre Kin dies. | The enemy hero falls. You win.* — a blow Armour ate is drawn at 0 twice while the fight is live, which is arm 2 on screen.
+- Mage, fight 7: *Mage hits back for 0 (1 stopped by armour). | Stone Troll acts. | strikes Mage for 3. | Mage hits back for 0 (1 stopped by armour). | Ogre Kin acts. | strikes Mage for 3 (2 wasted — damage does not carry). | Mage dies. | Your hero falls.* — a retaliation that bounced, twice, and nothing after the hero's death.
+
+Shots are in `.probe-ui/run-7-{knight,ranger,mage}-light/` with a sha256 manifest.
+
 ## 2026-09-10 — closing an independent review of the class layer: the screen, the tooltip, the odds and the fizzle
 
 Taken on branch `worktree-agent-a2039c8da0f15808d`, cut from `2781bab`; the suite is **195 tests** here, 189 at the base. The review found the resolver sound and found four things in the surfaces the new verbs feed. Fourteen mutations below, each applied to the shipped source, run against the shipped test command, and reverted with its digest compared. All fourteen came back the colour they were meant to — thirteen red and one deliberately green. No anchor was broken.
