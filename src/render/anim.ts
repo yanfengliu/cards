@@ -38,6 +38,7 @@ const BASE_MS: Readonly<Record<Beat['kind'], number>> = {
   retaliate: 300,
   fizzle: 260,
   buff: 440,
+  spell: 300,
   death: 320,
 };
 

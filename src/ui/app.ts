@@ -683,6 +683,17 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
       case 'fizzle':
         logLine('has no legal target — the attack fizzles.');
         break;
+      case 'spell': {
+        const bits: string[] = [];
+        if (beat.absorbed > 0) bits.push(`${beat.absorbed} stopped by armour`);
+        if (beat.wasted > 0) bits.push(`${beat.wasted} wasted`);
+        logLine(
+          `scorches <b>${nameOf(beat.targetUid)}</b> for <b>${beat.dealt}</b>` +
+            (bits.length > 0 ? ` <i>(${bits.join('; ')})</i>` : '') +
+            ' — spell damage, nothing hits back.',
+        );
+        break;
+      }
       case 'buff': {
         const from =
           beat.source.via === 'relay'
@@ -735,6 +746,17 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
       case 'fizzle': {
         const at = elementFor(beat.uid);
         if (at !== null) fx.float(at, 'no target', 'is-small', ms);
+        break;
+      }
+      case 'spell': {
+        // No beam: a scorch reaches every unit on the line at once, and one
+        // beam per target from the same hero is a fan of lines saying nothing
+        // an attack beam does not. The number over each target is the beat.
+        const to = elementFor(beat.targetUid);
+        if (to !== null) {
+          fx.float(to, beat.dealt > 0 ? `−${beat.dealt}` : 'blocked', 'is-spell', ms, 4);
+          if (beat.absorbed > 0) fx.float(to, `armour −${beat.absorbed}`, 'is-small', ms, 38);
+        }
         break;
       }
       case 'buff': {

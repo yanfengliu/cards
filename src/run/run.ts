@@ -60,6 +60,7 @@ import type {
   NodeRecord,
   RunAgentChoice,
   RunChoice,
+  RunClass,
   RunContent,
   RunLog,
   RunState,
@@ -67,6 +68,61 @@ import type {
 
 /** The stream name the run's own generator is derived on. */
 export const RUN_STREAM = 'run';
+
+/**
+ * The class a run is when none is named, and the only class a content with no
+ * class list offers. It is the class every run was before classes existed,
+ * which is what lets a log written then replay unchanged: `replayRun` reads a
+ * missing `classId` as this one.
+ */
+export const DEFAULT_CLASS_ID = 'knight';
+
+/**
+ * The class `classId` names on `content`, or the content's implicit one.
+ *
+ * A content without a class list has exactly one class, made of its own hero,
+ * deck and pool and called `DEFAULT_CLASS_ID`; a fixture with one hero and one
+ * deck is such a content. Asking such a content for any other class, or a
+ * listed content for a class it does not list, is an error that names the
+ * classes it does offer.
+ */
+export function classOf(content: RunContent, classId: string = DEFAULT_CLASS_ID): RunClass {
+  const classes = content.classes;
+  if (classes === undefined || classes.length === 0) {
+    if (classId !== DEFAULT_CLASS_ID) {
+      throw new Error(
+        `run: class "${classId}" is not one this content offers. A content with no class list ` +
+          `has one class, "${DEFAULT_CLASS_ID}", made of its own hero, starting deck and pool.`,
+      );
+    }
+    return {
+      id: DEFAULT_CLASS_ID,
+      name: content.hero.name,
+      hero: content.hero,
+      startingDeck: content.startingDeck,
+      rewards: content.rewards,
+    };
+  }
+  const cls = classes.find((c) => c.id === classId);
+  if (cls === undefined) {
+    throw new Error(
+      `run: class "${classId}" is not one this content offers. A run is started as one of ` +
+        `${classes.map((c) => c.id).join(', ')}.`,
+    );
+  }
+  return cls;
+}
+
+/**
+ * `content` as a run of `classId` plays it: the class's hero, starting deck
+ * and pool in the content's own three fields, so nothing inside the loop
+ * reads a class. The class list stays, so a derived content can be asked for
+ * another class again.
+ */
+export function contentForClass(content: RunContent, classId: string = DEFAULT_CLASS_ID): RunContent {
+  const cls = classOf(content, classId);
+  return { ...content, hero: cls.hero, startingDeck: cls.startingDeck, rewards: cls.rewards };
+}
 
 /**
  * A run agent. One method per decision the run puts in front of a player, plus
@@ -102,26 +158,40 @@ function requirePick(value: number, count: number, what: string, allowSkip: bool
   return value;
 }
 
-export function startRun(content: RunContent, seed: number): RunState {
+/**
+ * Start a run as `classId`. The class decides the hero, the starting deck and
+ * the pool, and nothing else: the maps are generated from the seed alone, so
+ * two classes on one seed walk the same three acts and fight the same
+ * encounters at the same nodes with the same fight seeds. That is what makes
+ * two classes on one seed comparable at all.
+ */
+export function startRun(
+  content: RunContent,
+  seed: number,
+  classId: string = DEFAULT_CLASS_ID,
+): RunState {
+  const cls = classOf(content, classId);
+  const active = contentForClass(content, classId);
   const rng: Rng = makeRng(seed, RUN_STREAM);
   const maps: ActMap[] = [];
-  for (let a = 0; a < content.acts.length; a++) {
-    maps.push(generateAct(rng, a, content.mapShape));
+  for (let a = 0; a < active.acts.length; a++) {
+    maps.push(generateAct(rng, a, active.mapShape));
   }
 
-  const deck = content.startingDeck.map((id, i) => makeDeckCard(id, i));
+  const deck = active.startingDeck.map((id, i) => makeDeckCard(id, i));
 
   return {
     seed,
-    content,
+    classId: cls.id,
+    content: active,
     maps,
     act: 0,
     row: -1,
     nodeId: -1,
-    hero: { health: content.hero.health, maxHealth: content.hero.health },
+    hero: { health: active.hero.health, maxHealth: active.hero.health },
     deck,
     nextInstance: deck.length,
-    gold: content.startingGold,
+    gold: active.startingGold,
     sigils: [],
     result: 'ongoing',
     ending: null,
@@ -326,13 +396,14 @@ function liveDriver(agent: RunAgent): Driver {
   };
 }
 
-/** Run a whole run, asking `agent` for every decision. */
+/** Run a whole run as `classId`, asking `agent` for every decision. */
 export function runRun(
   content: RunContent,
   seed: number,
   agent: RunAgent,
+  classId: string = DEFAULT_CLASS_ID,
 ): { run: RunState; log: RunLog } {
-  const run = startRun(content, seed);
+  const run = startRun(content, seed, classId);
   const nodes: NodeRecord[] = [];
   const driver = liveDriver(agent);
   while (run.result === 'ongoing') {
@@ -340,7 +411,7 @@ export function runRun(
     if (record === null) break;
     nodes.push(record);
   }
-  return { run, log: { seed, nodes } };
+  return { run, log: { seed, classId: run.classId, nodes } };
 }
 
 /**
@@ -353,9 +424,13 @@ export function runRun(
  * kind does not match what the node asks for is an error rather than a
  * silently ignored entry - a replay that skipped a decision would otherwise
  * diverge quietly, which is the exact failure the invariant exists to forbid.
+ *
+ * The class is the one thing read from the log before the first node, and a
+ * log with no `classId` - one written before classes existed - is the default
+ * class, which is the only class it could have been.
  */
 export function replayRun(content: RunContent, log: RunLog): RunState {
-  const run = startRun(content, log.seed);
+  const run = startRun(content, log.seed, log.classId ?? DEFAULT_CLASS_ID);
 
   for (const record of log.nodes) {
     if (run.result !== 'ongoing') break;

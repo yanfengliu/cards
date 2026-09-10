@@ -412,13 +412,14 @@ test('a run resumes from its log to the same hash, and refuses a log from anothe
   }
   assert.ok(live.log.nodes.length >= 2, 'the fixture walk completed too few nodes to resume anything');
 
-  const resumed = createRunController(content, 4, live.log);
+  const resumed = createRunController(content, 4, { resume: live.log });
   assert.equal(resumed.hash(), live.hash(), 'the resumed run is not the run that was saved');
   assert.equal(resumed.phase.kind, live.phase.kind);
   assert.equal(resumed.log.nodes.length, live.log.nodes.length);
+  assert.equal(resumed.classId, live.classId, 'the resumed run is not the class that was saved');
 
   assert.throws(
-    () => createRunController(content, 5, live.log),
+    () => createRunController(content, 5, { resume: live.log }),
     /cannot resume a run seeded 4 as seed 5\. A log replays only on its own seed/,
   );
 });

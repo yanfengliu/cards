@@ -107,7 +107,21 @@ export type TriggerRule = (
 
 export const RELAY_POWER = 2;
 export const WAKE_POWER = 2;
+/**
+ * What Scorch deals to every enemy unit after the scorching entity's swing.
+ * A starting guess: 1 kills a Goblin in two turns and does nothing to anything
+ * with Armour, which is the whole shape of the class that carries it.
+ */
+export const SCORCH_DAMAGE = 1;
 export const DEFAULT_MAX_ITERATIONS = 4096;
+
+/**
+ * How many attacks one act spawns for `e`: two for Volley, one for anything
+ * else. Exported so the odds shown before commit can count a second swing.
+ */
+export function swingsOf(e: Entity): number {
+  return e.traits.includes('volley') ? 2 : 1;
+}
 
 /**
  * Legal targets for an attack by `attacker`.
@@ -169,16 +183,45 @@ function apply(
   rng: Rng,
 ): { events: GameEvent[]; spawned: Effect[] } {
   switch (effect.kind) {
+    /**
+     * An act: the entity's action, then its after-acting hook.
+     *
+     * The action is one attack by default, and the two class traits change
+     * what it is - for a hero and a unit alike, because the resolver does not
+     * know what a class is:
+     *
+     *   - **Volley** spawns two attacks instead of one. Each is its own
+     *     `attack` effect, so each picks its own target and, for a unit, draws
+     *     its own retaliation. A unit that dies to the first swing's
+     *     retaliation never reaches the second: `attack` skips a dead entity,
+     *     the same rule that stops a dead Relay body from firing.
+     *   - **Scorch** spawns a `damageAll` against the other side after the
+     *     swing(s). It is spell damage, so it takes nothing back and never
+     *     reaches the enemy hero, and it is one effect, so every unit it hits
+     *     dies at one checkpoint in board order.
+     *
+     * Everything spawned here is a continuation of the act, so it all queues
+     * ahead of any reaction to the first swing: a Volley's second swing lands
+     * before a Wake answering the first swing's death grants its Power.
+     *
+     * `docs/design/game.md`: "The Knight swings for 2, the Ranger for 1 twice,
+     * the Mage for 1 with a rider." The Knight is the default branch.
+     */
     case 'act': {
       const e = findEntity(state, effect.uid);
       if (e === null || !e.alive) return { events: [], spawned: [] };
-      return {
-        events: [{ kind: 'acted', uid: e.uid }],
-        spawned: [
-          { kind: 'attack', uid: e.uid },
-          { kind: 'afterAct', uid: e.uid },
-        ],
-      };
+      const spawned: Effect[] = [];
+      for (let i = 0; i < swingsOf(e); i++) spawned.push({ kind: 'attack', uid: e.uid });
+      if (e.traits.includes('scorch')) {
+        spawned.push({
+          kind: 'damageAll',
+          uid: e.uid,
+          side: otherSide(e.side),
+          amount: SCORCH_DAMAGE,
+        });
+      }
+      spawned.push({ kind: 'afterAct', uid: e.uid });
+      return { events: [{ kind: 'acted', uid: e.uid }], spawned };
     }
 
     /**

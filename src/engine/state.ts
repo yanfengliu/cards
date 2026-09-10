@@ -11,7 +11,20 @@
 
 export type Side = 'player' | 'enemy';
 
-export type Trait = 'guard' | 'relay' | 'wake';
+/**
+ * The traits the resolver knows. Every one is read in `resolver.ts` and
+ * nowhere else; `render/glossary.ts` keys its explanations by this union, so a
+ * trait added here does not compile until it is explained.
+ *
+ * `volley` and `scorch` arrived with classes. They are how the design's three
+ * hero attacks - "the Knight swings for 2, the Ranger for 1 twice, the Mage for
+ * 1 with a rider" - are data on a `HeroSpec` rather than a switch on a class
+ * name: a Ranger is a hero with `power: 1` and `volley`, a Mage is one with
+ * `power: 1` and `scorch`, and a Knight is one with `power: 2` and nothing. A
+ * unit may carry either too, and the resolver treats a hero and a unit the
+ * same way, which is what lets a Volley archer exist in the Ranger's pool.
+ */
+export type Trait = 'guard' | 'relay' | 'wake' | 'volley' | 'scorch';
 
 export type Tribe = 'human' | 'dwarf' | 'elf' | 'orc' | 'beast' | 'hero';
 
@@ -110,6 +123,13 @@ export type HeroSpec = {
   readonly health: number;
   readonly power: number;
   readonly armour: number;
+  /**
+   * The class's attack, as traits. Absent means a plain swing, so every hero
+   * literal written before classes existed still means what it meant; the
+   * Knight is exactly that hero, and its canonical form is unchanged because
+   * `makeHero` gives it the empty trait list it always had.
+   */
+  readonly traits?: readonly Trait[];
 };
 
 export type Entity = {
@@ -235,7 +255,7 @@ export function makeHero(state: GameState, side: Side, spec: HeroSpec): Entity {
     health: spec.health,
     maxHealth: spec.health,
     armour: spec.armour,
-    traits: [],
+    traits: spec.traits === undefined ? [] : spec.traits.slice(),
     alive: true,
     equipment: emptySlots(),
   };

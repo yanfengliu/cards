@@ -91,6 +91,21 @@ export type Beat =
       readonly amount: number;
       readonly source: BuffSource;
     }
+  /**
+   * Damage that did not come from an attack: a spell's, or a Scorch rider's.
+   * Same shape as `attack` less `guardForced`, because a spell consults no
+   * Guard, and nothing hits back - which is why it is its own beat rather than
+   * an `attack` with a flag the retaliation drawing would have to read.
+   */
+  | {
+      readonly kind: 'spell';
+      readonly uid: number;
+      readonly targetUid: number;
+      readonly raw: number;
+      readonly dealt: number;
+      readonly absorbed: number;
+      readonly wasted: number;
+    }
   | { readonly kind: 'death'; readonly uid: number; readonly side: Side };
 
 function viewOf(e: Entity, pool: CardPool): EntityView {
@@ -347,6 +362,30 @@ export function buildBeats(view: BoardView, events: readonly GameEvent[]): Beat[
         applyBeat(view, beat);
         break;
       }
+      case 'damaged': {
+        // Spell damage. Before the Mage's Scorch no fight the screen played
+        // could produce this event - the run deals only units - and a view
+        // that dropped it drifted from the engine on the first scorched line.
+        const target = findView(view, ev.targetUid);
+        const before = target?.health ?? 0;
+        const beat: Beat = {
+          kind: 'spell',
+          uid: ev.uid,
+          targetUid: ev.targetUid,
+          raw: ev.raw,
+          dealt: ev.dealt,
+          absorbed: ev.raw - ev.dealt,
+          wasted: Math.max(0, ev.dealt - before),
+        };
+        beats.push(beat);
+        applyBeat(view, beat);
+        break;
+      }
+      case 'equipped':
+        // Worn, not drawn: equipment changes the hero's numbers through
+        // `power()` and `armourOf()`, which the view reads off the engine's
+        // state at the end of the phase. No card the run deals is equipment.
+        break;
       case 'died': {
         deaths.push({ uid: ev.uid, rightUid: ev.rightUid });
         const beat: Beat = { kind: 'death', uid: ev.uid, side: ev.side };
@@ -377,7 +416,8 @@ export function applyBeat(view: BoardView, beat: Beat): void {
       break;
     }
     case 'attack':
-    case 'retaliate': {
+    case 'retaliate':
+    case 'spell': {
       const target = findView(view, beat.targetUid);
       if (target !== null) target.health -= beat.dealt;
       break;

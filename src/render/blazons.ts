@@ -64,6 +64,20 @@ const DEVICE: Readonly<Record<string, { charge: ChargeId; on: Tincture; bordure:
   u_sentinel: { charge: 'tower', on: 'argent', bordure: 'or' },
   u_champion: { charge: 'leaf', on: 'or', bordure: 'or' },
 
+  // The ten that arrived with classes. Within one tribe no two cards share a
+  // charge and its metal, because the charge is how two cards of one race are
+  // told apart; across tribes the field already separates them.
+  u_archer: { charge: 'crescent', on: 'argent', bordure: 'or' },
+  u_wayfinder: { charge: 'mullet', on: 'or', bordure: 'or' },
+  u_treewarden: { charge: 'leaf', on: 'or', bordure: 'or' },
+  u_longbow: { charge: 'sword', on: 'argent', bordure: 'or' },
+  u_herald: { charge: 'crescent', on: 'argent', bordure: 'or' },
+  u_manatarms: { charge: 'hammer', on: 'or', bordure: 'or' },
+  u_paladin: { charge: 'eagle', on: 'argent', bordure: 'or' },
+  u_veteran: { charge: 'wyvern', on: 'or', bordure: 'or' },
+  u_thane: { charge: 'eagle', on: 'or', bordure: 'argent' },
+  u_bulwark: { charge: 'tower', on: 'argent', bordure: 'or' },
+
   e_goblin: { charge: 'wyvern', on: 'argent', bordure: 'or' },
   e_shieldwall: { charge: 'tower', on: 'or', bordure: 'or' },
   e_ogre: { charge: 'hammer', on: 'or', bordure: 'argent' },

@@ -22,7 +22,7 @@
  * as more certain than it is would be the same lie in the other direction.
  */
 
-import { legalTargets } from '../engine/resolver.ts';
+import { legalTargets, swingsOf } from '../engine/resolver.ts';
 import { type GameState, type Side, cloneState, heroOf, otherSide, power } from '../engine/state.ts';
 
 /** Relay's flat grant, mirrored from `engine/resolver.ts`. */
@@ -73,9 +73,9 @@ export type IncomingOdds = {
   readonly poolSize: number;
   /** True when Guard is narrowing the pool: some living non-Guard is excluded. */
   readonly guarded: boolean;
-  /** Living entities on the attacking side that will act, hero included. */
+  /** Attacks the attacking side will throw, hero included: a Volley body counts twice. */
   readonly attackers: number;
-  /** Their total current Power. */
+  /** Their total current Power, a Volley body's counted once per swing. */
   readonly totalPower: number;
   /** uid -> damage one *average* attack would deal it after its armour. */
   readonly damageIfHit: ReadonlyMap<number, number>;
@@ -101,8 +101,10 @@ export function incomingOdds(state: GameState, side: Side): IncomingOdds {
   let totalPower = 0;
   for (const e of state.board[side]) {
     if (!e.alive) continue;
-    attackers++;
-    totalPower += power(e);
+    // A Volley entity is two attacks at its Power, and the line on screen says
+    // "N attacks for P Power", so both count it twice.
+    attackers += swingsOf(e);
+    totalPower += power(e) * swingsOf(e);
   }
 
   // One attacker's damage against one defender is `power - armour`, floored at

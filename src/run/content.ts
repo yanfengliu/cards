@@ -14,41 +14,25 @@
 // opens with - plus the enemy deck, which gets heavier per act. No new card is
 // invented here, because inventing cards is unit 4's job.
 
-import { CARD_POOL, ENEMY_CARDS, PLAYER_CARDS, PLAYER_HERO } from '../content/cards.ts';
-import type { HeroSpec } from '../engine/state.ts';
-import type {
-  ActContent,
-  MapShape,
-  RewardEntry,
-  RunContent,
-  RunEncounter,
-  RunEventDef,
-} from './types.ts';
+import { CARD_POOL, ENEMY_CARDS, PLAYER_CARDS } from '../content/cards.ts';
+import { CLASSES, classById, DEFAULT_CLASS } from '../content/classes.ts';
+import type { ActContent, MapShape, RunContent, RunEncounter, RunEventDef } from './types.ts';
 
 /**
- * The run's life bar.
+ * The run's life bar, its starting deck and its reward pool are the class's.
  *
- * `docs/design/game.md` says hero Health "persists across the whole run" and
- * gives no number for it; the 30 in `src/content/cards.ts` is a single-fight
- * probe value. It is calibrated rather than guessed, by the same rule both
- * times: about three or four act-3 fights between rests.
- *
- * **It moved from 80 to 200 when combat became mutual and decks began to
- * reshuffle, and it had to.** Both rules push in the same direction. Your
- * bodies now die to the retaliation their own attacks draw, so the line
- * protecting the hero thins faster; and the enemy's deck no longer runs dry, so
- * it keeps fielding bodies for the whole fight instead of stopping around round
- * four. At 80 the run was **unwinnable - 0 of 1000** - while every individual
- * encounter still won 87-100% of the time in isolation. Nothing was too hard;
- * the Health economy had simply stopped adding up.
- *
- * The measured cost of a won fight roughly doubled, which is where the number
- * comes from: at 200 Health a won act-3 fight costs the placement bot about
- * 35-55 and the act-3 boss about 80. Flagged in the plan as a number the owner
- * should set, along with the act curve it does not fix - act 1 now clears 100%
- * of the time and every run that ends does so in act 2 or 3.
+ * All three used to live here as `RUN_HERO`, `STARTING_DECK` and
+ * `REWARD_TABLE`, one of each. They are now `src/content/classes.ts`'s, one
+ * set per class, and the Knight's are the ones that were here - with the
+ * history that set them: hero Health moved from 80 to 200 when combat became
+ * mutual and decks began to reshuffle (the run was unwinnable at 80, 0 of
+ * 1000, while every encounter still won in isolation), and the starting deck
+ * is not all 1-cost because an all-1-cost deck cannot hurt Armour 1 and won 0
+ * of 200 runs. `RUN_CONTENT` below carries the default class's three fields in
+ * its own, so a caller that never names a class gets the Knight, and
+ * `startRun` swaps in another class's on request.
  */
-export const RUN_HERO: HeroSpec = { ...PLAYER_HERO, health: 200 };
+const DEFAULT = classById(DEFAULT_CLASS);
 
 /**
  * Rounds a run fight may take before it is called off.
@@ -64,13 +48,9 @@ export const RUN_HERO: HeroSpec = { ...PLAYER_HERO, health: 200 };
  */
 export const RUN_MAX_ROUNDS = 20;
 
-function repeat(id: string, n: number): string[] {
-  return new Array<string>(n).fill(id);
-}
-
 /**
- * Fourteen cards, against the eighteen of `PLAYER_DECK`, growing to roughly
- * twenty-three by the Black Gate.
+ * A starting deck is fourteen cards, against the eighteen of `PLAYER_DECK`,
+ * growing to roughly twenty-three by the Black Gate.
  *
  * The design calls for "a small curated deck" that grows; a run starting at the
  * mid-run size has nothing to build. It was sixteen, and the two that left were
@@ -83,37 +63,9 @@ function repeat(id: string, n: number): string[] {
  * reshuffles the discard back in, so the reason for the floor is gone: deck
  * size is a consistency dial again rather than a budget. The count is left at
  * what removing Ward leaves it rather than retuned, because retuning it is a
- * balance decision and this round already moved three rules.
- *
- * The curve matters more than the count. An all-1-cost deck of Squires,
- * Shieldbearers and Pikemen tops out at 2 Power a body, and every enemy from
- * the Shieldwall up carries Armour 1, so it deals nothing at all: two
- * Berserkers and an Ironguard are what make the starting deck able to hurt
- * anything. That was measured, not assumed - the flat version won 0 of 200
- * runs.
+ * balance decision. The three decks are in `src/content/classes.ts`; a pool's
+ * weights are weights, not a rarity system - common cards are commoner.
  */
-export const STARTING_DECK: readonly string[] = [
-  ...repeat('u_squire', 3),
-  ...repeat('u_shieldbearer', 3),
-  ...repeat('u_pikeman', 4),
-  ...repeat('u_berserker', 2),
-  ...repeat('u_ironguard', 1),
-  ...repeat('u_avenger', 1),
-];
-
-/** Common cards are commoner. Weights, not a rarity system. */
-export const REWARD_TABLE: readonly RewardEntry[] = [
-  { cardId: 'u_squire', weight: 10 },
-  { cardId: 'u_shieldbearer', weight: 10 },
-  { cardId: 'u_pikeman', weight: 10 },
-  { cardId: 'u_hornblower', weight: 8 },
-  { cardId: 'u_ironguard', weight: 8 },
-  { cardId: 'u_avenger', weight: 8 },
-  { cardId: 'u_berserker', weight: 8 },
-  { cardId: 'u_captain', weight: 4 },
-  { cardId: 'u_sentinel', weight: 4 },
-  { cardId: 'u_champion', weight: 4 },
-];
 
 /**
  * Each act's enemy deck as a repeating pattern; an encounter takes the first
@@ -353,14 +305,21 @@ export const EVENTS: readonly RunEventDef[] = [
   },
 ];
 
-/** The shipped run. Handed to `startRun`; nothing in `src/run/` imports it. */
+/**
+ * The shipped run. Handed to `startRun`; nothing in `src/run/` imports it.
+ *
+ * `hero`, `startingDeck` and `rewards` are the default class's, so a caller
+ * that names no class gets the run that existed before classes did; `classes`
+ * is what `startRun` chooses among when one is named.
+ */
 export const RUN_CONTENT: RunContent = {
   pool: CARD_POOL,
-  hero: RUN_HERO,
-  startingDeck: STARTING_DECK,
+  hero: DEFAULT.hero,
+  startingDeck: DEFAULT.startingDeck,
+  classes: CLASSES,
   acts: ACTS,
   mapShape: MAP_SHAPE,
-  rewards: REWARD_TABLE,
+  rewards: DEFAULT.rewards,
   events: EVENTS,
   rewardOffers: 3,
   shopStock: 3,
@@ -374,24 +333,15 @@ export const RUN_CONTENT: RunContent = {
 /**
  * Every card id this content names, checked once at module load.
  *
- * A typo in a reward table is otherwise a crash two hundred nodes into a
- * measurement run, which is a bad place to learn about it.
+ * A typo in an encounter is otherwise a crash two hundred nodes into a
+ * measurement run, which is a bad place to learn about it. The decks and pools
+ * are checked the same way where they live, in `src/content/classes.ts`.
  */
 const KNOWN = new Set<string>([
   ...PLAYER_CARDS.map((c) => c.id),
   ...ENEMY_CARDS.map((c) => c.id),
 ]);
 
-for (const entry of REWARD_TABLE) {
-  if (!KNOWN.has(entry.cardId)) {
-    throw new Error(`run content: reward table names unknown card "${entry.cardId}"`);
-  }
-}
-for (const id of STARTING_DECK) {
-  if (!KNOWN.has(id)) {
-    throw new Error(`run content: starting deck names unknown card "${id}"`);
-  }
-}
 for (const act of ACTS) {
   for (const enc of [...act.fights, ...act.elites, act.boss]) {
     for (const id of [...enc.enemyDeck, ...enc.opening]) {
