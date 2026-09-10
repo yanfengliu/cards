@@ -36,6 +36,14 @@
     {
       "id": 8,
       "theme": "playable-run"
+    },
+    {
+      "id": 9,
+      "theme": "sigils"
+    },
+    {
+      "id": 10,
+      "theme": "classes"
     }
   ]
 }
