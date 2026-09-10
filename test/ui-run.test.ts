@@ -21,14 +21,17 @@
 //   differently from the engine is that gate's failure, not this one's.
 //   Runs 12 shipped-content seeds and 30 fixture seeds, each under two route
 //   styles - greedy, which never declines, and random, which does - and asserts
-//   the population it walked: every decision kind compared, at least one
-//   decline, at least one lost fight and one won run. A window, not the space.
-//   Proves nothing about the DOM, timing, or what the screens say.
+//   the population it walked: every decision kind compared, sigil offers and
+//   attach shelves included, at least one decline, at least one lost fight and
+//   one won run. A window, not the space. Proves nothing about the DOM, timing,
+//   or what the screens say.
 //
 // Made to go red: previewing the shop shelf from a clone advanced by one draw
 // fails at "fixture seed 1 random: shop shelf previewed [t_grunt,t_wall], runRun
 // offered [t_wall,t_grunt]"; previewing the reward on the live state instead
-// of a clone fails the same seed's next fight. See `docs/learning/gate-proofs.md`.
+// of a clone fails the same seed's next fight; drawing the reward shelf before
+// the hero sigil offer instead of after it fails at the first won elite. See
+// `docs/learning/gate-proofs.md`.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,7 +42,7 @@ import { RUN_CONTENT } from '../src/run/content.ts';
 import { makeDeckCard } from '../src/run/deck.ts';
 import { hashRun } from '../src/run/hash.ts';
 import { type RunAgent, replayRun, runChoices, runRun, travelOptions } from '../src/run/run.ts';
-import type { ForgeOffer, RunContent, ShopItem } from '../src/run/types.ts';
+import type { ForgeOffer, RewardOption, RunContent, ShopItem, SigilDef } from '../src/run/types.ts';
 import { makeRunAgent } from '../src/sim/runbots.ts';
 import { blazonFor } from '../src/render/blazons.ts';
 import { createRunController } from '../src/ui/run.ts';
@@ -64,6 +67,16 @@ const POOL: CardPool = {
   energyPerTurn: 3,
   handSize: 5,
 };
+
+/** One card sigil per trait, every hero effect once. See `test/run.test.ts`. */
+const FIXTURE_SIGILS: readonly SigilDef[] = [
+  { kind: 'card', id: 'fx_relay', name: 'Relay Sigil', trait: 'relay', weight: 2 },
+  { kind: 'card', id: 'fx_wake', name: 'Wake Sigil', trait: 'wake', weight: 2 },
+  { kind: 'card', id: 'fx_guard', name: 'Guard Sigil', trait: 'guard', weight: 1 },
+  { kind: 'hero', id: 'fx_oak', name: 'Oak', effect: { kind: 'maxHealth', amount: 10 }, weight: 1 },
+  { kind: 'hero', id: 'fx_lance', name: 'Lance', effect: { kind: 'heroPower', amount: 1 }, weight: 1 },
+  { kind: 'hero', id: 'fx_bulwark', name: 'Bulwark', effect: { kind: 'heroArmour', amount: 1 }, weight: 1 },
+];
 
 function fixtureContent(): RunContent {
   const enemy = {
@@ -137,6 +150,9 @@ function fixtureContent(): RunContent {
         ],
       },
     ],
+    sigils: FIXTURE_SIGILS,
+    heroSigilOffers: 2,
+    cardSigilChance: 0.5,
     rewardOffers: 2,
     shopStock: 2,
     shopBasePrice: 10,
@@ -154,7 +170,9 @@ function fixtureContent(): RunContent {
 
 type Seen =
   | { kind: 'travel'; options: number[]; pick: number }
-  | { kind: 'reward'; offer: string[]; pick: number }
+  | { kind: 'sigil'; offer: string[]; pick: number }
+  | { kind: 'reward'; offer: RewardOption[]; pick: number }
+  | { kind: 'attach'; sigilId: string; offers: number[]; pick: number }
   | { kind: 'forge'; offers: ForgeOffer[]; pick: number }
   | { kind: 'shop'; stock: ShopItem[]; pick: number }
   | { kind: 'event'; defId: string; options: string[]; pick: number };
@@ -168,9 +186,19 @@ function recording(base: RunAgent): { agent: RunAgent; seen: Seen[] } {
       seen.push({ kind: 'travel', options: options.map((o) => o.id), pick });
       return pick;
     },
+    sigil(run, offer) {
+      const pick = base.sigil(run, offer);
+      seen.push({ kind: 'sigil', offer: offer.map((s) => s.id), pick });
+      return pick;
+    },
     reward(run, offer) {
       const pick = base.reward(run, offer);
       seen.push({ kind: 'reward', offer: offer.slice(), pick });
+      return pick;
+    },
+    attach(run, sigil, offers) {
+      const pick = base.attach(run, sigil, offers);
+      seen.push({ kind: 'attach', sigilId: sigil.id, offers: offers.slice(), pick });
       return pick;
     },
     forge(run, offers) {
@@ -239,17 +267,53 @@ function drive(content: RunContent, seed: number, base: RunAgent, tally: Tally, 
         ctl.finishFight({ fight, rounds: log });
         break;
       }
-      case 'reward': {
+      case 'sigil': {
         const s = next();
+        assert.equal(s.kind, 'sigil', `${label}: runRun decided ${s.kind} where the controller offers a hero sigil`);
+        assert.deepEqual(
+          p.offer.map((o) => o.id),
+          s.offer,
+          `${label}: hero sigils previewed [${p.offer.map((o) => o.id).join(',')}], runRun offered [${s.offer.join(',')}]`,
+        );
+        if (s.pick < 0) tally.declines++;
+        ctl.pickSigil(s.pick);
+        tally.sigil++;
+        break;
+      }
+      case 'reward': {
+        let s = next();
+        // The controller declines an empty hero sigil offer on the player's
+        // behalf rather than showing a screen with one button, so at a won
+        // elite or boss with nothing left to offer it walks straight to the
+        // shelf while `runRun` still records the choice. That is the one place
+        // the two lists may differ, and it may differ only by a decline: any
+        // other sigil choice here is a real divergence.
+        if (s.kind === 'sigil') {
+          assert.equal(s.pick, -1, `${label}: the controller skipped a hero sigil offer runRun took`);
+          assert.deepEqual(s.offer, [], `${label}: the controller skipped a non-empty hero sigil offer`);
+          tally.sigil++;
+          tally.declines++;
+          s = next();
+        }
         assert.equal(s.kind, 'reward', `${label}: runRun decided ${s.kind} where the controller rewards`);
+        const word = (o: RewardOption): string => (o.kind === 'card' ? o.cardId : `sigil:${o.sigil.id}`);
         assert.deepEqual(
           p.offer,
           s.offer,
-          `${label}: reward previewed [${p.offer.join(',')}], runRun offered [${s.offer.join(',')}]`,
+          `${label}: reward previewed [${p.offer.map(word).join(',')}], runRun offered [${s.offer.map(word).join(',')}]`,
         );
         if (s.pick < 0) tally.declines++;
         ctl.pickReward(s.pick);
         tally.reward++;
+        break;
+      }
+      case 'attach': {
+        const s = next();
+        assert.equal(s.kind, 'attach', `${label}: runRun decided ${s.kind} where the controller attaches`);
+        assert.equal(p.sigil.id, s.sigilId, `${label}: the sigil being attached differs`);
+        assert.deepEqual(p.offers, s.offers, `${label}: attach shelves differ`);
+        ctl.attach(s.offers[s.pick]!);
+        tally.attach++;
         break;
       }
       case 'forge': {
@@ -303,7 +367,9 @@ function drive(content: RunContent, seed: number, base: RunAgent, tally: Tally, 
 test('the controller previews what visit computes and its log replays to runRun\'s hash', () => {
   const tally: Tally = {
     travel: 0,
+    sigil: 0,
     reward: 0,
+    attach: 0,
     forge: 0,
     shop: 0,
     event: 0,
@@ -329,6 +395,8 @@ test('the controller previews what visit computes and its log replays to runRun\
   assert.equal(tally.runs, 84, summary);
   assert.ok(tally.travel >= 300, `too few travel decisions compared: ${summary}`);
   assert.ok(tally.reward >= 100, `too few reward offers compared: ${summary}`);
+  assert.ok(tally.sigil >= 20, `too few hero sigil offers compared: ${summary}`);
+  assert.ok(tally.attach >= 10, `too few attach shelves compared: ${summary}`);
   assert.ok(tally.forge >= 10, `too few forge offers compared: ${summary}`);
   assert.ok(tally.shop >= 10, `too few shop shelves compared: ${summary}`);
   assert.ok(tally.event >= 10, `too few events compared: ${summary}`);
@@ -375,7 +443,8 @@ test('the controller refuses what the run would refuse, and says why', () => {
       } else if (ph.kind === 'fight') {
         const { fight, log } = runFight(ph.setup, placement);
         poor.finishFight({ fight, rounds: log });
-      } else if (ph.kind === 'reward') poor.pickReward(-1);
+      } else if (ph.kind === 'sigil') poor.pickSigil(-1);
+      else if (ph.kind === 'reward') poor.pickReward(-1);
       else if (ph.kind === 'forge') poor.forge(0, 'power');
       else if (ph.kind === 'event') poor.chooseEvent(0);
     }
@@ -405,7 +474,9 @@ test('a run resumes from its log to the same hash, and refuses a log from anothe
     else if (p.kind === 'fight') {
       const { fight, log } = runFight(p.setup, placement);
       live.finishFight({ fight, rounds: log });
-    } else if (p.kind === 'reward') live.pickReward(0);
+    } else if (p.kind === 'sigil') live.pickSigil(0);
+    else if (p.kind === 'reward') live.pickReward(0);
+    else if (p.kind === 'attach') live.attach(p.offers[0]!);
     else if (p.kind === 'forge') live.forge(0, 'health');
     else if (p.kind === 'shop') live.buy(-1);
     else live.chooseEvent(0);

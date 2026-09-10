@@ -25,6 +25,8 @@
 //   - All three act maps are generated at setup, before the first choice. The
 //     map is therefore a function of the seed alone, which is what makes two
 //     routes through one seed comparable at all.
+//   - Sigil offers are node-keyed too, and never touch the run stream; see
+//     `nodes.ts` for why that is what lets a log from before sigils replay.
 //
 // The engine is composed, never reached into: `setupFight`, `runFight` and
 // `replayFight` are called with a `CardPool` this module builds. Nothing under
@@ -43,27 +45,33 @@ import { cloneDeck, makeDeckCard, runPool, applyForge } from './deck.ts';
 import { generateAct } from './map.ts';
 import {
   addCard,
+  attachCardSigil,
+  attachOffers,
   drawEvent,
   encounterFor,
   fightSeedFor,
   forgeOffers,
   goldFor,
+  grantHeroSigil,
+  heroSigilOffer,
+  heroSpecFor,
   applyEventEffect,
   healHero,
   restAmount,
   rewardOffer,
   shopStock,
 } from './nodes.ts';
-import type {
-  ActMap,
-  MapNode,
-  NodeRecord,
-  RunAgentChoice,
-  RunChoice,
-  RunClass,
-  RunContent,
-  RunLog,
-  RunState,
+import {
+  type ActMap,
+  type MapNode,
+  type NodeRecord,
+  type RunAgentChoice,
+  type RunChoice,
+  type RunClass,
+  type RunContent,
+  type RunLog,
+  type RunState,
+  RUN_LOG_FORMAT,
 } from './types.ts';
 
 /** The stream name the run's own generator is derived on. */
@@ -154,9 +162,9 @@ export function contentForClass(content: RunContent, classId: string = defaultCl
  * the placement policy the fights are played with.
  *
  * Every method returns an index into the options it was handed, so a decision
- * is one integer and a run is a list of integers plus a seed. `reward` and
- * `shop` also accept `-1`, which is "take nothing" - declining is a decision,
- * and a run where you cannot decline has one fewer.
+ * is one integer and a run is a list of integers plus a seed. `reward`,
+ * `sigil` and `shop` also accept `-1`, which is "take nothing" - declining is
+ * a decision, and a run where you cannot decline has one fewer.
  */
 export type RunAgent = RunAgentChoice & {
   readonly placement: PlacementPolicy;
@@ -251,7 +259,19 @@ export function travelOptions(run: RunState): MapNode[] {
   return here.next.map((id) => map.nodes[id]!);
 }
 
-/** The fight setup this node produces, deck and hero Health as they stand now. */
+/**
+ * The fight setup this node produces: deck, hero and sigils as they stand
+ * now.
+ *
+ * A card sigil reaches the fight as a trait on its instance through `runPool`;
+ * a hero sigil reaches it as a number on the `HeroSpec` through `heroSpecFor`.
+ * Both are seams the engine already had. Nothing goes through the pool's two
+ * per-fight numbers, `handSize` and `energyPerTurn`, because `fight.ts` reads
+ * those for both sides and a hero sigil that moved one would hand the enemy
+ * the same card; `fightSigilProblems` in `src/run/sigils.ts` holds them still,
+ * and `npm run verify:run` fails on it. A run holding no sigil hands the fight
+ * exactly the setup it did before sigils existed.
+ */
 export function fightSetupFor(run: RunState, node: MapNode): FightSetup {
   const enc = encounterFor(run, node);
   return {
@@ -262,7 +282,7 @@ export function fightSetupFor(run: RunState, node: MapNode): FightSetup {
     enemyOpening: enc.opening,
     // Hero Health persists across the whole run; the fight is handed the bar as
     // it stands, and whatever is left of it is carried out again below.
-    playerHero: { ...run.content.hero, health: run.hero.health },
+    playerHero: heroSpecFor(run),
     enemyHero: enc.enemyHero,
     maxRounds: run.content.maxRounds,
   };
@@ -307,13 +327,49 @@ function visit(run: RunState, node: MapNode, driver: Driver): NodeRecord {
       }
 
       run.gold += goldFor(run, node);
-      // The seam sigils will land in: a won elite or boss is where a hero sigil
-      // is granted in the design. Nothing is granted here - sigils are their own
-      // unit - and `run.sigils` stays empty, which `test/run.test.ts` asserts.
-      const offer = rewardOffer(run);
+
+      // A won elite or boss asks about a hero sigil first, and always.
+      // `docs/design/game.md`: "boss and event rewards are hero sigils" - this
+      // is where relics went. The offer is the node's own draw, and when
+      // nothing is left to offer the only legal answer is -1. Asking every
+      // time is what keeps a log's shape a function of the map and the fights,
+      // which `migrateRunLog` relies on.
+      if (node.type === 'elite' || node.type === 'boss') {
+        const sigils = heroSigilOffer(run, node);
+        const pick = requirePick(driver.choose.sigil(run, sigils), sigils.length, 'sigil', true);
+        choices.push({ kind: 'sigil', pick });
+        if (pick >= 0) grantHeroSigil(run, sigils[pick]!);
+      }
+
+      // Then the shelf: cards, and at an ordinary fight sometimes a card sigil
+      // beside them. "Card or sigil?" is one pick, and a sigil pick asks one
+      // more question - which deck card it goes on.
+      const offer = rewardOffer(run, node);
       const pick = requirePick(driver.choose.reward(run, offer), offer.length, 'reward', true);
       choices.push({ kind: 'reward', pick });
-      if (pick >= 0) addCard(run, offer[pick]!);
+      if (pick >= 0) {
+        const chosen = offer[pick]!;
+        if (chosen.kind === 'card') {
+          addCard(run, chosen.cardId);
+        } else {
+          const targets = attachOffers(run, chosen.sigil);
+          if (targets.length === 0) {
+            throw new Error(
+              `run: "${chosen.sigil.id}" was on the shelf and no deck card can take it; ` +
+                `rewardOffer must only offer a card sigil with somewhere to go`,
+            );
+          }
+          const at = requirePick(
+            driver.choose.attach(run, chosen.sigil, targets),
+            targets.length,
+            'attach',
+            false,
+          );
+          const deckIndex = targets[at]!;
+          choices.push({ kind: 'attach', deckIndex });
+          attachCardSigil(run, deckIndex, chosen.sigil);
+        }
+      }
       break;
     }
 
@@ -436,7 +492,73 @@ export function runRun(
     if (record === null) break;
     nodes.push(record);
   }
-  return { run, log: { seed, classId: run.classId, nodes } };
+  return { run, log: { seed, classId: run.classId, format: RUN_LOG_FORMAT, nodes } };
+}
+
+/**
+ * A stored log, whatever format it was written in, as the format this code
+ * replays - or an error naming what is wrong with it.
+ *
+ * Format 1 is what units 5, 8 and 10 wrote: no `format` field, and no `sigil`
+ * choice at a won elite or boss because there was nothing to ask. Everything
+ * else it holds still indexes what it indexed: the sigil offers are drawn from
+ * node-keyed streams (`nodes.ts`), the card sigil sits after the cards on the
+ * shelf, and the hero sigil offer is asked at every won elite or boss. So the
+ * whole upgrade is one inserted decline per won elite or boss, after the
+ * travel choice, and `test/sigils.test.ts` replays two format 1 logs recorded
+ * before sigils existed to the runs they recorded. Read that test's own note
+ * before trusting the word "replays": it pins the reward table those logs were
+ * recorded against, because a recorded log indexes offers and unit 10 changed
+ * the offers. The format is what this function owns; the content is not.
+ *
+ * `classId` is carried through untouched and is not part of the format. Unit
+ * 10 added it to a format 1 log without moving the number, because a log that
+ * names no class replays as the content's default class either way; a format 1
+ * log may therefore name a class or not, and both upgrade the same.
+ *
+ * A log in the current format comes back as it is. A log in a format this
+ * code has never written is refused with both numbers named, because its
+ * choices would index shelves drawn some other way and a "successful" replay
+ * of it would be a different run wearing its seed.
+ */
+export function migrateRunLog(raw: unknown): RunLog {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('run log: not a run log - it is not an object');
+  }
+  const log = raw as { seed?: unknown; classId?: unknown; format?: unknown; nodes?: unknown };
+  if (typeof log.seed !== 'number' || !Number.isInteger(log.seed)) {
+    throw new Error('run log: not a run log - it has no integer `seed`');
+  }
+  if (!Array.isArray(log.nodes)) {
+    throw new Error(`run log: not a run log - seed ${log.seed} has no \`nodes\` list`);
+  }
+  const nodes = log.nodes as NodeRecord[];
+  const named = typeof log.classId === 'string' ? { classId: log.classId } : {};
+  const format = log.format ?? 1;
+  if (format === RUN_LOG_FORMAT) {
+    return { seed: log.seed, ...named, format: RUN_LOG_FORMAT, nodes };
+  }
+  if (format !== 1) {
+    throw new Error(
+      `run log: written in format ${String(format)}, and this code reads formats 1 and ` +
+        `${RUN_LOG_FORMAT}. Its choices index shelves that are drawn some other way, so it cannot ` +
+        `be replayed; start a new run on seed ${log.seed}.`,
+    );
+  }
+  const decline: RunChoice = { kind: 'sigil', pick: -1 };
+  const upgraded = nodes.map((n) => {
+    const asked = (n.type === 'elite' || n.type === 'boss') && n.fightResult === 'playerWin';
+    if (!asked) return n;
+    const [travel, ...rest] = n.choices;
+    if (travel === undefined || travel.kind !== 'travel') {
+      throw new Error(
+        `run log: node ${n.nodeId} in act ${n.act + 1} does not begin with a travel choice, so it ` +
+          `is not a format 1 record and cannot be upgraded`,
+      );
+    }
+    return { ...n, choices: [travel, decline, ...rest] };
+  });
+  return { seed: log.seed, ...named, format: RUN_LOG_FORMAT, nodes: upgraded };
 }
 
 /**
@@ -456,6 +578,18 @@ export function runRun(
  * only class such a run could have been.
  */
 export function replayRun(content: RunContent, log: RunLog): RunState {
+  // Only the current format is replayed. A log from an earlier one is not
+  // wrong, it is unupgraded: `migrateRunLog` is the one path that reads it,
+  // and refusing it here is what keeps a stale log from being replayed as if
+  // it were current by a caller that forgot to upgrade it.
+  const format = (log as { format?: unknown }).format ?? 1;
+  if (format !== RUN_LOG_FORMAT) {
+    throw new Error(
+      `run replay: this log was written in format ${String(format)} and this code replays ` +
+        `format ${RUN_LOG_FORMAT}. Upgrade it with migrateRunLog first; a log it refuses cannot ` +
+        `be resumed, so start a new run on seed ${log.seed}.`,
+    );
+  }
   const run = startRun(content, log.seed, log.classId ?? defaultClassId(content));
 
   for (const record of log.nodes) {
@@ -489,7 +623,20 @@ export function replayRun(content: RunContent, log: RunLog): RunState {
           }
           return at;
         },
+        sigil: () => take('sigil').pick,
         reward: () => take('reward').pick,
+        attach: (_run, sigil, targets) => {
+          const wanted = take('attach').deckIndex;
+          const at = targets.indexOf(wanted);
+          if (at < 0) {
+            throw new Error(
+              `run replay: the log attaches "${sigil.id}" to deck index ${wanted}, which is not ` +
+                `one of the cards that can take ${sigil.trait} now [${targets.join(', ')}]. ` +
+                `The deck did not regenerate identically.`,
+            );
+          }
+          return at;
+        },
         forge: (_run, offers) => {
           const wanted = take('forge');
           const at = offers.findIndex(

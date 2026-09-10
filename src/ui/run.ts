@@ -31,9 +31,17 @@
  *     `runRun` handed the bot, and requires the two final run hashes to agree.
  *   - After every commit the controller checks the replayed state against what
  *     the preview promised - the hero's Health, the gold, the card that joined
- *     the deck - and throws, naming both numbers, if they differ. A preview
- *     that lied is a screen that showed the player a choice they did not get,
- *     and that has to be loud.
+ *     the deck, the sigils granted - and throws, naming both numbers, if they
+ *     differ. A preview that lied is a screen that showed the player a choice
+ *     they did not get, and that has to be loud.
+ *
+ * A won fight is the one node with more than one decision in it, and the
+ * order is `visit`'s: a hero sigil offer at an elite or boss, then the shelf,
+ * then - when the shelf pick was a card sigil - the card it goes on. The
+ * clone that previews the first offer is kept as a cursor through the node,
+ * so each later offer is drawn from the run stream exactly where `visit`
+ * draws it, and the grant a hero sigil makes to the cursor is the grant the
+ * replay makes to the state.
  *
  * Nothing here writes to `src/run/`, and no `src/run/` export is reached
  * around: the offers come from `nodes.ts`, the setup from `fightSetupFor`, the
@@ -44,10 +52,14 @@ import type { Fight, FightSetup, RoundRecord } from '../engine/fight.ts';
 import { heroOf } from '../engine/state.ts';
 import { hashRun } from '../run/hash.ts';
 import {
+  attachCardSigil,
+  attachOffers,
   drawEvent,
   encounterFor,
   forgeOffers,
   goldFor,
+  grantHeroSigil,
+  heroSigilOffer,
   rewardOffer,
   restAmount,
   shopStock,
@@ -62,11 +74,15 @@ import {
 } from '../run/run.ts';
 import {
   FORGE_MODES,
+  RUN_LOG_FORMAT,
+  type CardSigilDef,
   type DeckCard,
   type ForgeMode,
   type ForgeOffer,
+  type HeroSigilDef,
   type MapNode,
   type NodeRecord,
+  type RewardOption,
   type RunChoice,
   type RunContent,
   type RunEncounter,
@@ -74,6 +90,7 @@ import {
   type RunLog,
   type RunState,
   type ShopItem,
+  type SigilGrant,
 } from '../run/types.ts';
 
 /** A fight the screen finished: the engine's final state and its action list. */
@@ -90,6 +107,15 @@ export type RunSnapshot = {
   readonly deckSize: number;
 };
 
+/** What a won fight has already settled by the time its shelves are shown. */
+type WonNumbers = {
+  /** What replay will set the hero to. Read off the finished fight, then off any hero sigil. */
+  readonly healthAfter: number;
+  readonly maxHealthAfter: number;
+  /** What replay will set gold to: the run's gold plus this node's pay. */
+  readonly goldAfter: number;
+};
+
 /**
  * What the run is waiting on. Exactly one of these at a time, and the method
  * that answers it is the only one the controller accepts.
@@ -104,18 +130,32 @@ export type RunPhase =
       readonly setup: FightSetup;
       readonly encounter: RunEncounter;
     }
+  /** A won elite or boss: `pickSigil`, or -1 to take none. */
+  | ({
+      readonly kind: 'sigil';
+      readonly node: MapNode;
+      readonly encounter: RunEncounter;
+      readonly outcome: FightOutcome;
+      readonly offer: readonly HeroSigilDef[];
+    } & WonNumbers)
   /** The fight was won: `pickReward`, or -1 to take nothing. */
-  | {
+  | ({
       readonly kind: 'reward';
       readonly node: MapNode;
       readonly encounter: RunEncounter;
       readonly outcome: FightOutcome;
-      readonly offer: readonly string[];
-      /** What replay will set the hero to. Read off the finished fight. */
-      readonly healthAfter: number;
-      /** What replay will set gold to: the run's gold plus this node's pay. */
-      readonly goldAfter: number;
-    }
+      readonly offer: readonly RewardOption[];
+    } & WonNumbers)
+  /** A card sigil was picked: `attach(deckIndex)`, one of `offers`. */
+  | ({
+      readonly kind: 'attach';
+      readonly node: MapNode;
+      readonly encounter: RunEncounter;
+      readonly outcome: FightOutcome;
+      readonly sigil: CardSigilDef;
+      /** Deck indices that can take the sigil, in deck order. */
+      readonly offers: readonly number[];
+    } & WonNumbers)
   /** A forge: `forge(deckIndex, mode)`. */
   | { readonly kind: 'forge'; readonly node: MapNode; readonly offers: readonly ForgeOffer[] }
   /** A shop: `buy(index)`, or -1 to leave. */
@@ -134,6 +174,8 @@ export type NodeOutcome = {
   readonly after: RunSnapshot;
   /** Cards that joined the deck at this node, in the order they joined. */
   readonly gained: readonly DeckCard[];
+  /** Sigils granted at this node, hero and card, in the order they were granted. */
+  readonly sigils: readonly SigilGrant[];
   readonly forged: { readonly card: DeckCard; readonly mode: ForgeMode } | null;
   readonly bought: { readonly item: ShopItem } | null;
   readonly event: { readonly def: RunEventDef; readonly option: number } | null;
@@ -156,7 +198,9 @@ export type RunController = {
   readonly last: NodeOutcome | null;
   travel(nodeId: number): void;
   finishFight(outcome: FightOutcome): void;
+  pickSigil(pick: number): void;
   pickReward(pick: number): void;
+  attach(deckIndex: number): void;
   forge(deckIndex: number, mode: ForgeMode): void;
   buy(index: number): void;
   chooseEvent(option: number): void;
@@ -179,8 +223,12 @@ function describe(phase: RunPhase): string {
       return 'the run is waiting for a node to travel to';
     case 'fight':
       return `a ${phase.node.type} is being fought`;
+    case 'sigil':
+      return 'a hero sigil is waiting to be picked or declined';
     case 'reward':
       return 'a fight reward is waiting to be picked';
+    case 'attach':
+      return `the ${phase.sigil.name} is waiting for a card to go on`;
     case 'forge':
       return 'a forge is waiting for a card and an upgrade';
     case 'shop':
@@ -218,6 +266,16 @@ export type RunControllerOptions = {
   readonly resume?: RunLog;
 };
 
+/** A won fight in progress: its cursor through the node's draws, and the choices so far. */
+type WonNode = {
+  readonly node: MapNode;
+  readonly encounter: RunEncounter;
+  readonly outcome: FightOutcome;
+  /** The canonical state cloned at the node's start and advanced through its draws and grants. */
+  readonly cursor: RunState;
+  readonly choices: RunChoice[];
+};
+
 /**
  * Start a run as a class, or resume one from its log.
  *
@@ -226,10 +284,12 @@ export type RunControllerOptions = {
  * a log cannot hold is the node in progress - a fight half fought is not in
  * it - so a resumed run stands on its last completed node, between nodes.
  * A log whose seed is not `seed`, or that does not replay, is refused with the
- * reason rather than half-applied. A log's class is the log's: a log written
- * before classes existed has none and is the default class, as `replayRun`
- * reads it, and `classId` is only for a fresh run - a saved run cannot be
- * resumed as a class it was not started as, and asking is refused.
+ * reason rather than half-applied. A log written under an earlier format is
+ * one of those: `replayRun` names the two formats, and `migrateRunLog` is what
+ * the caller reads a stored log through. A log's class is the log's: a log
+ * written before classes existed has none and is the default class, as
+ * `replayRun` reads it, and `classId` is only for a fresh run - a saved run
+ * cannot be resumed as a class it was not started as, and asking is refused.
  */
 export function createRunController(
   content: RunContent,
@@ -239,6 +299,7 @@ export function createRunController(
   const nodes: NodeRecord[] = [];
   const resume = options.resume;
   let classId = options.classId ?? defaultClassId(content);
+  let format = RUN_LOG_FORMAT;
   if (resume !== undefined) {
     if (resume.seed !== seed) {
       throw new Error(
@@ -253,15 +314,20 @@ export function createRunController(
       );
     }
     classId = logged;
+    // A saved log parsed from storage may predate the field; 1 is what "no
+    // field" meant, and `replayRun` is the one that refuses it.
+    format = (resume as { format?: number }).format ?? 1;
     for (const record of resume.nodes) nodes.push(record);
   }
   // Refuse an unknown class here, by name, rather than three frames down.
   classOf(content, classId);
   // The one path. Even the empty log goes through it, so the starting state is
   // the replay of nothing rather than a second construction of the same thing.
-  let state: RunState = replayRun(content, { seed, classId, nodes });
+  let state: RunState = replayRun(content, { seed, classId, format, nodes });
+  format = RUN_LOG_FORMAT;
   let phase: RunPhase = state.result === 'ongoing' ? { kind: 'travel' } : { kind: 'over' };
   let last: NodeOutcome | null = null;
+  let won: WonNode | null = null;
 
   function requirePhase<K extends RunPhase['kind']>(
     kind: K,
@@ -285,12 +351,12 @@ export function createRunController(
    */
   function commit(
     provisional: NodeRecord,
-    detail: Omit<NodeOutcome, 'node' | 'act' | 'before' | 'after' | 'gained' | 'actCleared'>,
+    detail: Omit<NodeOutcome, 'node' | 'act' | 'before' | 'after' | 'gained' | 'sigils' | 'actCleared'>,
     verify: (next: RunState) => void,
   ): void {
     const before = snapshotOf(state);
     const node = provisional;
-    const next = replayRun(content, { seed, classId, nodes: [...nodes, provisional] });
+    const next = replayRun(content, { seed, classId, format, nodes: [...nodes, provisional] });
     verify(next);
 
     const record: NodeRecord = {
@@ -308,10 +374,12 @@ export function createRunController(
       before,
       after: snapshotOf(next),
       gained: next.deck.slice(state.deck.length),
+      sigils: next.sigils.slice(state.sigils.length),
       actCleared: mapNode.type === 'boss' && next.result !== 'dead',
       ...detail,
     };
     state = next;
+    won = null;
     phase = next.result === 'ongoing' ? { kind: 'travel' } : { kind: 'over' };
   }
 
@@ -389,6 +457,26 @@ export function createRunController(
     }
   }
 
+  function numbersOf(w: WonNode): WonNumbers {
+    return {
+      healthAfter: w.cursor.hero.health,
+      maxHealthAfter: w.cursor.hero.maxHealth,
+      goldAfter: w.cursor.gold,
+    };
+  }
+
+  /** The shelf, drawn where `visit` draws it: after any hero sigil offer and grant. */
+  function toReward(w: WonNode): void {
+    phase = {
+      kind: 'reward',
+      node: w.node,
+      encounter: w.encounter,
+      outcome: w.outcome,
+      offer: rewardOffer(w.cursor, w.node),
+      ...numbersOf(w),
+    };
+  }
+
   function finishFight(outcome: FightOutcome): void {
     const p = requirePhase('fight', 'finish a fight');
     const { fight, rounds } = outcome;
@@ -405,17 +493,17 @@ export function createRunController(
       );
     }
     const travelChoice: RunChoice = { kind: 'travel', nodeId: p.node.id };
-    const fightRecord = (choices: RunChoice[]): NodeRecord => ({
-      ...baseRecord(p.node, choices),
-      fight: rounds.slice(),
-      fightSeed: p.setup.seed,
-      fightResult: fight.result,
-      fightRounds: fight.round,
-    });
     const detail = { ...noDetail, fight: { encounter: p.encounter, outcome } };
 
     if (fight.result !== 'playerWin') {
-      commit(fightRecord([travelChoice]), detail, (next) => {
+      const record: NodeRecord = {
+        ...baseRecord(p.node, [travelChoice]),
+        fight: rounds.slice(),
+        fightSeed: p.setup.seed,
+        fightResult: fight.result,
+        fightRounds: fight.round,
+      };
+      commit(record, detail, (next) => {
         if (next.result !== 'dead') {
           throw diverged('the fight', `a loss (${fight.result})`, `a run that is ${next.result}`);
         }
@@ -423,49 +511,131 @@ export function createRunController(
       return;
     }
 
-    // `visit` on a win: Health carried out, gold paid, then the reward drawn.
-    // Neither the Health nor the gold touches the run stream, so the clone at
-    // the node's start is at the offer's position.
-    const healthAfter = Math.max(0, heroOf(fight.state, 'player').health);
-    const goldAfter = state.gold + goldFor(state, p.node);
-    phase = {
-      kind: 'reward',
+    // `visit` on a win: Health carried out, gold paid, then any hero sigil
+    // offer, then the shelf. Neither the Health nor the gold touches the run
+    // stream, so the clone at the node's start is at the first offer's
+    // position; it is kept as the cursor for the offers after it.
+    const cursor = cloneRunState(state);
+    cursor.hero.health = Math.max(0, heroOf(fight.state, 'player').health);
+    cursor.gold = state.gold + goldFor(state, p.node);
+    const w: WonNode = {
       node: p.node,
       encounter: p.encounter,
       outcome,
-      offer: rewardOffer(cloneRunState(state)),
-      healthAfter,
-      goldAfter,
+      cursor,
+      choices: [travelChoice],
     };
+    won = w;
+    if (p.node.type === 'elite' || p.node.type === 'boss') {
+      // `visit` asks at every won elite or boss. With nothing left to offer
+      // the only legal answer is -1, so the controller gives it on the
+      // player's behalf rather than showing a screen with one button, and
+      // the log holds the choice either way.
+      const offer = heroSigilOffer(cursor, p.node);
+      if (offer.length > 0) {
+        phase = { kind: 'sigil', node: p.node, encounter: p.encounter, outcome, offer, ...numbersOf(w) };
+        return;
+      }
+      w.choices.push({ kind: 'sigil', pick: -1 });
+    }
+    toReward(w);
+  }
+
+  function pickSigil(pick: number): void {
+    const p = requirePhase('sigil', 'pick a hero sigil');
+    const w = won!;
+    requireIndex(pick, p.offer.length, 'hero sigil pick', true);
+    w.choices.push({ kind: 'sigil', pick });
+    if (pick >= 0) grantHeroSigil(w.cursor, p.offer[pick]!);
+    toReward(w);
+  }
+
+  /** The record a won node commits, and the checks every won node shares. */
+  function commitWon(w: WonNode, cardTaken: string | null, attached: { sigil: CardSigilDef; deckIndex: number } | null): void {
+    const record: NodeRecord = {
+      ...baseRecord(w.node, w.choices.slice()),
+      fight: w.outcome.rounds.slice(),
+      fightSeed: w.outcome.fight.seed,
+      fightResult: w.outcome.fight.result,
+      fightRounds: w.outcome.fight.round,
+    };
+    const deckBefore = state.deck.length;
+    const sigilsBefore = state.sigils.length;
+    const promisedSigils = w.cursor.sigils.slice(sigilsBefore);
+    commit(record, { ...noDetail, fight: { encounter: w.encounter, outcome: w.outcome } }, (next) => {
+      if (next.result === 'dead') throw diverged('the fight', 'a win', 'a run that is dead');
+      if (next.hero.health !== w.cursor.hero.health) {
+        throw diverged('Health after the fight', w.cursor.hero.health, next.hero.health);
+      }
+      if (next.hero.maxHealth !== w.cursor.hero.maxHealth) {
+        throw diverged('maximum Health after the fight', w.cursor.hero.maxHealth, next.hero.maxHealth);
+      }
+      if (next.gold !== w.cursor.gold) throw diverged('gold after the fight', w.cursor.gold, next.gold);
+      const joined = next.deck.slice(deckBefore).map((d) => d.cardId);
+      const expected = cardTaken === null ? [] : [cardTaken];
+      if (joined.join(',') !== expected.join(',')) {
+        throw diverged('the card taken', expected.join(',') || 'nothing', joined.join(',') || 'nothing');
+      }
+      const granted = next.sigils.slice(sigilsBefore);
+      const word = (g: SigilGrant): string =>
+        `${g.sigilId}@${g.target === 'hero' ? 'hero' : g.target.instanceId}`;
+      if (granted.map(word).join(',') !== promisedSigils.map(word).join(',')) {
+        throw diverged(
+          'the sigils granted',
+          promisedSigils.map(word).join(',') || 'none',
+          granted.map(word).join(',') || 'none',
+        );
+      }
+      if (attached !== null) {
+        const dc = next.deck[attached.deckIndex];
+        if (dc === undefined || !dc.sigils.some((s) => s.id === attached.sigil.id)) {
+          throw diverged(
+            `the card carrying ${attached.sigil.name}`,
+            state.deck[attached.deckIndex]?.instanceId ?? `deck index ${attached.deckIndex}`,
+            dc === undefined ? 'nothing' : `${dc.instanceId} without it`,
+          );
+        }
+      }
+    });
   }
 
   function pickReward(pick: number): void {
     const p = requirePhase('reward', 'pick a reward');
+    const w = won!;
     requireIndex(pick, p.offer.length, 'reward pick', true);
     const wanted = pick >= 0 ? p.offer[pick]! : null;
-    const record: NodeRecord = {
-      ...baseRecord(p.node, [
-        { kind: 'travel', nodeId: p.node.id },
-        { kind: 'reward', pick },
-      ]),
-      fight: p.outcome.rounds.slice(),
-      fightSeed: p.outcome.fight.seed,
-      fightResult: p.outcome.fight.result,
-      fightRounds: p.outcome.fight.round,
-    };
-    const deckBefore = state.deck.length;
-    commit(record, { ...noDetail, fight: { encounter: p.encounter, outcome: p.outcome } }, (next) => {
-      if (next.result === 'dead') throw diverged('the fight', 'a win', 'a run that is dead');
-      if (next.hero.health !== p.healthAfter) {
-        throw diverged('Health after the fight', p.healthAfter, next.hero.health);
-      }
-      if (next.gold !== p.goldAfter) throw diverged('gold after the fight', p.goldAfter, next.gold);
-      const joined = next.deck.slice(deckBefore).map((d) => d.cardId);
-      const expected = wanted === null ? [] : [wanted];
-      if (joined.join(',') !== expected.join(',')) {
-        throw diverged('the card taken', expected.join(',') || 'nothing', joined.join(',') || 'nothing');
-      }
-    });
+    w.choices.push({ kind: 'reward', pick });
+    if (wanted !== null && wanted.kind === 'sigil') {
+      // `visit` asks which card next, from the deck as it stands - no draw.
+      const offers = attachOffers(w.cursor, wanted.sigil);
+      phase = {
+        kind: 'attach',
+        node: w.node,
+        encounter: w.encounter,
+        outcome: w.outcome,
+        sigil: wanted.sigil,
+        offers,
+        ...numbersOf(w),
+      };
+      return;
+    }
+    commitWon(w, wanted === null ? null : wanted.cardId, null);
+  }
+
+  function attach(deckIndex: number): void {
+    const p = requirePhase('attach', 'attach a sigil');
+    const w = won!;
+    if (!p.offers.includes(deckIndex)) {
+      throw new Error(
+        `run: ${p.sigil.name} cannot go on deck index ${deckIndex}. It can go on ` +
+          `[${p.offers.join(', ')}] - every card without ${p.sigil.trait} already.`,
+      );
+    }
+    w.choices.push({ kind: 'attach', deckIndex });
+    // The cursor mirrors `visit` to the end of the node, so the grants it
+    // promises are the grants the replay must make - hero and card alike.
+    attachCardSigil(w.cursor, deckIndex, p.sigil);
+    commitWon(w, null, { sigil: p.sigil, deckIndex });
   }
 
   function forge(deckIndex: number, mode: ForgeMode): void {
@@ -550,7 +720,7 @@ export function createRunController(
       return state;
     },
     get log(): RunLog {
-      return { seed, classId, nodes: nodes.slice() };
+      return { seed, classId, format, nodes: nodes.slice() };
     },
     get phase() {
       return phase;
@@ -560,7 +730,9 @@ export function createRunController(
     },
     travel,
     finishFight,
+    pickSigil,
     pickReward,
+    attach,
     forge,
     buy,
     chooseEvent,

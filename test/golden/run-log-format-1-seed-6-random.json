@@ -1,0 +1,2200 @@
+{
+ "recordedAt": "c13a0cc",
+ "route": "random",
+ "placement": "right",
+ "result": "dead",
+ "hash": "f5abcf3d2118a2b9",
+ "log": {
+  "seed": 6,
+  "nodes": [
+   {
+    "act": 0,
+    "nodeId": 0,
+    "type": "fight",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 0
+     },
+     {
+      "kind": "reward",
+      "pick": -1
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_avenger#13",
+       "u_berserker#11",
+       "u_shieldbearer#5",
+       "u_pikeman#7",
+       "u_shieldbearer#3"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#7",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_avenger#13",
+       "u_berserker#11",
+       "u_squire#0",
+       "u_pikeman#6",
+       "u_squire#2"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#0",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 2
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 3
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_avenger#13",
+       "u_berserker#11",
+       "u_ironguard#12",
+       "u_shieldbearer#4",
+       "u_berserker#10"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#13",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_berserker#11",
+       "u_ironguard#12",
+       "u_berserker#10",
+       "u_pikeman#9",
+       "u_squire#1"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#11",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 5,
+      "handBefore": [
+       "u_ironguard#12",
+       "u_berserker#10",
+       "u_squire#1",
+       "u_pikeman#8",
+       "u_shieldbearer#4"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#1",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 6,
+      "handBefore": [
+       "u_ironguard#12",
+       "u_berserker#10",
+       "u_shieldbearer#3",
+       "u_pikeman#7",
+       "u_pikeman#9"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#7",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 7,
+      "handBefore": [
+       "u_ironguard#12",
+       "u_berserker#10",
+       "u_squire#0",
+       "u_squire#2",
+       "u_shieldbearer#5"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#0",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 2
+       }
+      ]
+     }
+    ],
+    "fightSeed": 1381659767,
+    "fightResult": "playerWin",
+    "fightRounds": 7,
+    "heroHealthAfter": 175,
+    "goldAfter": 25,
+    "deckSizeAfter": 14
+   },
+   {
+    "act": 0,
+    "nodeId": 1,
+    "type": "event",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 1
+     },
+     {
+      "kind": "event",
+      "option": 0
+     }
+    ],
+    "fight": null,
+    "fightSeed": null,
+    "fightResult": null,
+    "fightRounds": 0,
+    "heroHealthAfter": 183,
+    "goldAfter": 25,
+    "deckSizeAfter": 14
+   },
+   {
+    "act": 0,
+    "nodeId": 3,
+    "type": "fight",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 3
+     },
+     {
+      "kind": "reward",
+      "pick": 0
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_shieldbearer#3",
+       "u_pikeman#8",
+       "u_shieldbearer#5",
+       "u_pikeman#6",
+       "u_pikeman#9"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_pikeman#6",
+       "u_pikeman#9",
+       "u_berserker#10",
+       "u_squire#1",
+       "u_squire#0"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#6",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#1",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_berserker#10",
+       "u_squire#0",
+       "u_shieldbearer#4",
+       "u_berserker#11",
+       "u_pikeman#7"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#0",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 2
+       },
+       {
+        "cardId": "u_pikeman#7",
+        "index": 3
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_berserker#10",
+       "u_berserker#11",
+       "u_squire#2",
+       "u_avenger#13",
+       "u_ironguard#12"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#10",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 5,
+      "handBefore": [
+       "u_berserker#11",
+       "u_avenger#13",
+       "u_ironguard#12",
+       "u_squire#1",
+       "u_berserker#10"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#11",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#1",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 6,
+      "handBefore": [
+       "u_avenger#13",
+       "u_ironguard#12",
+       "u_berserker#10",
+       "u_pikeman#6",
+       "u_pikeman#8"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#13",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 1
+       }
+      ]
+     }
+    ],
+    "fightSeed": 3204138773,
+    "fightResult": "playerWin",
+    "fightRounds": 6,
+    "heroHealthAfter": 161,
+    "goldAfter": 50,
+    "deckSizeAfter": 15
+   },
+   {
+    "act": 0,
+    "nodeId": 7,
+    "type": "fight",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 7
+     },
+     {
+      "kind": "reward",
+      "pick": -1
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_squire#0",
+       "u_shieldbearer#14",
+       "u_berserker#11",
+       "u_ironguard#12",
+       "u_pikeman#9"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#0",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_berserker#11",
+       "u_ironguard#12",
+       "u_shieldbearer#3",
+       "u_squire#1",
+       "u_shieldbearer#4"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#1",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_berserker#11",
+       "u_ironguard#12",
+       "u_pikeman#8",
+       "u_avenger#13",
+       "u_pikeman#7"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#11",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_ironguard#12",
+       "u_avenger#13",
+       "u_pikeman#7",
+       "u_pikeman#6",
+       "u_shieldbearer#5"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#7",
+        "index": 2
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 3
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 4
+       }
+      ]
+     }
+    ],
+    "fightSeed": 1631967371,
+    "fightResult": "playerWin",
+    "fightRounds": 4,
+    "heroHealthAfter": 147,
+    "goldAfter": 75,
+    "deckSizeAfter": 15
+   },
+   {
+    "act": 0,
+    "nodeId": 10,
+    "type": "elite",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 10
+     },
+     {
+      "kind": "reward",
+      "pick": 2
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_avenger#13",
+       "u_pikeman#6",
+       "u_shieldbearer#5",
+       "u_squire#0",
+       "u_squire#2"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#6",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_avenger#13",
+       "u_squire#2",
+       "u_shieldbearer#4",
+       "u_pikeman#7",
+       "u_pikeman#9"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#2",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#7",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_avenger#13",
+       "u_pikeman#9",
+       "u_shieldbearer#3",
+       "u_pikeman#8",
+       "u_ironguard#12"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#9",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_avenger#13",
+       "u_ironguard#12",
+       "u_berserker#11",
+       "u_squire#1",
+       "u_berserker#10"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#13",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#1",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 5,
+      "handBefore": [
+       "u_ironguard#12",
+       "u_berserker#11",
+       "u_berserker#10",
+       "u_shieldbearer#14",
+       "u_squire#1"
+      ],
+      "placements": [
+       {
+        "cardId": "u_ironguard#12",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 6,
+      "handBefore": [
+       "u_berserker#11",
+       "u_berserker#10",
+       "u_squire#1",
+       "u_squire#2",
+       "u_shieldbearer#5"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#1",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 7,
+      "handBefore": [
+       "u_berserker#11",
+       "u_berserker#10",
+       "u_shieldbearer#3",
+       "u_pikeman#8",
+       "u_squire#0"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 2
+       }
+      ]
+     }
+    ],
+    "fightSeed": 1689443878,
+    "fightResult": "playerWin",
+    "fightRounds": 7,
+    "heroHealthAfter": 122,
+    "goldAfter": 130,
+    "deckSizeAfter": 16
+   },
+   {
+    "act": 0,
+    "nodeId": 14,
+    "type": "rest",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 14
+     }
+    ],
+    "fight": null,
+    "fightSeed": null,
+    "fightResult": null,
+    "fightRounds": 0,
+    "heroHealthAfter": 200,
+    "goldAfter": 130,
+    "deckSizeAfter": 16
+   },
+   {
+    "act": 0,
+    "nodeId": 17,
+    "type": "rest",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 17
+     }
+    ],
+    "fight": null,
+    "fightSeed": null,
+    "fightResult": null,
+    "fightRounds": 0,
+    "heroHealthAfter": 200,
+    "goldAfter": 130,
+    "deckSizeAfter": 16
+   },
+   {
+    "act": 0,
+    "nodeId": 19,
+    "type": "boss",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 19
+     },
+     {
+      "kind": "reward",
+      "pick": 2
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_shieldbearer#3",
+       "u_pikeman#15",
+       "u_squire#0",
+       "u_pikeman#6",
+       "u_shieldbearer#14"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_pikeman#6",
+       "u_shieldbearer#14",
+       "u_shieldbearer#5",
+       "u_pikeman#7",
+       "u_pikeman#8"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#6",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_pikeman#7",
+       "u_pikeman#8",
+       "u_berserker#10",
+       "u_squire#2",
+       "u_shieldbearer#4"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#7",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_berserker#10",
+       "u_shieldbearer#4",
+       "u_pikeman#9",
+       "u_ironguard#12",
+       "u_avenger#13"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#10",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 5,
+      "handBefore": [
+       "u_pikeman#9",
+       "u_ironguard#12",
+       "u_avenger#13",
+       "u_squire#1",
+       "u_berserker#11"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#9",
+        "index": 0
+       },
+       {
+        "cardId": "u_ironguard#12",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 6,
+      "handBefore": [
+       "u_avenger#13",
+       "u_squire#1",
+       "u_berserker#11",
+       "u_pikeman#15",
+       "u_pikeman#9"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#1",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 2
+       }
+      ]
+     }
+    ],
+    "fightSeed": 2688351211,
+    "fightResult": "playerWin",
+    "fightRounds": 6,
+    "heroHealthAfter": 173,
+    "goldAfter": 220,
+    "deckSizeAfter": 17
+   },
+   {
+    "act": 1,
+    "nodeId": 0,
+    "type": "fight",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 0
+     },
+     {
+      "kind": "reward",
+      "pick": 0
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_shieldbearer#5",
+       "u_squire#0",
+       "u_pikeman#6",
+       "u_captain#16",
+       "u_shieldbearer#4"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_captain#16",
+       "u_shieldbearer#4",
+       "u_avenger#13",
+       "u_squire#1",
+       "u_shieldbearer#3"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#1",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#13",
+       "u_ironguard#12",
+       "u_pikeman#15",
+       "u_berserker#11"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#13",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_captain#16",
+       "u_ironguard#12",
+       "u_berserker#11",
+       "u_squire#2",
+       "u_pikeman#8"
+      ],
+      "placements": [
+       {
+        "cardId": "u_ironguard#12",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 5,
+      "handBefore": [
+       "u_captain#16",
+       "u_berserker#11",
+       "u_pikeman#8",
+       "u_pikeman#9",
+       "u_shieldbearer#14"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#8",
+        "index": 2
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 3
+       },
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 4
+       }
+      ]
+     },
+     {
+      "round": 6,
+      "handBefore": [
+       "u_captain#16",
+       "u_berserker#11",
+       "u_pikeman#7",
+       "u_berserker#10",
+       "u_pikeman#15"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#11",
+        "index": 2
+       },
+       {
+        "cardId": "u_pikeman#7",
+        "index": 3
+       }
+      ]
+     },
+     {
+      "round": 7,
+      "handBefore": [
+       "u_captain#16",
+       "u_berserker#10",
+       "u_pikeman#15",
+       "u_avenger#13",
+       "u_pikeman#9"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#10",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 8,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#13",
+       "u_pikeman#9",
+       "u_squire#2",
+       "u_pikeman#8"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#9",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 2
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 3
+       }
+      ]
+     },
+     {
+      "round": 9,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#13",
+       "u_squire#1",
+       "u_shieldbearer#3",
+       "u_shieldbearer#4"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#1",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 10,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#13",
+       "u_shieldbearer#14",
+       "u_pikeman#6",
+       "u_squire#0"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 2
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 3
+       }
+      ]
+     }
+    ],
+    "fightSeed": 1180271783,
+    "fightResult": "playerWin",
+    "fightRounds": 10,
+    "heroHealthAfter": 149,
+    "goldAfter": 255,
+    "deckSizeAfter": 18
+   },
+   {
+    "act": 1,
+    "nodeId": 1,
+    "type": "fight",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 1
+     },
+     {
+      "kind": "reward",
+      "pick": -1
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_ironguard#12",
+       "u_berserker#11",
+       "u_shieldbearer#14",
+       "u_pikeman#6",
+       "u_pikeman#15"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_ironguard#12",
+       "u_berserker#11",
+       "u_squire#1",
+       "u_captain#16",
+       "u_pikeman#7"
+      ],
+      "placements": [
+       {
+        "cardId": "u_ironguard#12",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#1",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_berserker#11",
+       "u_captain#16",
+       "u_pikeman#7",
+       "u_squire#0",
+       "u_avenger#13"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#11",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#7",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_captain#16",
+       "u_squire#0",
+       "u_avenger#13",
+       "u_shieldbearer#4",
+       "u_pikeman#8"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#0",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 2
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 3
+       }
+      ]
+     },
+     {
+      "round": 5,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#13",
+       "u_squire#2",
+       "u_berserker#10",
+       "u_shieldbearer#5"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#13",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 6,
+      "handBefore": [
+       "u_captain#16",
+       "u_berserker#10",
+       "u_shieldbearer#5",
+       "u_avenger#17",
+       "u_shieldbearer#3"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#10",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 7,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#17",
+       "u_shieldbearer#3",
+       "u_pikeman#9",
+       "u_pikeman#15"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 2
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 3
+       }
+      ]
+     },
+     {
+      "round": 8,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#17",
+       "u_pikeman#8",
+       "u_shieldbearer#4",
+       "u_shieldbearer#5"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#8",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 2
+       }
+      ]
+     }
+    ],
+    "fightSeed": 719301756,
+    "fightResult": "playerWin",
+    "fightRounds": 8,
+    "heroHealthAfter": 126,
+    "goldAfter": 290,
+    "deckSizeAfter": 18
+   },
+   {
+    "act": 1,
+    "nodeId": 4,
+    "type": "rest",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 4
+     }
+    ],
+    "fight": null,
+    "fightSeed": null,
+    "fightResult": null,
+    "fightRounds": 0,
+    "heroHealthAfter": 200,
+    "goldAfter": 290,
+    "deckSizeAfter": 18
+   },
+   {
+    "act": 1,
+    "nodeId": 7,
+    "type": "rest",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 7
+     }
+    ],
+    "fight": null,
+    "fightSeed": null,
+    "fightResult": null,
+    "fightRounds": 0,
+    "heroHealthAfter": 200,
+    "goldAfter": 290,
+    "deckSizeAfter": 18
+   },
+   {
+    "act": 1,
+    "nodeId": 10,
+    "type": "event",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 10
+     },
+     {
+      "kind": "event",
+      "option": 1
+     }
+    ],
+    "fight": null,
+    "fightSeed": null,
+    "fightResult": null,
+    "fightRounds": 0,
+    "heroHealthAfter": 200,
+    "goldAfter": 325,
+    "deckSizeAfter": 18
+   },
+   {
+    "act": 1,
+    "nodeId": 13,
+    "type": "fight",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 13
+     },
+     {
+      "kind": "reward",
+      "pick": 0
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_pikeman#7",
+       "u_pikeman#6",
+       "u_captain#16",
+       "u_avenger#13",
+       "u_shieldbearer#4"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#7",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#13",
+       "u_squire#2",
+       "u_shieldbearer#3",
+       "u_pikeman#8"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#2",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#13",
+       "u_pikeman#15",
+       "u_pikeman#9",
+       "u_berserker#10"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#13",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_captain#16",
+       "u_pikeman#9",
+       "u_berserker#10",
+       "u_shieldbearer#5",
+       "u_squire#1"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#9",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#1",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 5,
+      "handBefore": [
+       "u_captain#16",
+       "u_berserker#10",
+       "u_avenger#17",
+       "u_berserker#11",
+       "u_squire#0"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#10",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 6,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#17",
+       "u_berserker#11",
+       "u_ironguard#12",
+       "u_shieldbearer#14"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#17",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 7,
+      "handBefore": [
+       "u_captain#16",
+       "u_berserker#11",
+       "u_ironguard#12",
+       "u_squire#1",
+       "u_shieldbearer#3"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#11",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#1",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 8,
+      "handBefore": [
+       "u_captain#16",
+       "u_ironguard#12",
+       "u_shieldbearer#3",
+       "u_pikeman#15",
+       "u_pikeman#8"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 9,
+      "handBefore": [
+       "u_captain#16",
+       "u_ironguard#12",
+       "u_pikeman#9",
+       "u_avenger#13",
+       "u_shieldbearer#14"
+      ],
+      "placements": [
+       {
+        "cardId": "u_ironguard#12",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 10,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#13",
+       "u_shieldbearer#14",
+       "u_pikeman#6",
+       "u_berserker#10"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#13",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 11,
+      "handBefore": [
+       "u_captain#16",
+       "u_pikeman#6",
+       "u_berserker#10",
+       "u_squire#0",
+       "u_shieldbearer#4"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#6",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 12,
+      "handBefore": [
+       "u_captain#16",
+       "u_berserker#10",
+       "u_pikeman#7",
+       "u_shieldbearer#5",
+       "u_squire#2"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#7",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 13,
+      "handBefore": [
+       "u_captain#16",
+       "u_berserker#10",
+       "u_avenger#17",
+       "u_avenger#13",
+       "u_shieldbearer#5"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#10",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 14,
+      "handBefore": [
+       "u_captain#16",
+       "u_avenger#17",
+       "u_avenger#13",
+       "u_squire#0",
+       "u_shieldbearer#3"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#17",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 1
+       }
+      ]
+     }
+    ],
+    "fightSeed": 2474974291,
+    "fightResult": "playerWin",
+    "fightRounds": 14,
+    "heroHealthAfter": 130,
+    "goldAfter": 360,
+    "deckSizeAfter": 19
+   },
+   {
+    "act": 1,
+    "nodeId": 15,
+    "type": "shop",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 15
+     },
+     {
+      "kind": "shop",
+      "buy": 1
+     }
+    ],
+    "fight": null,
+    "fightSeed": null,
+    "fightResult": null,
+    "fightRounds": 0,
+    "heroHealthAfter": 130,
+    "goldAfter": 280,
+    "deckSizeAfter": 20
+   },
+   {
+    "act": 1,
+    "nodeId": 17,
+    "type": "boss",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 17
+     },
+     {
+      "kind": "reward",
+      "pick": -1
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_pikeman#15",
+       "u_avenger#13",
+       "u_shieldbearer#5",
+       "u_pikeman#8",
+       "u_ironguard#12"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#15",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_avenger#13",
+       "u_ironguard#12",
+       "u_shieldbearer#4",
+       "u_squire#1",
+       "u_berserker#10"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#13",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_ironguard#12",
+       "u_squire#1",
+       "u_berserker#10",
+       "u_avenger#17",
+       "u_shieldbearer#3"
+      ],
+      "placements": [
+       {
+        "cardId": "u_ironguard#12",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#1",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_berserker#10",
+       "u_avenger#17",
+       "u_shieldbearer#3",
+       "u_shieldbearer#14",
+       "u_pikeman#9"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 1
+       },
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 2
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 3
+       }
+      ]
+     },
+     {
+      "round": 5,
+      "handBefore": [
+       "u_berserker#10",
+       "u_avenger#17",
+       "u_pikeman#6",
+       "u_berserker#11",
+       "u_captain#18"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#10",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 6,
+      "handBefore": [
+       "u_avenger#17",
+       "u_berserker#11",
+       "u_captain#18",
+       "u_captain#16",
+       "u_pikeman#7"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#17",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#7",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 7,
+      "handBefore": [
+       "u_berserker#11",
+       "u_captain#18",
+       "u_captain#16",
+       "u_squire#0",
+       "u_avenger#19"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#11",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 8,
+      "handBefore": [
+       "u_captain#18",
+       "u_captain#16",
+       "u_avenger#19",
+       "u_squire#2",
+       "u_pikeman#7"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#19",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 9,
+      "handBefore": [
+       "u_captain#18",
+       "u_captain#16",
+       "u_pikeman#7",
+       "u_pikeman#8",
+       "u_berserker#11"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#7",
+        "index": 0
+       },
+       {
+        "cardId": "u_berserker#11",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 10,
+      "handBefore": [
+       "u_captain#18",
+       "u_captain#16",
+       "u_pikeman#8",
+       "u_pikeman#6",
+       "u_pikeman#9"
+      ],
+      "placements": [
+       {
+        "cardId": "u_pikeman#8",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 11,
+      "handBefore": [
+       "u_captain#18",
+       "u_captain#16",
+       "u_squire#1",
+       "u_shieldbearer#4",
+       "u_berserker#10"
+      ],
+      "placements": [
+       {
+        "cardId": "u_squire#1",
+        "index": 0
+       },
+       {
+        "cardId": "u_berserker#10",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 12,
+      "handBefore": [
+       "u_captain#18",
+       "u_captain#16",
+       "u_shieldbearer#4",
+       "u_squire#0",
+       "u_pikeman#15"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 13,
+      "handBefore": [
+       "u_captain#18",
+       "u_captain#16",
+       "u_shieldbearer#3",
+       "u_avenger#17",
+       "u_shieldbearer#5"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 0
+       },
+       {
+        "cardId": "u_avenger#17",
+        "index": 1
+       }
+      ]
+     }
+    ],
+    "fightSeed": 4174118336,
+    "fightResult": "playerWin",
+    "fightRounds": 13,
+    "heroHealthAfter": 62,
+    "goldAfter": 400,
+    "deckSizeAfter": 20
+   },
+   {
+    "act": 2,
+    "nodeId": 0,
+    "type": "fight",
+    "choices": [
+     {
+      "kind": "travel",
+      "nodeId": 0
+     }
+    ],
+    "fight": [
+     {
+      "round": 1,
+      "handBefore": [
+       "u_shieldbearer#4",
+       "u_squire#2",
+       "u_squire#0",
+       "u_berserker#10",
+       "u_shieldbearer#14"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#4",
+        "index": 0
+       },
+       {
+        "cardId": "u_squire#2",
+        "index": 1
+       },
+       {
+        "cardId": "u_squire#0",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 2,
+      "handBefore": [
+       "u_berserker#10",
+       "u_shieldbearer#14",
+       "u_captain#16",
+       "u_shieldbearer#3",
+       "u_pikeman#7"
+      ],
+      "placements": [
+       {
+        "cardId": "u_shieldbearer#14",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#3",
+        "index": 1
+       },
+       {
+        "cardId": "u_pikeman#7",
+        "index": 2
+       }
+      ]
+     },
+     {
+      "round": 3,
+      "handBefore": [
+       "u_berserker#10",
+       "u_captain#16",
+       "u_pikeman#6",
+       "u_captain#18",
+       "u_ironguard#12"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#10",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#6",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 4,
+      "handBefore": [
+       "u_captain#16",
+       "u_captain#18",
+       "u_ironguard#12",
+       "u_avenger#13",
+       "u_avenger#19"
+      ],
+      "placements": [
+       {
+        "cardId": "u_captain#16",
+        "index": 0
+       }
+      ]
+     },
+     {
+      "round": 5,
+      "handBefore": [
+       "u_captain#18",
+       "u_ironguard#12",
+       "u_avenger#13",
+       "u_avenger#19",
+       "u_pikeman#8"
+      ],
+      "placements": [
+       {
+        "cardId": "u_ironguard#12",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#8",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 6,
+      "handBefore": [
+       "u_captain#18",
+       "u_avenger#13",
+       "u_avenger#19",
+       "u_berserker#11",
+       "u_pikeman#15"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#13",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#15",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 7,
+      "handBefore": [
+       "u_captain#18",
+       "u_avenger#19",
+       "u_berserker#11",
+       "u_pikeman#9",
+       "u_shieldbearer#5"
+      ],
+      "placements": [
+       {
+        "cardId": "u_avenger#19",
+        "index": 0
+       },
+       {
+        "cardId": "u_pikeman#9",
+        "index": 1
+       }
+      ]
+     },
+     {
+      "round": 8,
+      "handBefore": [
+       "u_captain#18",
+       "u_berserker#11",
+       "u_shieldbearer#5",
+       "u_squire#1",
+       "u_avenger#17"
+      ],
+      "placements": [
+       {
+        "cardId": "u_berserker#11",
+        "index": 0
+       },
+       {
+        "cardId": "u_shieldbearer#5",
+        "index": 1
+       }
+      ]
+     }
+    ],
+    "fightSeed": 617610193,
+    "fightResult": "enemyWin",
+    "fightRounds": 8,
+    "heroHealthAfter": 0,
+    "goldAfter": 400,
+    "deckSizeAfter": 20
+   }
+  ]
+ }
+}

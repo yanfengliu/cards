@@ -31,7 +31,7 @@ import {
   runRun,
   startRun,
 } from '../src/run/run.ts';
-import type { ActMap, NodeType, RunContent, RunLog } from '../src/run/types.ts';
+import type { ActMap, NodeType, RunContent, RunLog, SigilDef } from '../src/run/types.ts';
 import { makeRunAgent } from '../src/sim/runbots.ts';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +55,20 @@ const POOL: CardPool = {
   energyPerTurn: 3,
   handSize: 5,
 };
+
+/**
+ * The fixture's sigils: one card sigil per trait and every hero effect once.
+ * Small on purpose - a run that holds all three hero sigils has nothing left
+ * to be offered, which is a branch worth walking.
+ */
+const FIXTURE_SIGILS: readonly SigilDef[] = [
+  { kind: 'card', id: 'fx_relay', name: 'Relay Sigil', trait: 'relay', weight: 2 },
+  { kind: 'card', id: 'fx_wake', name: 'Wake Sigil', trait: 'wake', weight: 2 },
+  { kind: 'card', id: 'fx_guard', name: 'Guard Sigil', trait: 'guard', weight: 1 },
+  { kind: 'hero', id: 'fx_oak', name: 'Oak', effect: { kind: 'maxHealth', amount: 10 }, weight: 1 },
+  { kind: 'hero', id: 'fx_lance', name: 'Lance', effect: { kind: 'heroPower', amount: 1 }, weight: 1 },
+  { kind: 'hero', id: 'fx_bulwark', name: 'Bulwark', effect: { kind: 'heroArmour', amount: 1 }, weight: 1 },
+];
 
 function fixtureContent(overrides: Partial<RunContent> = {}): RunContent {
   const enemy = {
@@ -117,6 +131,9 @@ function fixtureContent(overrides: Partial<RunContent> = {}): RunContent {
         ],
       },
     ],
+    sigils: FIXTURE_SIGILS,
+    heroSigilOffers: 2,
+    cardSigilChance: 0.5,
     rewardOffers: 2,
     shopStock: 2,
     shopBasePrice: 10,
@@ -132,7 +149,9 @@ function fixtureContent(overrides: Partial<RunContent> = {}): RunContent {
 function scriptedAgent(pick: number, placement = makeRunAgent({ route: 'greedy', placement: 'right', seed: 1 }).placement): RunAgent {
   return {
     travel: (_r, options) => Math.min(pick, options.length - 1),
+    sigil: (_r, offer) => Math.min(pick, offer.length - 1),
     reward: (_r, offer) => Math.min(pick, offer.length - 1),
+    attach: (_r, _sigil, offers) => Math.min(pick, offers.length - 1),
     forge: (_r, offers) => Math.min(pick, offers.length - 1),
     shop: () => -1,
     event: (_r, def) => Math.min(pick, def.options.length - 1),
@@ -368,6 +387,9 @@ test('what is left of the hero after a fight is what the next fight starts with'
   // when Health actually moves, so the fixture is built to make it move.
   const bare = fixtureContent({
     startingDeck: ['t_grunt', 't_grunt', 't_grunt', 't_grunt'],
+    // No sigils either: a hero sigil that raises maximum Health heals by the
+    // same amount when it is taken, and this test forbids every heal.
+    sigils: [],
     // No rest and no event on this map, so Health is monotone down and any
     // upward move is the carry being dropped rather than a heal.
     mapShape: {
@@ -547,7 +569,8 @@ test('a shop refuses a purchase the run cannot afford, and says so', () => {
         },
         shop: () => 0,
       }),
-    /run: shop purchase of "t_grunt" costs \d+ gold and the run holds \d+\. An agent must check the price/,
+    // The card is whichever the shelf drew first; the message's shape is the claim.
+    /run: shop purchase of "t_\w+" costs \d+ gold and the run holds \d+\. An agent must check the price/,
   );
 });
 
@@ -572,13 +595,33 @@ test('a run ends when the hero dies and is won by the last boss, never both', ()
   assert.ok(wins + deaths === 30);
 });
 
-test('sigils stay out of scope: no run this unit can generate grants one', () => {
-  // The seam is inert on purpose. `hashRun` covers the list, so the day sigils
-  // land this goes red rather than the run hash quietly agreeing with itself.
+test('a content set with no sigils grants none, and every sigil choice it records is a decline', () => {
+  // The inert path still holds: `test/sigils.test.ts` gates the live one.
+  //
+  // **A won elite or boss records a `sigil` choice even here, and that is the
+  // design rather than a leak.** `nodes.ts` states why: the shape of a log has
+  // to depend on the map and the fights and not on how many sigils the content
+  // lists, because that is what lets a log written before sigils be upgraded
+  // by inserting declines and nothing else. So what a sigil-free content must
+  // guarantee is narrower and checkable: nothing is granted, no shelf offers a
+  // sigil, no `attach` is ever asked, and every `sigil` choice is -1.
+  const content = fixtureContent({ sigils: [] });
+  let fightsWon = 0;
+  let declines = 0;
   for (const seed of RUN_SEEDS.slice(0, 15)) {
-    const { run } = runRun(RUN_CONTENT, seed, makeRunAgent({ route: 'greedy', placement: 'right', seed }));
-    assert.deepEqual(run.sigils, [], `seed ${seed} granted a sigil`);
+    const { run, log } = runRun(content, seed, scriptedAgent(0));
+    assert.deepEqual(run.sigils, [], `seed ${seed} granted a sigil from content that has none`);
+    for (const c of runChoices(log)) {
+      assert.ok(c.kind !== 'attach', `seed ${seed} recorded an attach choice with no sigil to attach`);
+      if (c.kind === 'sigil') {
+        assert.equal(c.pick, -1, `seed ${seed} picked hero sigil ${c.pick} from a content with none`);
+        declines++;
+      }
+    }
+    fightsWon += log.nodes.filter((n) => n.fightResult === 'playerWin').length;
   }
+  assert.ok(fightsWon >= 15, `only ${fightsWon} fights won across the window; the reward path was barely walked`);
+  assert.ok(declines >= 5, `only ${declines} sigil choices across the window; the forced-decline path was barely walked`);
 });
 
 test('replay refuses a choice list that does not match the decisions a node offers', () => {
@@ -586,6 +629,7 @@ test('replay refuses a choice list that does not match the decisions a node offe
   const live = runRun(content, 5, scriptedAgent(0));
   const damaged: RunLog = {
     seed: live.log.seed,
+    format: live.log.format,
     nodes: live.log.nodes.map((n, i) => (i === 0 ? { ...n, choices: [] } : n)),
   };
   assert.throws(
@@ -599,6 +643,7 @@ test('replay refuses a travel choice that the regenerated map does not offer', (
   const live = runRun(content, 5, scriptedAgent(0));
   const damaged: RunLog = {
     seed: live.log.seed,
+    format: live.log.format,
     nodes: live.log.nodes.map((n, i) =>
       i === 0 ? { ...n, choices: [{ kind: 'travel' as const, nodeId: 999 }, ...n.choices.slice(1)] } : n,
     ),

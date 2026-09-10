@@ -38,6 +38,13 @@ export type EntityView = {
   readonly maxHealth: number;
   readonly armour: number;
   readonly traits: readonly Trait[];
+  /**
+   * The traits in `traits` a sigil granted rather than the card printing
+   * them, answered by `SigilTraitsOf` below rather than by anything on the
+   * engine's card. Optional and read as empty when absent, so every view
+   * literal written before sigils existed still compiles.
+   */
+  readonly sigilTraits?: readonly Trait[];
   readonly cost: number;
   alive: boolean;
   /** Presentation only. Never round-trips into `GameState`. */
@@ -108,7 +115,18 @@ export type Beat =
     }
   | { readonly kind: 'death'; readonly uid: number; readonly side: Side };
 
-function viewOf(e: Entity, pool: CardPool): EntityView {
+/**
+ * Which of a card's traits a sigil granted rather than the card printing.
+ *
+ * Answered by whoever owns the deck the card is an instance of - the run - and
+ * handed in, because the engine's `UnitCard` carries no such field: the
+ * resolver has no use for where a trait came from, and `AGENTS.md` keeps a
+ * fight's card an ordinary card. Absent means nothing was granted, which is
+ * every card outside a run.
+ */
+export type SigilTraitsOf = (cardId: string) => readonly Trait[];
+
+function viewOf(e: Entity, pool: CardPool, sigilTraitsOf?: SigilTraitsOf): EntityView {
   // A hero has no card in the pool, so its printed identity comes off the
   // entity itself. `cardId` is `hero:<name>` by construction in `state.ts`.
   if (e.isHero) {
@@ -131,6 +149,7 @@ function viewOf(e: Entity, pool: CardPool): EntityView {
     };
   }
   const card = pool.card(e.cardId);
+  const granted = sigilTraitsOf === undefined ? [] : sigilTraitsOf(e.cardId);
   return {
     uid: e.uid,
     cardId: e.cardId,
@@ -144,6 +163,7 @@ function viewOf(e: Entity, pool: CardPool): EntityView {
     maxHealth: e.maxHealth,
     armour: e.armour,
     traits: e.traits.slice(),
+    ...(granted.length > 0 ? { sigilTraits: granted.slice() } : {}),
     cost: card.cost,
     alive: e.alive,
     acting: false,
@@ -153,9 +173,14 @@ function viewOf(e: Entity, pool: CardPool): EntityView {
 /**
  * A card that is not on any board - in the hand, on offer as a reward, in the
  * run's deck - as the view the renderer draws. `uid` is -1 because it has none,
- * and it is drawn at its printed numbers.
+ * and it is drawn at its printed numbers. `sigilTraits` is what the run says a
+ * sigil granted it, and is left off when empty.
  */
-export function cardEntityView(card: UnitCard, side: Side = 'player'): EntityView {
+export function cardEntityView(
+  card: UnitCard,
+  side: Side = 'player',
+  sigilTraits: readonly Trait[] = [],
+): EntityView {
   return {
     uid: -1,
     cardId: card.id,
@@ -169,16 +194,17 @@ export function cardEntityView(card: UnitCard, side: Side = 'player'): EntityVie
     maxHealth: card.health,
     armour: card.armour,
     traits: card.traits,
+    ...(sigilTraits.length > 0 ? { sigilTraits } : {}),
     cost: card.cost,
     alive: true,
     acting: false,
   };
 }
 
-export function snapshot(state: GameState, pool: CardPool): BoardView {
+export function snapshot(state: GameState, pool: CardPool, sigilTraitsOf?: SigilTraitsOf): BoardView {
   return {
-    player: state.board.player.map((e) => viewOf(e, pool)),
-    enemy: state.board.enemy.map((e) => viewOf(e, pool)),
+    player: state.board.player.map((e) => viewOf(e, pool, sigilTraitsOf)),
+    enemy: state.board.enemy.map((e) => viewOf(e, pool, sigilTraitsOf)),
   };
 }
 
