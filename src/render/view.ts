@@ -22,7 +22,7 @@
  * than as a board that quietly drifts out of step with the fight.
  */
 
-import type { CardPool, Entity, GameState, Side, Trait } from '../engine/state.ts';
+import type { CardPool, Entity, GameState, Side, Trait, UnitCard } from '../engine/state.ts';
 import type { GameEvent } from '../engine/resolver.ts';
 
 export type EntityView = {
@@ -131,6 +131,31 @@ function viewOf(e: Entity, pool: CardPool): EntityView {
     traits: e.traits.slice(),
     cost: card.cost,
     alive: e.alive,
+    acting: false,
+  };
+}
+
+/**
+ * A card that is not on any board - in the hand, on offer as a reward, in the
+ * run's deck - as the view the renderer draws. `uid` is -1 because it has none,
+ * and it is drawn at its printed numbers.
+ */
+export function cardEntityView(card: UnitCard, side: Side = 'player'): EntityView {
+  return {
+    uid: -1,
+    cardId: card.id,
+    name: card.name,
+    tribe: card.tribe,
+    side,
+    isHero: false,
+    basePower: card.power,
+    bonusPower: 0,
+    health: card.health,
+    maxHealth: card.health,
+    armour: card.armour,
+    traits: card.traits,
+    cost: card.cost,
+    alive: true,
     acting: false,
   };
 }

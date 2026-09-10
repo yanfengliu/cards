@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Cards — a fight</title>
+    <title>Cards — a run</title>
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23a3202a'/%3E%3Cpath d='M16 6l7 3v8c0 5-4 8-7 9-3-1-7-4-7-9V9z' fill='%23d9a520'/%3E%3C/svg%3E"
@@ -11,14 +11,15 @@
     <link rel="stylesheet" href="./app.css" />
   </head>
   <body>
-    <div id="app">
+    <div id="app" data-mode="run">
       <header class="hud">
         <div class="hud__title">
           Cards
-          <small id="subtitle">a fight you can play</small>
+          <small id="subtitle">a run you can play</small>
         </div>
 
-        <div class="hud__group">
+        <!-- The single addressable fight: `?encounter=even&seed=7`. Hidden in a run. -->
+        <div class="hud__group fight-only" id="fight-controls">
           <span class="hud__label">Seed</span>
           <input
             id="seed"
@@ -34,6 +35,9 @@
           ></select>
           <button id="newfight" type="button" data-act="newfight">New fight</button>
         </div>
+
+        <!-- The run's readouts: Health, gold, deck, seed. Filled by runapp.ts. -->
+        <div class="hud__group hud__group--status run-only" id="run-status" aria-live="polite"></div>
 
         <div class="hud__group">
           <span class="hud__label">Speed</span>
@@ -75,41 +79,63 @@
         </div>
       </header>
 
-      <div class="stage" id="stage">
-        <section class="side" id="side-enemy">
-          <div class="side__head">
-            <span class="side__name" id="enemy-name">Enemy line</span>
-            <span class="side__intent" id="enemy-intent"></span>
-          </div>
-          <div class="row" id="enemy-row"></div>
-        </section>
-
-        <div class="log" id="log" aria-live="polite"></div>
-
-        <section class="side" id="side-player">
-          <div class="side__head">
-            <span class="side__name">Your line — resolves left to right, hero last</span>
-            <span class="side__intent" id="player-intent"></span>
-          </div>
-          <div class="row" id="player-row"></div>
-        </section>
-
-        <div class="fxlayer" id="fx"></div>
-      </div>
-
-      <div id="banner-slot"></div>
-
-      <footer class="tray">
-        <div class="tray__side">
-          <div class="hud__label">Energy</div>
-          <div class="energy" id="energy"></div>
-          <p class="hint" id="hint"></p>
-          <button class="btn--primary" id="commit" type="button" data-act="commit">
-            Commit turn
-          </button>
+      <!--
+        The run: the act map with what a node leads to beside it, and the node
+        screens - reward, forge, shop, event, rest, the act break, the end - in
+        the same place. Filled by runapp.ts.
+      -->
+      <section class="run screen" id="run" hidden>
+        <div class="run__body" id="run-body">
+          <div class="run__map" id="run-map" aria-label="Act map"></div>
+          <aside class="run__side">
+            <div class="run__notice" id="run-notice" aria-live="polite"></div>
+            <div class="run__panel" id="run-consequence" aria-live="polite"></div>
+            <div class="run__panel" id="run-deck"></div>
+          </aside>
         </div>
-        <div class="hand" id="hand"></div>
-      </footer>
+        <div class="run__node" id="run-node" hidden></div>
+      </section>
+
+      <!-- The fight. Shown by itself in fight mode, and for a run's fight nodes. -->
+      <section class="screen" id="fight" hidden>
+        <div class="stage" id="stage">
+          <section class="side" id="side-enemy">
+            <div class="side__head">
+              <span class="side__name" id="enemy-name">Enemy line</span>
+              <span class="side__intent" id="enemy-intent"></span>
+            </div>
+            <div class="row" id="enemy-row"></div>
+          </section>
+
+          <div class="log" id="log" aria-live="polite"></div>
+
+          <section class="side" id="side-player">
+            <div class="side__head">
+              <span class="side__name">Your line — resolves left to right, hero last</span>
+              <span class="side__intent" id="player-intent"></span>
+            </div>
+            <div class="row" id="player-row"></div>
+          </section>
+
+          <div class="fxlayer" id="fx"></div>
+        </div>
+
+        <div id="banner-slot"></div>
+        <!-- After a run's fight: the one button that leads back into the run. -->
+        <div class="fight__after run-only" id="fight-after" hidden></div>
+
+        <footer class="tray">
+          <div class="tray__side">
+            <div class="hud__label">Energy</div>
+            <div class="energy" id="energy"></div>
+            <p class="hint" id="hint"></p>
+            <button class="btn--primary" id="commit" type="button" data-act="commit">
+              Commit turn
+            </button>
+          </div>
+          <div class="hand" id="hand"></div>
+        </footer>
+      </section>
     </div>
 
     <!--

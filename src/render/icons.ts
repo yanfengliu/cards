@@ -48,7 +48,18 @@ export type IconName =
   | 'elf'
   | 'orc'
   | 'beast'
-  | 'hero';
+  | 'hero'
+  // The run. One per `NodeType` in `run/types.ts`; `render/map.ts` binds them.
+  | 'fight'
+  | 'elite'
+  | 'event'
+  | 'shop'
+  | 'forge'
+  | 'rest'
+  | 'boss'
+  // The run's two readouts that are not a node.
+  | 'gold'
+  | 'deck';
 
 interface IconDef {
   readonly d: string;
@@ -206,6 +217,100 @@ const ICONS: Readonly<Record<IconName, IconDef>> = {
     shape: 'a crown',
     fillRule: 'nonzero',
     d: 'M2 6.4 L7.4 11.6 L12 3 L16.6 11.6 L22 6.4 V17.4 H2 Z M2 19 H22 V21.8 H2 Z',
+  },
+
+  // ---- the map. Each is a node type a player routes through, and the map is
+  // read at about 20px, so these are silhouettes the way the trait pips are.
+
+  // Two swords crossed at the hilt, each with its guard and pommel, so the X
+  // is a pair of weapons and not a cross. One sword is the `power` icon's four
+  // parts turned through 45 degrees; the other is its mirror.
+  fight: {
+    shape: 'two crossed swords',
+    fillRule: 'nonzero',
+    d:
+      'M4.93 4.93 L7.19 5.49 L16.38 14.69 L14.69 16.38 L5.49 7.19 Z' +
+      ' M12.99 18.08 L18.08 12.99 L19.21 14.12 L14.12 19.21 Z' +
+      ' M15.96 17.37 L17.37 15.96 L19.64 18.22 L18.22 19.64 Z' +
+      circle(19.78, 19.78, 1.7) +
+      ' M19.07 4.93 L16.81 5.49 L7.62 14.69 L9.31 16.38 L18.51 7.19 Z' +
+      ' M11.01 18.08 L5.92 12.99 L4.79 14.12 L9.88 19.21 Z' +
+      ' M8.04 17.37 L6.63 15.96 L4.36 18.22 L5.78 19.64 Z' +
+      circle(4.22, 19.78, 1.7),
+  },
+  // A round head with five spikes on a handle. Harder than a fight, and it
+  // says so with a weapon that is heavier than a sword.
+  elite: {
+    shape: 'a spiked mace',
+    fillRule: 'nonzero',
+    d:
+      circle(12, 9, 5) +
+      ' M10.7 4.4 L12 1 L13.3 4.4 Z' +
+      ' M15.33 5.57 L18.93 5 L16.63 7.83 Z' +
+      ' M16.63 10.17 L18.93 13 L15.33 12.43 Z' +
+      ' M7.37 10.17 L5.07 13 L8.67 12.43 Z' +
+      ' M7.37 7.83 L5.07 5 L8.67 5.57 Z' +
+      ' M10.9 13 H13.1 V22.5 H10.9 Z',
+  },
+  // A signpost: an arrow-shaped board on a post. Something on the road whose
+  // outcome is not printed on the map.
+  event: {
+    shape: 'a signpost',
+    fillRule: 'nonzero',
+    d: 'M11 3 H13 V22.5 H11 Z M5.5 6.5 H17.5 L20.8 9.5 L17.5 12.5 H5.5 Z M8 20.5 H16 V22.5 H8 Z',
+  },
+  // A balance on a post with a pan each side. Trade, not treasure - the coin
+  // purse is `gold`, which is what you spend here.
+  shop: {
+    shape: 'a pair of scales',
+    fillRule: 'nonzero',
+    d:
+      'M11.2 3 H12.8 V21 H11.2 Z M6 20.5 H18 V22.5 H6 Z M3 6 H21 V7.6 H3 Z' +
+      ' M3 7.4 L1.2 13.6 L2.4 13.6 L4.2 7.4 Z M4.2 7.4 L9.6 13.6 L8.4 13.6 L3 7.4 Z' +
+      ' M21 7.4 L22.8 13.6 L21.6 13.6 L19.8 7.4 Z M19.8 7.4 L14.4 13.6 L15.6 13.6 L21 7.4 Z' +
+      ' M1.5 13.5 H9.5 A4 4 0 0 1 1.5 13.5 Z M14.5 13.5 H22.5 A4 4 0 0 1 14.5 13.5 Z',
+  },
+  // A hammer, head up-left and handle down-right. The anvil is taken: it is
+  // the dwarf, and one shape means one thing.
+  forge: {
+    shape: 'a hammer',
+    fillRule: 'nonzero',
+    d: 'M3.5 4.5 H15.5 V11.5 H3.5 Z M14.28 7.21 L22.28 20.21 L19.72 21.79 L11.72 8.79 Z',
+  },
+  // A flame over two crossed logs.
+  rest: {
+    shape: 'a campfire',
+    fillRule: 'nonzero',
+    d:
+      'M12 2.5 C14.5 6 17.6 8.4 17.6 12.6 C17.6 15.6 15.2 17.6 12 17.6 C8.8 17.6 6.4 15.6 6.4 12.6' +
+      ' C6.4 10 8.2 8.6 9 6.4 C9.6 8.4 10.2 9.6 11.6 10.2 C11 7.4 11.4 4.8 12 2.5 Z' +
+      ' M3 19.6 L20.6 21.4 L20.4 23 L2.8 21.2 Z M21 19.6 L3.4 21.4 L3.6 23 L21.2 21.2 Z',
+  },
+  // A skull: cranium, jaw with teeth, two eye holes and a nose. The one node
+  // that ends an act.
+  boss: {
+    shape: 'a skull',
+    fillRule: 'evenodd',
+    d:
+      'M4.5 10 A7.5 7.5 0 0 1 19.5 10 V13.2 C19.5 14.6 18.4 15.6 17 15.8 V21 H15.2 V18.8 H13.2 V21' +
+      ' H10.8 V18.8 H8.8 V21 H7 V15.8 C5.6 15.6 4.5 14.6 4.5 13.2 Z' +
+      circle(9.2, 10.6, 2.1) +
+      circle(14.8, 10.6, 2.1) +
+      ' M12 13 L10.9 15.2 H13.1 Z',
+  },
+  // A tied money bag: the run's currency, which only a shop takes.
+  gold: {
+    shape: 'a tied money bag',
+    fillRule: 'nonzero',
+    d:
+      'M12 4 C9 4 8.6 6.6 8.6 7.4 C4.8 9.8 3.2 14 3.6 17.4 C4 20.6 7 22.4 12 22.4 C17 22.4 20 20.6' +
+      ' 20.4 17.4 C20.8 14 19.2 9.8 15.4 7.4 C15.4 6.6 15 4 12 4 Z M8.2 7.2 H15.8 V8.8 H8.2 Z',
+  },
+  // Two cards, one behind the other.
+  deck: {
+    shape: 'two overlapping cards',
+    fillRule: 'nonzero',
+    d: 'M4.5 3.5 H15 V17.5 H4.5 Z M9 6.5 H19.5 V20.5 H9 Z',
   },
 };
 
