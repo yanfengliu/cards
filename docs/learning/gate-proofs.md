@@ -6,6 +6,73 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-10 — the class layer: Volley, Scorch, and a run that is the class it was started as (`test/hero-attacks.test.ts`, `test/classes.test.ts`)
+
+Taken on branch `worktree-agent-aa48bc3f62599eab6`, cut from `8b4177c`; the suite is **189 tests** here, 164 at the base before the two files were added. `test/hero-attacks.test.ts` is 13 of them and `test/classes.test.ts` is 12.
+
+Both files were written by a worker that died to a rate limit before it could make any of them go red, and both carry `Mutation watched going red:` comments naming a mutation. **Those comments were claims, not evidence.** Every one of the fifteen below was applied to the shipped source at this revision, the shipped test command was run, and the tree was restored and its digest compared before the next mutation. All fifteen went red. `src/engine/resolver.ts` hashes `6ca08197…` before the first mutation and after the last.
+
+The commands were `node --test test/hero-attacks.test.ts` and `node --test test/classes.test.ts`. Failure text below is the `node:test` spec reporter's own, trimmed of stack frames.
+
+### The instrument was wrong first, and said so
+
+The runner writes each mutation by replacing an anchor string. Every source file in this repo is CRLF, and the anchors were written with `\n`, so **eight of the fifteen multi-line mutations matched nothing on the first pass** — the single-line ones matched and the multi-line ones did not. The runner asserts each anchor occurs exactly once before writing, so those eight were reported as `BROKEN-MUTATION` rather than run; without that assertion they would have written nothing, run a clean tree, and come back green, and eight gates would have been recorded as unprovable. A no-op edit and a gate that cannot fail produce the same green.
+
+The same guard caught a real ambiguity: `const cls = classOf(content, classId);` appears in both `startRun` and `contentForClass`, so M15's first anchor matched twice and was refused.
+
+### Volley — `src/engine/resolver.ts`
+
+| mutation | site | of 13 | the failure |
+|---|---|---|---|
+| `swingsOf` returns 1 for everything | `swingsOf` | 6 | "a Volley act is two attacks from one act": `1 !== 2` |
+| one `attack` at `power(e) * swingsOf(e)` — the other way to write "swings twice" | `act`, `attack` | 7 | "a Volley unit that dies to its first swing's retaliation never swings again": `one swing landed, not two` — `18 !== 19` |
+| both swings applied inside one `apply`, no checkpoint between them | `act`, `attack` | 5 | same test, on the stream: actual `[acted, attacked, retaliated, attacked, retaliated, died]` against expected `[acted, attacked, retaliated, died]` |
+| the `e.isHero ? 0 :` guard deleted, so a hero trades on its own swing | `attack` | 2 | "mutual damage applies to a Volley swing as to any other": `a hero takes nothing back on either swing` — `24 !== 30` |
+
+The second and third are the two ways to get Volley wrong, and they fail differently on purpose. Writing it as one doubled swing keeps the event count right and gets the *damage* wrong (`18 !== 19` is the wall taking 2 from a dead body's single swing); writing it as two swings inside one `apply` keeps the damage right and gets the *checkpoint* wrong, letting a body killed by the first retaliation swing again from off the board. Only the shipped shape — two separate `attack` effects — passes both.
+
+**The third mutation also tripped the seed-window guard**, which is the more interesting half. "the second swing lands before any reaction to the first" searches seeds 1..24 for a roll that sends the second swing at the waker, and asserts at the end: `no seed in 1..24 sent the second swing at the waker, so the Health half of this gate did not run`. Under the mutation that is exactly what came back. A gate that cannot tell "passed" from "did not run" reports the second as the first; this one says which happened, and was made to say it.
+
+### Scorch — `src/engine/resolver.ts`
+
+| mutation | site | of 13 | the failure |
+|---|---|---|---|
+| the `scorch` spawn dropped from the `act` case | `act` | 7 | trace `[act, attack, afterAct]` against expected `[act, attack, scorch, afterAct]` |
+| the `t.isHero` filter dropped from the shared loop | `damageAll`/`scorch` | 5 | a third `damaged` appears; the enemy hero burns |
+| the `scorch` spawned ahead of the attacks | `act` | 5 | trace `[act, scorch, attack, afterAct]`; the burn kills the Guard before the swing can hit it, and "Scorch follows the swing" fails with both deaths ahead of the `attacked` |
+| `effect.kind === 'damageAll'` dropped from the fizzle condition | `damageAll`/`scorch` | 1 | "a Scorch with nothing to burn says nothing": `and said nothing` — a `fizzled` appears between `attacked` and `afterActed` |
+| Scorch made to trade, dealing the burned unit's Power back to the burner | `damageAll`/`scorch` | 1 | "Scorch is spell damage on a unit too": `the swing's trade with the Guard, and nothing from the brute` — `1 !== 8` |
+
+The last one is not a mutation the file's own comments name. It was added because "Scorch is spell damage" is the claim the whole shared-loop design rests on, and the comments only covered Scorch being written *as an attack per unit*; this is the narrower defect of keeping the loop and adding a trade inside it. It goes red, so the claim is held by the loop and not by the loop's shape.
+
+### The content — `src/content/classes.ts`
+
+| mutation | site | of 12 | the failure |
+|---|---|---|---|
+| the two elves removed from the Knight's pool | `KNIGHT.rewards` | 1 | `the Knight's pool has no elf. Class sets the pool and races appear across all of it; the pool holds human, dwarf and the player's cards come in human, dwarf, elf.` |
+| the Ranger's hero given Power 2 | `RANGER.hero` | 1 | "the three heroes are the design's three attacks": `2 !== 1` |
+
+The race gate reads the races off `PLAYER_CARDS` rather than listing them, so it asks the question of every class the day a fourth race lands. Today all three pools hold all three player races.
+
+### The run — `src/run/run.ts`
+
+| mutation | site | of 12 | the failure |
+|---|---|---|---|
+| `replayRun` ignoring `log.classId`, replaying every log as the default class | `replayRun` | 2 | not an assertion but a thrown domain error: `run pool: no deck instance "u_berserker#13" in this run's deck. The deck holds: u_squire#0, … u_avenger#13. An instance id is minted when a card enters the deck and is never reused.` |
+| `contentForClass` keeping the full class list | `contentForClass` | 1 | derived class list `[knight, ranger, mage]` against expected `[knight]` |
+| `classOf` falling back to the default class instead of throwing | `classOf` | 3 | `Missing expected exception.`, three times |
+| `startRun` ignoring `classId` and reading the content's own fields | `startRun` | 5 | `'knight' !== 'ranger'`, and `200 !== 180` where the controller checks the run's own Health bar |
+
+The `replayRun` mutation is the one the coordinator named as load-bearing, and it is worth recording *how* it fails. It does not reach the hash comparison at all: replaying a Ranger's log as a Knight asks the Knight's deck for a card the Ranger drafted, and the deck says so by name. That is a better failure than a hash mismatch, and it is the run pool's error message doing the work rather than the test's.
+
+### Bound
+
+- Fifteen mutations against two test files at one revision. A gate proven to fail on one defect is not proven to fail on a different one, and nothing here says the two files are complete — only that no claim checked below is held by a gate that cannot go red.
+- The engine gates are fixtures, not shipped cards. No id in `test/hero-attacks.test.ts` exists in `src/content`; Volley is pinned at `VOLLEY_SWINGS` (2) and Scorch at `SCORCH_DAMAGE` (1). A shipped card whose Volley interacts with a trait no fixture carries is outside this.
+- The class gates are the shipped content, deliberately, and walk seeds 1..6 per class. A property that fails one seed in ten thousand is not covered; `npm run verify:run` covers 200 seeds of the Knight alone.
+- The class-pick screen is checked as HTML, not as pixels.
+- Nothing here is a claim about balance. See `docs/work/10_classes/plan.md` for the per-class run measurements, and `docs/policies/local-rules.md` for why they are not targets.
+
 ## 2026-09-08 — a run a person plays is the run `replayRun` replays (`test/ui-run.test.ts`, `test/map-render.test.ts`)
 
 Taken on branch `worktree-agent-af6686455b89ab68a`, cut from `ea8852c`; the suite is **164 tests** here, 156 at the base. Every mutation below was applied to the stated file, the stated command run, and the tree restored before the next one. The commands were `node --test test/ui-run.test.ts` and `node --test test/map-render.test.ts`.
