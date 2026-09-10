@@ -134,16 +134,23 @@ export type CardSigilDef = {
 };
 
 /**
- * What a hero sigil does to the run. Each is a number the run applies without
- * the engine growing a verb: the two Power amounts go in as `SideRules` on the
- * hero, `maxHealth` moves the run's life bar, and `handSize` moves the hand
- * size on the pool the fight is handed. `amount` is added to the default.
+ * What a hero sigil does to the run. Each is a number the run applies to the
+ * `HeroSpec` it hands every fight, or to its own Health bar, without the
+ * engine growing a field or a verb: `maxHealth` moves the run's life bar and
+ * heals by the same amount when taken; `heroPower` and `heroArmour` are added
+ * to the hero the fight is handed (`heroSpecFor` in `nodes.ts`). `amount` is
+ * added to the content's number.
+ *
+ * Deliberately absent, because each needs the engine: a Relay or Wake amount
+ * for one side (the resolver reads one constant for both sides), and a hand
+ * size or energy for one side (`CardPool.handSize` and `energyPerTurn` are
+ * read for both sides by `fight.ts`, so a hero sigil that moved either would
+ * hand the enemy the same card). `docs/work/9_sigils/plan.md` lists them.
  */
 export type HeroSigilEffect =
-  | { readonly kind: 'relayPower'; readonly amount: number }
-  | { readonly kind: 'wakePower'; readonly amount: number }
   | { readonly kind: 'maxHealth'; readonly amount: number }
-  | { readonly kind: 'handSize'; readonly amount: number };
+  | { readonly kind: 'heroPower'; readonly amount: number }
+  | { readonly kind: 'heroArmour'; readonly amount: number };
 
 /**
  * A sigil placed on the hero. "This is where relics went": a won elite or boss
@@ -163,9 +170,10 @@ export type SigilDef = CardSigilDef | HeroSigilDef;
  * One grant, as the run's ledger records it: the hero, or a deck card by its
  * instance id. The list is the run's history of what it picked up and in what
  * order; the *effect* of each grant lives where it applies - on the deck card
- * for a card sigil, in `heroRules`/`handSizeFor`/the Health bar for a hero
- * sigil - and `test/sigils.test.ts` holds ledger and deck to each other.
- * `hashRun` covers the list.
+ * for a card sigil, on the Health bar or in `heroSpecFor` for a hero sigil -
+ * and `sigilProblems` in `sigils.ts` holds ledger and state to each other
+ * while `checkSigilsInFights` in `src/sim/runmeasure.ts` holds the ledger to
+ * what a fight is actually handed. `hashRun` covers the list.
  */
 export type SigilGrant = {
   /** The hero, for a run-long sigil, or a deck card by its instance id. */
@@ -268,7 +276,11 @@ export type RunContent = {
   readonly sigils: readonly SigilDef[];
   /** How many hero sigils a won elite or boss puts on offer. */
   readonly heroSigilOffers: number;
-  /** Chance, rolled on the run stream, that a won ordinary fight offers a card sigil. */
+  /**
+   * Chance that a won ordinary fight offers a card sigil beside its cards.
+   * Rolled on a stream keyed to the node, never on the run stream, so the
+   * shelf's cards are drawn exactly as they were before sigils existed.
+   */
   readonly cardSigilChance: number;
   /** How many cards a fight reward offers. */
   readonly rewardOffers: number;
@@ -299,7 +311,12 @@ export type RunEnding = {
 
 export type RunChoice =
   | { readonly kind: 'travel'; readonly nodeId: number }
-  /** A won elite or boss: which hero sigil of those offered, or -1 for none. */
+  /**
+   * A won elite or boss: which hero sigil of those offered, or -1 for none.
+   * Recorded at every won elite or boss, even when nothing was on offer and
+   * -1 was the only answer, so a log's shape is a function of the map and the
+   * fights alone.
+   */
   | { readonly kind: 'sigil'; readonly pick: number }
   /** A won fight: which of the shelf's `RewardOption`s, or -1 for none. */
   | { readonly kind: 'reward'; readonly pick: number }
@@ -337,10 +354,9 @@ export type RunLog = {
   readonly seed: number;
   /**
    * The shape of the log, `RUN_LOG_FORMAT` when written by this code. A log
-   * from an earlier format is refused by `replayRun` with the two numbers
-   * named, never replayed as if it were current: the choices it holds index
-   * shelves that are no longer drawn in the same order, so a "successful"
-   * replay of it would be a different run wearing this one's seed.
+   * from an earlier format is upgraded by `migrateRunLog` in `run.ts` before
+   * it is replayed; `replayRun` itself takes only the current format, so a
+   * stale log cannot be replayed as if it were current by accident.
    */
   readonly format: number;
   readonly nodes: NodeRecord[];
@@ -350,14 +366,18 @@ export type RunLog = {
  * The log format this code writes and replays.
  *
  *   1  units 5 and 8: travel, reward, forge, shop, event; no `format` field
- *   2  unit 9: the `sigil` and `attach` choices, and the reward shelf can
- *      hold a card sigil, so a `reward` pick no longer always names a card
+ *   2  unit 9: a `sigil` choice at every won elite or boss, an `attach`
+ *      choice after a reward pick that was a card sigil, and the reward
+ *      shelf can end in a card sigil, so a `reward` pick no longer always
+ *      names a card
  *
- * A saved run written under format 1 is refused on load rather than resumed,
- * and `src/ui/runapp.ts` says so and starts fresh. There is no migration
- * because there is nothing to migrate to: the run stream is consumed
- * differently from the first won elite on, so the old choices do not describe
- * any run this content can produce.
+ * A format 1 log is upgraded, not refused. The sigil offers draw from
+ * node-keyed streams and the card sigil is appended after the cards, so every
+ * shelf a format 1 log indexed is still drawn exactly as it was, and the one
+ * choice such a log lacks - the hero sigil at a won elite or boss - is
+ * inserted as a decline. `test/sigils.test.ts` replays two logs recorded
+ * before sigils existed, `test/golden/run-log-format-1-*.json`, to the hashes
+ * they had then.
  */
 export const RUN_LOG_FORMAT = 2;
 
@@ -371,7 +391,10 @@ export const RUN_LOG_FORMAT = 2;
  */
 export type RunAgentChoice = {
   travel(run: RunState, options: readonly MapNode[]): number;
-  /** A won elite or boss. `-1` declines. Not asked when nothing is on offer. */
+  /**
+   * A won elite or boss. `-1` declines. Asked at every won elite or boss; when
+   * `offer` is empty, -1 is the only legal answer.
+   */
   sigil(run: RunState, offer: readonly HeroSigilDef[]): number;
   reward(run: RunState, offer: readonly RewardOption[]): number;
   /** Which deck card a picked card sigil goes on. An index into `offers`, which are deck indices. */

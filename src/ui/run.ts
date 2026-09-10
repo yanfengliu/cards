@@ -491,11 +491,16 @@ export function createRunController(content: RunContent, seed: number, resume?: 
     };
     won = w;
     if (p.node.type === 'elite' || p.node.type === 'boss') {
-      const offer = heroSigilOffer(cursor);
+      // `visit` asks at every won elite or boss. With nothing left to offer
+      // the only legal answer is -1, so the controller gives it on the
+      // player's behalf rather than showing a screen with one button, and
+      // the log holds the choice either way.
+      const offer = heroSigilOffer(cursor, p.node);
       if (offer.length > 0) {
         phase = { kind: 'sigil', node: p.node, encounter: p.encounter, outcome, offer, ...numbersOf(w) };
         return;
       }
+      w.choices.push({ kind: 'sigil', pick: -1 });
     }
     toReward(w);
   }

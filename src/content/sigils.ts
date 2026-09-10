@@ -4,8 +4,9 @@
 // Relay Sigil makes any unit a relay." and "A sigil placed on the hero applies
 // to the whole run. This is where relics went." Two kinds, two targets, and the
 // same discipline as `cards.ts`: a sigil is a row of data naming an effect the
-// engine already has. A card sigil names a `Trait`; a hero sigil names one of
-// four run-level modifiers. No sigil is an `if` anywhere in `src/engine/`.
+// run already applies. A card sigil names a `Trait`; a hero sigil names one of
+// three numbers on the hero the run hands every fight. No sigil is an `if`
+// anywhere in `src/engine/`, and nothing under `src/engine/` changed for them.
 //
 // **Every weight and amount here is a starting guess, and none of them is a
 // balance claim.** The owner's ruling of 2026-09-09 is that content is not
@@ -33,39 +34,27 @@ export const CARD_SIGILS: readonly CardSigilDef[] = [
 ];
 
 /**
- * Four hero sigils, each a modifier the run can apply without a new engine
- * verb:
+ * Three hero sigils, one per number the run can move on its hero without the
+ * engine learning anything. Each is applied in `src/run/`: `maxHealth` moves
+ * the run's own life bar the moment it is taken and heals by the same amount,
+ * because a bigger bar with the same hole in it is not a reward the player can
+ * feel at the boss they just beat; `heroPower` and `heroArmour` are added to
+ * the `HeroSpec` every later fight is handed (`heroSpecFor` in `nodes.ts`).
+ * The run's hero has 200 Health (`src/run/content.ts`), so the Oak is fifteen
+ * percent of the bar - a rest and a half.
  *
- *   - `relayPower` and `wakePower` move the amount a cascade trait grants on
- *     the player's side, through `SideRules` on the hero. The enemy's Relays,
- *     if it ever fields one, stay at the engine's default.
- *   - `maxHealth` raises the run's life bar and heals by the same amount the
- *     moment it is taken, because a bigger bar with the same hole in it is not
- *     a reward the player can feel at the boss they just beat.
- *   - `handSize` draws one more card a turn, through the pool the fight is
- *     handed. A thin deck cycles to its good cards faster with it, which is
- *     the "deck thinning as a skill" lever pointed at from the other end.
- *
- * Two of the design's own examples are deliberately not here, and
- * `docs/work/9_sigils/plan.md` says why: "Relay reaches two slots right" adds an
- * ordering decision to the resolver, and "leader damage heals you" needs a
- * heal verb the engine does not have.
+ * What is deliberately not here, and why, so nobody adds it as a data row and
+ * finds it silently wrong. The design's own example, "Relay reaches two slots
+ * right", and a Relay or Wake *amount* for one side both need the resolver to
+ * read a rule off the hero, which is an engine change and a coordinator
+ * decision (`ARCHITECTURE.md`). A wider hand or more energy would go through
+ * `CardPool.handSize` or `energyPerTurn`, and `src/engine/fight.ts` reads both
+ * for **both sides** - `enemyPlays` draws the enemy to the same `handSize` -
+ * so a hero sigil that moved either would hand the enemy the same card. That
+ * one was built once, tested only on the player's hand, and taken out;
+ * `docs/work/9_sigils/plan.md` records it.
  */
 export const HERO_SIGILS: readonly HeroSigilDef[] = [
-  {
-    kind: 'hero',
-    id: 'si_chain',
-    name: 'Sigil of the Chain',
-    effect: { kind: 'relayPower', amount: 1 },
-    weight: 3,
-  },
-  {
-    kind: 'hero',
-    id: 'si_vigil',
-    name: 'Sigil of Vigil',
-    effect: { kind: 'wakePower', amount: 1 },
-    weight: 3,
-  },
   {
     kind: 'hero',
     id: 'si_oak',
@@ -75,10 +64,17 @@ export const HERO_SIGILS: readonly HeroSigilDef[] = [
   },
   {
     kind: 'hero',
-    id: 'si_wide_hand',
-    name: 'Sigil of the Wide Hand',
-    effect: { kind: 'handSize', amount: 1 },
-    weight: 2,
+    id: 'si_lance',
+    name: 'Sigil of the Lance',
+    effect: { kind: 'heroPower', amount: 1 },
+    weight: 3,
+  },
+  {
+    kind: 'hero',
+    id: 'si_bulwark',
+    name: 'Sigil of the Bulwark',
+    effect: { kind: 'heroArmour', amount: 1 },
+    weight: 3,
   },
 ];
 
@@ -90,12 +86,13 @@ export const SIGILS: readonly SigilDef[] = [...CARD_SIGILS, ...HERO_SIGILS];
  *
  *   - A won elite or boss offers `heroSigilOffers` hero sigils the run does not
  *     already hold; the player takes one or none. Two, so it is a choice and
- *     not a prize.
- *   - A won ordinary fight rolls `cardSigilChance` on the run stream and, when
- *     it hits, puts one card sigil on the shelf beside the three cards. One in
- *     two is a starting guess: at that rate a run that clears act 1 has seen
- *     about two, which is enough to author a cascade and not enough to make
- *     every deck the same deck.
+ *     not a prize. With three in the pool, the third such node offers one and
+ *     the fourth offers nothing - the run then records a decline by itself.
+ *   - A won ordinary fight rolls `cardSigilChance` on that node's own stream
+ *     and, when it hits, puts one card sigil on the shelf beside the three
+ *     cards. One in two is a starting guess: at that rate a run that clears
+ *     act 1 has seen about two, which is enough to author a cascade and not
+ *     enough to make every deck the same deck.
  */
 export const SIGIL_CONTENT = {
   sigils: SIGILS,

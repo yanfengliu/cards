@@ -137,15 +137,15 @@ const CARD_SIGIL_VALUE: Readonly<Record<CardSigilDef['trait'], number>> = {
 
 /**
  * Which hero sigil the greedy bot reaches for first. Health is the run's life
- * bar and is what ends most runs, so it comes first; the two Power amounts
- * feed the cascade the placement bot is searching over; a wider hand is worth
- * the least to a bot that already spends all its energy most turns.
+ * bar and is what ends most runs, so it comes first; Armour on the hero comes
+ * off every hit it takes, which over a run of many small hits is worth more
+ * than one Power on a hero that swings once a round. Keyed by the effect
+ * union, so a kind the run can apply cannot ship without a preference.
  */
 const HERO_SIGIL_VALUE: Readonly<Record<HeroSigilDef['effect']['kind'], number>> = {
   maxHealth: 4,
-  relayPower: 3,
-  wakePower: 2,
-  handSize: 1,
+  heroArmour: 3,
+  heroPower: 2,
 };
 
 function greedyReward(run: RunState, offer: readonly RewardOption[]): number {

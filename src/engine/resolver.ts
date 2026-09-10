@@ -110,31 +110,6 @@ export const WAKE_POWER = 2;
 export const DEFAULT_MAX_ITERATIONS = 4096;
 
 /**
- * The Relay and Wake amounts in force on one side: the hero's `rules`, with
- * the engine's constants filling whatever a hero sigil did not move.
- *
- * Read from the hero rather than from a fight-level setting because the hero
- * is the entity the design puts a hero sigil *on*, and because it makes the
- * rule per side by construction: the player's Relays can hand +3 while the
- * enemy's hand +2, with no side check anywhere in `triggersFor`. A board with
- * no hero in its rightmost slot - which no fight produces - answers with the
- * defaults rather than throwing, since a lookup inside the resolver's own
- * loop is the wrong place for a structural error to surface.
- */
-export function sideRulesOf(
-  state: GameState,
-  side: Side,
-): { readonly relayPower: number; readonly wakePower: number } {
-  const board = state.board[side];
-  const last = board[board.length - 1];
-  const rules = last !== undefined && last.isHero ? last.rules : null;
-  return {
-    relayPower: rules?.relayPower ?? RELAY_POWER,
-    wakePower: rules?.wakePower ?? WAKE_POWER,
-  };
-}
-
-/**
  * Legal targets for an attack by `attacker`.
  *
  * Design rules, in this order:
@@ -512,22 +487,10 @@ function triggersFor(state: GameState, event: GameEvent, extra: TriggerRule | nu
         // did not finish acting. That is the existing "no unit acts after
         // dying" rule meeting the new trade, and it is a real cost on a fragile
         // Relay body rather than a special case written for it.
-        //
-        // The amount is the side's, not the constant's: a hero sigil can move
-        // it for one side through `sideRulesOf`, and a sigil-granted Relay is
-        // indistinguishable here from a printed one because both are the word
-        // `relay` in `e.traits`. That is the `AGENTS.md` rule - a sigil is data
-        // plus a named trait - and it is why nothing in this function asks
-        // where a trait came from.
         if (e.traits.includes('relay')) {
           const r = rightNeighbour(state, e);
           if (r !== null && r.alive) {
-            out.push({
-              kind: 'gainPower',
-              uid: r.uid,
-              amount: sideRulesOf(state, e.side).relayPower,
-              sourceUid: e.uid,
-            });
+            out.push({ kind: 'gainPower', uid: r.uid, amount: RELAY_POWER, sourceUid: e.uid });
           }
         }
       }
@@ -541,12 +504,7 @@ function triggersFor(state: GameState, event: GameEvent, extra: TriggerRule | nu
       // to the LEFT of the one that has not acted yet, which is exactly the
       // neighbour Wake reads.
       if (event.kind === 'died' && event.rightUid === e.uid && e.traits.includes('wake')) {
-        out.push({
-          kind: 'gainPower',
-          uid: e.uid,
-          amount: sideRulesOf(state, e.side).wakePower,
-          sourceUid: event.uid,
-        });
+        out.push({ kind: 'gainPower', uid: e.uid, amount: WAKE_POWER, sourceUid: event.uid });
       }
 
       if (extra !== null) {

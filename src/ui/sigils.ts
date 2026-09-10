@@ -23,8 +23,8 @@
  * controller, and the controller advances it through `replayRun` alone.
  */
 
-import type { UnitCard } from '../engine/state.ts';
-import { hasTrait } from '../run/deck.ts';
+import type { Trait, UnitCard } from '../engine/state.ts';
+import { grantedTraits, hasTrait, resolveDeckCard } from '../run/deck.ts';
 import { heldHeroSigils, sigilById } from '../run/nodes.ts';
 import type { CardSigilDef, DeckCard, HeroSigilDef, RunContent, RunState } from '../run/types.ts';
 import { STAT_TERMS, TRAIT_TERMS } from '../render/glossary.ts';
@@ -45,9 +45,11 @@ function cardSigilWords(sigil: CardSigilDef): string {
 }
 
 /**
- * The hero sigil offer. Each option says what it does at the amount in force
- * - "+3 instead of +2" - and declining is its own button, because a run where
- * you cannot decline has one fewer decision.
+ * The hero sigil offer. Each option says what it does at the number the fight
+ * will use, and declining is its own button, because a run where you cannot
+ * decline has one fewer decision. Never shown for an empty offer: the
+ * controller declines on the player's behalf then, since -1 is the only
+ * answer there is.
  */
 export function heroSigilOfferHtml(p: Extract<RunPhase, { kind: 'sigil' }>, state: RunState): string {
   const f = p.outcome.fight;
@@ -89,30 +91,31 @@ export function sigilShelfButton(sigil: CardSigilDef, pick: number): string {
  * The attach screen: the whole deck, the cards that can take the sigil as
  * buttons and the rest disabled with the reason on them. `cardButton` is the
  * run screen's own card button, handed in so a deck card here is drawn
- * exactly as it is at the forge.
+ * exactly as it is at the forge, sigil marks included.
  */
 export function attachHtml(
   p: Extract<RunPhase, { kind: 'attach' }>,
   state: RunState,
-  cardButton: (card: UnitCard, attrs: string, foot: string) => string,
-  resolve: (dc: DeckCard) => UnitCard,
+  cardButton: (card: UnitCard, attrs: string, foot: string, sigilTraits: readonly Trait[]) => string,
 ): string {
   const trait = TRAIT_TERMS[p.sigil.trait];
+  const pool = state.content.pool;
   const cards = state.deck
     .map((dc, i) => {
-      const card = resolve(dc);
+      const card = resolveDeckCard(pool, dc);
       const can = p.offers.includes(i);
       const why = can
         ? ''
-        : hasTrait(state.content.pool, dc, p.sigil.trait)
+        : hasTrait(pool, dc, p.sigil.trait)
           ? `already ${trait.name}`
           : 'cannot take it';
+      const marks = sigilMarks(dc, state.content);
       return cardButton(
         card,
         `data-run="attach" data-index="${i}"${can ? '' : ' disabled'}`,
-        (sigilMarks(dc, state.content).length > 0
-          ? `<span class="runcard__sigil">${esc(sigilMarks(dc, state.content))}</span>`
-          : '') + (can ? '' : `<span class="runcard__price is-short">${esc(why)}</span>`),
+        (marks.length > 0 ? `<span class="runcard__sigil">${esc(marks)}</span>` : '') +
+          (can ? '' : `<span class="runcard__price is-short">${esc(why)}</span>`),
+        grantedTraits(pool, dc),
       );
     })
     .join('');

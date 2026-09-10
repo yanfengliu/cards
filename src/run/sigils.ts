@@ -2,13 +2,19 @@
 //
 // A grant is recorded twice on purpose: in the run's ledger (`RunState.sigils`,
 // the history of what was picked up and where it went) and where it applies
-// (the trait on the `DeckCard`, or the rule `heroRules` reads off the ledger).
-// Two records of one fact can drift, and this file is the answer to that
-// rather than an argument that they will not: `sigilProblems` walks both
-// directions - every ledger entry has its effect in place, every effect in
-// place has its ledger entry - and returns every disagreement as a sentence.
-// `npm run verify:run` fails on a non-empty list, and `test/sigils.test.ts`
-// runs it over every fixture run.
+// (the trait on the `DeckCard`, or the Health bar a hero sigil moved). Two
+// records of one fact can drift, and this file is the answer to that rather
+// than an argument that they will not: `sigilProblems` walks both directions -
+// every ledger entry has its effect in place, every effect in place has its
+// ledger entry - and returns every disagreement as a sentence. `npm run
+// verify:run` fails on a non-empty list, and `test/sigils.test.ts` runs it
+// over every fixture run.
+//
+// What it cannot see, and what covers that instead: the two hero effects that
+// are numbers read off the ledger at fight time, `heroPower` and `heroArmour`,
+// have no second record here to drift from. `checkSigilsInFights` in
+// `src/sim/runmeasure.ts` compares them, and every card sigil, against the
+// fight the run actually hands the engine.
 
 import { sigilById } from './nodes.ts';
 import type { RunState, SigilDef } from './types.ts';
@@ -18,6 +24,8 @@ export function sigilProblems(run: RunState): string[] {
   const content = run.content;
   const heldHero = new Set<string>();
   const ledgerCard = new Set<string>();
+  // The bar the content plus the ledger say the hero should have.
+  let bar = content.hero.health;
 
   for (const g of run.sigils) {
     let def: SigilDef;
@@ -34,6 +42,7 @@ export function sigilProblems(run: RunState): string[] {
       }
       if (heldHero.has(def.id)) problems.push(`the hero holds "${def.id}" twice`);
       heldHero.add(def.id);
+      if (def.effect.kind === 'maxHealth') bar += def.effect.amount;
       continue;
     }
     const target = g.target;
@@ -75,6 +84,17 @@ export function sigilProblems(run: RunState): string[] {
         );
       }
     }
+  }
+
+  // The one hero effect that is state rather than a number read at fight time.
+  if (run.hero.maxHealth !== bar) {
+    problems.push(
+      `the hero's maximum Health is ${run.hero.maxHealth}, and the content's ${content.hero.health} ` +
+        `plus every maximum-Health sigil in the ledger make it ${bar}`,
+    );
+  }
+  if (run.hero.health > run.hero.maxHealth) {
+    problems.push(`the hero stands at ${run.hero.health}, above its maximum of ${run.hero.maxHealth}`);
   }
 
   return problems;

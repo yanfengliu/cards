@@ -58,17 +58,16 @@ const POOL: CardPool = {
 
 /**
  * The fixture's sigils: one card sigil per trait and every hero effect once.
- * Small on purpose - a run that holds all four hero sigils has nothing left
+ * Small on purpose - a run that holds all three hero sigils has nothing left
  * to be offered, which is a branch worth walking.
  */
 const FIXTURE_SIGILS: readonly SigilDef[] = [
   { kind: 'card', id: 'fx_relay', name: 'Relay Sigil', trait: 'relay', weight: 2 },
   { kind: 'card', id: 'fx_wake', name: 'Wake Sigil', trait: 'wake', weight: 2 },
   { kind: 'card', id: 'fx_guard', name: 'Guard Sigil', trait: 'guard', weight: 1 },
-  { kind: 'hero', id: 'fx_chain', name: 'Chain', effect: { kind: 'relayPower', amount: 1 }, weight: 1 },
   { kind: 'hero', id: 'fx_oak', name: 'Oak', effect: { kind: 'maxHealth', amount: 10 }, weight: 1 },
-  { kind: 'hero', id: 'fx_hand', name: 'Hand', effect: { kind: 'handSize', amount: 1 }, weight: 1 },
-  { kind: 'hero', id: 'fx_vigil', name: 'Vigil', effect: { kind: 'wakePower', amount: 1 }, weight: 1 },
+  { kind: 'hero', id: 'fx_lance', name: 'Lance', effect: { kind: 'heroPower', amount: 1 }, weight: 1 },
+  { kind: 'hero', id: 'fx_bulwark', name: 'Bulwark', effect: { kind: 'heroArmour', amount: 1 }, weight: 1 },
 ];
 
 function fixtureContent(overrides: Partial<RunContent> = {}): RunContent {

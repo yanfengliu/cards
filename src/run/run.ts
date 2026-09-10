@@ -25,6 +25,8 @@
 //   - All three act maps are generated at setup, before the first choice. The
 //     map is therefore a function of the seed alone, which is what makes two
 //     routes through one seed comparable at all.
+//   - Sigil offers are node-keyed too, and never touch the run stream; see
+//     `nodes.ts` for why that is what lets a log from before sigils replay.
 //
 // The engine is composed, never reached into: `setupFight`, `runFight` and
 // `replayFight` are called with a `CardPool` this module builds. Nothing under
@@ -51,9 +53,8 @@ import {
   forgeOffers,
   goldFor,
   grantHeroSigil,
-  handSizeFor,
-  heroRules,
   heroSigilOffer,
+  heroSpecFor,
   applyEventEffect,
   healHero,
   restAmount,
@@ -80,9 +81,9 @@ export const RUN_STREAM = 'run';
  * the placement policy the fights are played with.
  *
  * Every method returns an index into the options it was handed, so a decision
- * is one integer and a run is a list of integers plus a seed. `reward` and
- * `shop` also accept `-1`, which is "take nothing" - declining is a decision,
- * and a run where you cannot decline has one fewer.
+ * is one integer and a run is a list of integers plus a seed. `reward`,
+ * `sigil` and `shop` also accept `-1`, which is "take nothing" - declining is
+ * a decision, and a run where you cannot decline has one fewer.
  */
 export type RunAgent = RunAgentChoice & {
   readonly placement: PlacementPolicy;
@@ -164,31 +165,29 @@ export function travelOptions(run: RunState): MapNode[] {
 }
 
 /**
- * The fight setup this node produces: deck, hero Health and hero sigils as
- * they stand now.
+ * The fight setup this node produces: deck, hero and sigils as they stand
+ * now.
  *
- * Hero sigils reach the fight through two seams the engine already had. The
- * rule amounts go on the hero's `SideRules`, so a Relay on the player's line
- * hands what the run's sigils say and the enemy's hand the default. The hand
- * size goes on the pool, which is where the engine reads it from anyway. A
- * run holding no hero sigil hands the fight exactly the setup it did before
- * sigils existed: no `rules` key, the pool's own hand size.
+ * A card sigil reaches the fight as a trait on its instance through `runPool`;
+ * a hero sigil reaches it as a number on the `HeroSpec` through `heroSpecFor`.
+ * Both are seams the engine already had. Nothing goes through the pool's two
+ * per-fight numbers, `handSize` and `energyPerTurn`, because `fight.ts` reads
+ * those for both sides and a hero sigil that moved one would hand the enemy
+ * the same card; `checkSigilsInFights` in `src/sim/runmeasure.ts` holds them
+ * still. A run holding no sigil hands the fight exactly the setup it did
+ * before sigils existed.
  */
 export function fightSetupFor(run: RunState, node: MapNode): FightSetup {
   const enc = encounterFor(run, node);
-  const pool = runPool(run.content.pool, run.deck);
-  const handSize = handSizeFor(run);
-  const rules = heroRules(run);
-  const bent = rules.relayPower !== undefined || rules.wakePower !== undefined;
   return {
     seed: fightSeedFor(run, node),
-    pool: handSize === pool.handSize ? pool : { ...pool, handSize },
+    pool: runPool(run.content.pool, run.deck),
     playerDeck: run.deck.map((d) => d.instanceId),
     enemyDeck: enc.enemyDeck,
     enemyOpening: enc.opening,
     // Hero Health persists across the whole run; the fight is handed the bar as
     // it stands, and whatever is left of it is carried out again below.
-    playerHero: { ...run.content.hero, health: run.hero.health, ...(bent ? { rules } : {}) },
+    playerHero: heroSpecFor(run),
     enemyHero: enc.enemyHero,
     maxRounds: run.content.maxRounds,
   };
@@ -234,19 +233,17 @@ function visit(run: RunState, node: MapNode, driver: Driver): NodeRecord {
 
       run.gold += goldFor(run, node);
 
-      // A won elite or boss offers a hero sigil first. `docs/design/game.md`:
-      // "boss and event rewards are hero sigils" - this is where relics went.
-      // The offer draws from the run stream before the card shelf does, so the
-      // shelf a replay recomputes is the shelf the player saw, in that order.
-      // Nothing on offer - every hero sigil already held, or a content set with
-      // none - asks no choice, the way an empty deck asks no forge.
+      // A won elite or boss asks about a hero sigil first, and always.
+      // `docs/design/game.md`: "boss and event rewards are hero sigils" - this
+      // is where relics went. The offer is the node's own draw, and when
+      // nothing is left to offer the only legal answer is -1. Asking every
+      // time is what keeps a log's shape a function of the map and the fights,
+      // which `migrateRunLog` relies on.
       if (node.type === 'elite' || node.type === 'boss') {
-        const sigils = heroSigilOffer(run);
-        if (sigils.length > 0) {
-          const pick = requirePick(driver.choose.sigil(run, sigils), sigils.length, 'sigil', true);
-          choices.push({ kind: 'sigil', pick });
-          if (pick >= 0) grantHeroSigil(run, sigils[pick]!);
-        }
+        const sigils = heroSigilOffer(run, node);
+        const pick = requirePick(driver.choose.sigil(run, sigils), sigils.length, 'sigil', true);
+        choices.push({ kind: 'sigil', pick });
+        if (pick >= 0) grantHeroSigil(run, sigils[pick]!);
       }
 
       // Then the shelf: cards, and at an ordinary fight sometimes a card sigil
@@ -403,6 +400,61 @@ export function runRun(
 }
 
 /**
+ * A stored log, whatever format it was written in, as the format this code
+ * replays - or an error naming what is wrong with it.
+ *
+ * Format 1 is what units 5 and 8 wrote: no `format` field, and no `sigil`
+ * choice at a won elite or boss because there was nothing to ask. Everything
+ * else it holds still indexes what it indexed: the sigil offers are drawn from
+ * node-keyed streams (`nodes.ts`), the card sigil sits after the cards on the
+ * shelf, and the hero sigil offer is asked at every won elite or boss. So the
+ * whole upgrade is one inserted decline per won elite or boss, after the
+ * travel choice, and `test/sigils.test.ts` replays two format 1 logs recorded
+ * before sigils existed to the hashes they had then.
+ *
+ * A log in the current format comes back as it is. A log in a format this
+ * code has never written is refused with both numbers named, because its
+ * choices would index shelves drawn some other way and a "successful" replay
+ * of it would be a different run wearing its seed.
+ */
+export function migrateRunLog(raw: unknown): RunLog {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('run log: not a run log - it is not an object');
+  }
+  const log = raw as { seed?: unknown; format?: unknown; nodes?: unknown };
+  if (typeof log.seed !== 'number' || !Number.isInteger(log.seed)) {
+    throw new Error('run log: not a run log - it has no integer `seed`');
+  }
+  if (!Array.isArray(log.nodes)) {
+    throw new Error(`run log: not a run log - seed ${log.seed} has no \`nodes\` list`);
+  }
+  const nodes = log.nodes as NodeRecord[];
+  const format = log.format ?? 1;
+  if (format === RUN_LOG_FORMAT) return { seed: log.seed, format: RUN_LOG_FORMAT, nodes };
+  if (format !== 1) {
+    throw new Error(
+      `run log: written in format ${String(format)}, and this code reads formats 1 and ` +
+        `${RUN_LOG_FORMAT}. Its choices index shelves that are drawn some other way, so it cannot ` +
+        `be replayed; start a new run on seed ${log.seed}.`,
+    );
+  }
+  const decline: RunChoice = { kind: 'sigil', pick: -1 };
+  const upgraded = nodes.map((n) => {
+    const asked = (n.type === 'elite' || n.type === 'boss') && n.fightResult === 'playerWin';
+    if (!asked) return n;
+    const [travel, ...rest] = n.choices;
+    if (travel === undefined || travel.kind !== 'travel') {
+      throw new Error(
+        `run log: node ${n.nodeId} in act ${n.act + 1} does not begin with a travel choice, so it ` +
+          `is not a format 1 record and cannot be upgraded`,
+      );
+    }
+    return { ...n, choices: [travel, decline, ...rest] };
+  });
+  return { seed: log.seed, format: RUN_LOG_FORMAT, nodes: upgraded };
+}
+
+/**
  * Replay a recorded run from seed plus its choice list alone, with no agent in
  * the loop. This is the run's half of the determinism invariant, executable.
  *
@@ -414,16 +466,16 @@ export function runRun(
  * diverge quietly, which is the exact failure the invariant exists to forbid.
  */
 export function replayRun(content: RunContent, log: RunLog): RunState {
-  // A log from another format is refused before a single node is replayed. Its
-  // choices are indices into shelves this code no longer draws in the same
-  // order, so replaying it would not fail - it would quietly produce a
-  // different run under the same seed. `RUN_LOG_FORMAT` says what changed.
+  // Only the current format is replayed. A log from an earlier one is not
+  // wrong, it is unupgraded: `migrateRunLog` is the one path that reads it,
+  // and refusing it here is what keeps a stale log from being replayed as if
+  // it were current by a caller that forgot to upgrade it.
   const format = (log as { format?: unknown }).format ?? 1;
   if (format !== RUN_LOG_FORMAT) {
     throw new Error(
       `run replay: this log was written in format ${String(format)} and this code replays ` +
-        `format ${RUN_LOG_FORMAT}. The choices in it index shelves that are drawn differently ` +
-        `now, so it cannot be resumed; start a new run on seed ${log.seed}.`,
+        `format ${RUN_LOG_FORMAT}. Upgrade it with migrateRunLog first; a log it refuses cannot ` +
+        `be resumed, so start a new run on seed ${log.seed}.`,
     );
   }
   const run = startRun(content, log.seed);

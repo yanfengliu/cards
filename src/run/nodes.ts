@@ -9,8 +9,8 @@
 // the run's determinism story:
 //
 //   - **The run stream.** One `Rng` on `RunState`, threaded through every
-//     reward offer, shop shelf, event draw and sigil offer. Consuming a
-//     different number of draws - by taking a shop instead of a forge - shifts
+//     reward card offer, shop shelf and event draw. Consuming a different
+//     number of draws - by taking a shop instead of a forge - shifts
 //     everything after it, which is what makes a route a route.
 //
 //   - **Node-keyed derivation.** A fight's seed and its encounter are
@@ -23,15 +23,20 @@
 //     "a node's fight is a function of the node, not of the route" in
 //     `test/run.test.ts`.
 //
-// Sigils draw from the run stream and only the run stream. A sigil offer is a
-// draw like a reward card is a draw, so taking one route rather than another
-// changes which sigils come up later, and no sigil can ever reach into a
-// fight's own streams - `checkStreamSeparation` in `src/sim/runmeasure.ts`
-// burns run-stream draws and requires every fight seed to hold still.
+// Sigil offers are node-keyed too, and for a reason beyond tidiness: the run
+// stream is what every choice in a saved log indexes. A hero sigil offer or a
+// card-sigil roll drawn from it would shift every shelf after the first won
+// elite, and a log written before sigils existed would replay under this
+// code to a different run wearing its seed. Drawn from the node's own stream
+// instead, the card half of every shelf consumes the run stream exactly as it
+// did, and `migrateRunLog` in `run.ts` has only a decline to insert. What a
+// hero sigil offer still depends on is what the run holds - a held sigil is
+// never re-offered - so it is a function of the node and of the route's
+// *grants*, never of the route's draws. `test/sigils.test.ts` gates both
+// halves: no offer moves `run.rng`, and no offer moves a fight seed.
 
-import { RELAY_POWER, WAKE_POWER } from '../engine/resolver.ts';
-import { type Rng, mixSeeds, nextFloat, nextInt } from '../engine/rng.ts';
-import type { SideRules } from '../engine/state.ts';
+import { type Rng, makeRng, mixSeeds, nextFloat, nextInt } from '../engine/rng.ts';
+import type { HeroSpec } from '../engine/state.ts';
 import { attachSigil, hasTrait, makeDeckCard } from './deck.ts';
 import type {
   CardSigilDef,
@@ -50,15 +55,17 @@ import type {
 } from './types.ts';
 import { FORGE_MODES } from './types.ts';
 
-/** Distinguishes the two node-keyed derivations. Arbitrary, and fixed forever. */
+/** Distinguishes the node-keyed derivations. Arbitrary, and fixed forever. */
 const TAG_FIGHT_SEED = 0x1f19;
 const TAG_ENCOUNTER = 0x0e11;
+const TAG_HERO_SIGIL = 0x51a1;
+const TAG_CARD_SIGIL = 0xca5d;
 
 /**
- * Weighted draw of `k` distinct entries. Draws are taken one at a time from the
- * run stream, so `k` offers cost exactly `k` draws. Shared by the card shelf,
- * the shop and both sigil offers, so they cannot disagree about what a
- * weighted draw is.
+ * Weighted draw of `k` distinct entries. Draws are taken one at a time from
+ * the generator handed in, so `k` offers cost exactly `k` draws. Shared by the
+ * card shelf, the shop and both sigil offers, so they cannot disagree about
+ * what a weighted draw is.
  */
 export function drawDistinct<T extends { readonly weight: number }>(
   rng: Rng,
@@ -132,41 +139,44 @@ export function heldHeroSigils(run: RunState): HeroSigilDef[] {
 }
 
 /**
- * The rules the run's hero sigils have bent, as the engine's `SideRules`: an
- * amount in force per rule, present only when some sigil moved it. Deltas add,
- * so two sigils on one rule stack; the shipped content offers each hero sigil
- * once, and `heroSigilOffer` never re-offers a held one.
+ * The hero the run hands its next fight: the content's hero at the run's
+ * current Health, plus every held hero sigil's Power and Armour.
+ *
+ * This is the whole of how a hero sigil reaches a fight, and it is the seam
+ * the engine already had - `FightSetup.playerHero` is data the run hands in.
+ * `maxHealth` is not read here because it is state: it moved the run's bar
+ * when it was taken, and the fight is handed the bar as it stands. A run
+ * holding no hero sigil hands exactly the spec it did before sigils existed.
  */
-export function heroRules(run: RunState): SideRules {
-  let relay = 0;
-  let wake = 0;
+export function heroSpecFor(run: RunState): HeroSpec {
+  let power = 0;
+  let armour = 0;
   for (const s of heldHeroSigils(run)) {
-    if (s.effect.kind === 'relayPower') relay += s.effect.amount;
-    else if (s.effect.kind === 'wakePower') wake += s.effect.amount;
+    if (s.effect.kind === 'heroPower') power += s.effect.amount;
+    else if (s.effect.kind === 'heroArmour') armour += s.effect.amount;
   }
-  return {
-    ...(relay !== 0 ? { relayPower: RELAY_POWER + relay } : {}),
-    ...(wake !== 0 ? { wakePower: WAKE_POWER + wake } : {}),
-  };
+  const hero = run.content.hero;
+  return { ...hero, health: run.hero.health, power: hero.power + power, armour: hero.armour + armour };
 }
 
-/** The hand size the run's fights draw to: the pool's, plus every held hand sigil. */
-export function handSizeFor(run: RunState): number {
-  let extra = 0;
-  for (const s of heldHeroSigils(run)) if (s.effect.kind === 'handSize') extra += s.effect.amount;
-  return run.content.pool.handSize + extra;
+/** The generator one node's sigil offer is drawn from. A function of the node alone. */
+function sigilRng(run: RunState, node: MapNode, tag: number): Rng {
+  return makeRng(mixSeeds(run.seed, run.act, node.id, tag), 'sigil');
 }
 
 /**
- * The hero sigils a won elite or boss puts on offer: `heroSigilOffers` distinct
- * ones the run does not already hold, weighted. Costs one draw per sigil
- * offered, and nothing when there is nothing left to offer - in which case the
- * node asks no `sigil` choice at all, the same way an empty deck asks no forge.
+ * The hero sigils a won elite or boss puts on offer: `heroSigilOffers`
+ * distinct ones the run does not already hold, weighted, drawn from the
+ * node's own stream. Empty when nothing is left to offer. The node still
+ * records a `sigil` choice then, which can only be -1, so the shape of a log
+ * depends on the map and the fights and not on how many hero sigils the
+ * content lists - which is what lets a log from before sigils be upgraded by
+ * inserting declines alone.
  */
-export function heroSigilOffer(run: RunState): HeroSigilDef[] {
+export function heroSigilOffer(run: RunState, node: MapNode): HeroSigilDef[] {
   const held = new Set(run.sigils.filter((g) => g.target === 'hero').map((g) => g.sigilId));
   const available = heroSigils(run.content).filter((s) => !held.has(s.id));
-  return drawDistinct(run.rng, available, run.content.heroSigilOffers);
+  return drawDistinct(sigilRng(run, node, TAG_HERO_SIGIL), available, run.content.heroSigilOffers);
 }
 
 /**
@@ -183,12 +193,15 @@ export function attachOffers(run: RunState, sigil: CardSigilDef): number[] {
 }
 
 /**
- * What a won fight puts on the shelf. `rewardOffers` cards, drawn as before,
- * then - at an ordinary fight only - one roll on `cardSigilChance` and, when it
- * hits, one weighted draw among the card sigils that have somewhere to go.
+ * What a won fight puts on the shelf. `rewardOffers` cards off the run stream,
+ * drawn exactly as they were before sigils existed, then - at an ordinary
+ * fight only - one roll on `cardSigilChance` from the node's own stream and,
+ * when it hits, one weighted draw from the same stream among the card sigils
+ * that have somewhere to go.
  *
- * The cards are drawn first so that the card half of the shelf consumes the
- * run stream exactly as it did before sigils existed. A sigil that no deck card
+ * The cards first and the sigil last, off a different generator, is what
+ * keeps a shelf a log from before sigils indexed the same shelf: every card
+ * pick in such a log still names the card it named. A sigil that no deck card
  * can take is never offered: an offer the player cannot use is not a decision,
  * and the `attach` choice that follows a sigil pick must always have a target.
  */
@@ -201,8 +214,9 @@ export function rewardOffer(run: RunState, node: MapNode): RewardOption[] {
   if (node.type !== 'fight') return out;
   const eligible = cardSigils(run.content).filter((s) => attachOffers(run, s).length > 0);
   if (eligible.length === 0 || run.content.cardSigilChance <= 0) return out;
-  if (nextFloat(run.rng) >= run.content.cardSigilChance) return out;
-  const drawn = drawDistinct(run.rng, eligible, 1)[0];
+  const rng = sigilRng(run, node, TAG_CARD_SIGIL);
+  if (nextFloat(rng) >= run.content.cardSigilChance) return out;
+  const drawn = drawDistinct(rng, eligible, 1)[0];
   if (drawn !== undefined) out.push({ kind: 'sigil', sigil: drawn });
   return out;
 }
@@ -325,14 +339,14 @@ export function addCard(run: RunState, cardId: string): void {
 
 /**
  * Take a hero sigil. It goes in the ledger, and the one effect that is a state
- * change rather than a rule - `maxHealth` - is applied here and now: the bar
+ * change rather than a number - `maxHealth` - is applied here and now: the bar
  * grows and the hero heals by the same amount, because a bigger bar with the
  * same hole in it would be a reward the player cannot feel at the boss they
- * just beat. The rule effects are read off the ledger by `heroRules` and
- * `handSizeFor` whenever a fight is set up, so they need no state of their own.
+ * just beat. The other two are read off the ledger by `heroSpecFor` whenever
+ * a fight is set up, so they need no state of their own.
  *
  * Refuses a sigil the run already holds: `heroSigilOffer` never offers one,
- * and a ledger with the same hero sigil twice would stack a rule the shelf
+ * and a ledger with the same hero sigil twice would stack a number the shelf
  * said could not stack.
  */
 export function grantHeroSigil(run: RunState, sigil: HeroSigilDef): void {

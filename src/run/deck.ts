@@ -43,31 +43,42 @@ export function makeDeckCard(cardId: string, instance: number): DeckCard {
 }
 
 /**
+ * The traits this instance's sigils add beyond what the card prints, in the
+ * order they were attached.
+ *
+ * A trait is a word in a list, so this is a set difference: a Relay Sigil on
+ * a card that already prints Relay adds nothing, and `attachSigil` refuses
+ * that attachment before it gets here. It is the run-layer answer to "where
+ * did this trait come from", which the screens ask so a pip can say a sigil
+ * put it there; the fight is never told, because the resolver has no use for
+ * the answer and `AGENTS.md` keeps a fight's card an ordinary card.
+ */
+export function grantedTraits(base: CardPool, dc: DeckCard): Trait[] {
+  const printed = base.card(dc.cardId).traits;
+  const out: Trait[] = [];
+  for (const s of dc.sigils) {
+    if (!printed.includes(s.trait) && !out.includes(s.trait)) out.push(s.trait);
+  }
+  return out;
+}
+
+/**
  * The card a deck instance actually fights as: upgrades applied, sigil traits
  * merged in.
  *
- * A trait is a word in a list, so merging is a set union: a Relay Sigil on a
- * card that already prints Relay adds nothing, and `attachSigil` refuses that
- * attachment before it gets here. `sigilTraits` is only the traits the sigils
- * *added*, and it is left off entirely when there are none, so a plain
- * instance resolves to exactly the object it resolved to before sigils
- * existed.
+ * `traits` is rewritten only when a sigil added something, so a plain instance
+ * resolves to exactly the object it resolved to before sigils existed.
  */
 export function resolveDeckCard(base: CardPool, dc: DeckCard): UnitCard {
   const card = base.card(dc.cardId);
-  const granted: Trait[] = [];
-  for (const s of dc.sigils) {
-    if (!card.traits.includes(s.trait) && !granted.includes(s.trait)) granted.push(s.trait);
-  }
+  const granted = grantedTraits(base, dc);
   return {
     ...card,
     id: dc.instanceId,
     cost: Math.max(0, card.cost + dc.costDelta),
     power: card.power + dc.powerBonus,
     health: card.health + dc.healthBonus,
-    ...(granted.length > 0
-      ? { traits: [...card.traits, ...granted], sigilTraits: granted }
-      : {}),
+    ...(granted.length > 0 ? { traits: [...card.traits, ...granted] } : {}),
   };
 }
 

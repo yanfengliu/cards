@@ -6,13 +6,7 @@
 // RNG has not actually reproduced the fight.
 
 import type { Fight } from './fight.ts';
-import {
-  type Entity,
-  type EquipmentSlots,
-  type GameState,
-  type SideRules,
-  EQUIP_SLOTS,
-} from './state.ts';
+import { type Entity, type EquipmentSlots, type GameState, EQUIP_SLOTS } from './state.ts';
 
 /**
  * The three slots, in slot order, each as its card's id and the two numbers the
@@ -28,18 +22,6 @@ function equipmentToCanonical(s: EquipmentSlots): string {
 }
 
 /**
- * The rules a hero's sigils have bent, in a fixed key order, only the keys that
- * are set. An object with no key set canonicalises to the empty string, and
- * the caller leaves it off entirely - the same answer as `null`.
- */
-function rulesToCanonical(r: SideRules): string {
-  const parts: string[] = [];
-  if (r.relayPower !== undefined) parts.push(`relay=${r.relayPower}`);
-  if (r.wakePower !== undefined) parts.push(`wake=${r.wakePower}`);
-  return parts.join(',');
-}
-
-/**
  * An entity, canonically.
  *
  * Equipment is appended only when something is worn. That is not tidiness: it
@@ -47,12 +29,6 @@ function rulesToCanonical(r: SideRules): string {
  * measurement's numbers and this addition are independent. An empty set of
  * slots and no slots at all are the same string for the same reason - a hero
  * wearing nothing is in the same position a unit is.
- *
- * A hero's bent rules are appended the same way, after the equipment, only
- * when one is set. They are in the digest because the same board under a
- * different Relay amount is a different fight, and a replay that agreed on the
- * board while disagreeing on the rule it was resolved under would have
- * coincided rather than reproduced.
  */
 function entityToCanonical(e: Entity): string {
   const base = [
@@ -69,12 +45,10 @@ function entityToCanonical(e: Entity): string {
     e.alive ? 1 : 0,
   ].join(':');
   const eq = e.equipment;
-  const worn =
-    eq !== null && (eq.weapon !== null || eq.armour !== null || eq.trinket !== null)
-      ? `:eq(${equipmentToCanonical(eq)})`
-      : '';
-  const rules = e.rules === null ? '' : rulesToCanonical(e.rules);
-  return base + worn + (rules.length > 0 ? `:rules(${rules})` : '');
+  if (eq === null || (eq.weapon === null && eq.armour === null && eq.trinket === null)) {
+    return base;
+  }
+  return `${base}:eq(${equipmentToCanonical(eq)})`;
 }
 
 export function stateToCanonical(state: GameState): string {
