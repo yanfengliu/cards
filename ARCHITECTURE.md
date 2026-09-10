@@ -183,7 +183,7 @@ The specific failure to watch for is tincture collision — two tribes whose fie
 Random targeting is fair when the player could have played around it, and unfair when they could not. That turns a feeling into requirements:
 
 - **Show the odds before commit.** Three Guards alive means each is a 33% target. Put that number on screen. A player who commits knowing the odds and loses the roll has lost fairly; one who did not know has been cheated.
-- **Telegraph enemy intent**, including AoE, a full turn ahead. This is already the mitigation named for the design's top open risk.
+- **Telegraph enemy intent**, including AoE, a full turn ahead. The design lists this as an open presentation item. It makes a read of the board possible; it is not a lever on whether any option is good, because AoE is one option among the spells and the game does not guarantee it is worth casting.
 - **Never end a run to invisible variance.** If a player could not have seen it coming, it is a bug in the presentation even when the simulation is correct.
 
 ### Measuring "challenging"
@@ -213,7 +213,7 @@ The floor is set from the measurement's own null arms, not as a fraction of the 
 
 **Which trait carries the gap is a separate measurement, and it needs a separate instrument**, because removing a trait also changes how hard the fight is and a win-rate gap is squeezed by the floor and the ceiling. `npm run measure:ablate` reads the enemy hero's Health as a continuous dial, calibrates each ablated card set on the random arm alone to bracket a chosen baseline, and reports A against B at both bracketing values. It exists as a tracked command because the previous round's version of it lived in untracked scratch and its table could not be reproduced from a clean checkout.
 
-The measurement is also the fastest way to answer the design's top open questions without arguing about them — including whether the unlimited board and the AoE-only counter actually work.
+The measurement is also the fastest way to answer the design's open questions without arguing about them — how wide a line the rules actually produce, how often a spell is worth its energy. What it returns is a description of what the rules produce, and per the owner's ruling of 2026-09-09 (`docs/policies/local-rules.md`) that is where its authority ends: a measurement showing an option is weak is information for the player, not a defect to tune out of the pool. The measured line is two units wide today; the unlimited board is a setting rather than a target, and nothing is re-costed to widen it.
 
 Extend it into a **skill gradient**: random < greedy < one-turn lookahead < deeper lookahead should be monotonic and well separated. Two adjacent tiers with equal win rates mean that layer of thinking is not being rewarded.
 
@@ -251,6 +251,8 @@ So the loop is driven by **playing the game**, not by auditing the source:
 3. Change **data, not code** — the `AGENTS.md` invariant that costs, stats and weights live in tracked data files exists precisely so a balance pass is a reviewable diff rather than a code change.
 4. Re-run. Compare against the previous batch.
 5. Periodically, play it as a human, because step 1 cannot tell you whether it is fun.
+
+One bound on step 3, set by the owner's ruling of 2026-09-09 (`docs/policies/local-rules.md`): a finding describes what the rules produce, and it is not a target. The loop does not re-cost content so that a particular board shape, card or strategy comes out viable, and a measurement showing an option is weak is information for the player, not a defect in the pool. Measuring is exactly what the ruling asks for; acting on a measurement by re-tuning content toward a shape is what it rules out. What the loop may still act on is what the player can see — the odds, the enemy's intent, a card's own text.
 
 Two traps worth naming in advance, both from fleet canon and both cheap to fall into here:
 
