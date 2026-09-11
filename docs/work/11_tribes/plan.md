@@ -2,8 +2,8 @@
 
 Status: active
 Owner: coordinator
-Created: 2026-09-11
-Updated: 2026-09-11
+Created: 2026-09-10
+Updated: 2026-09-10
 
 Review round 1 is closed: six findings, six gates, eleven mutations. See "Review round 1" below.
 
@@ -101,6 +101,10 @@ The comment is corrected, a fixture now pins the stream a body carrying both emi
 **Checks.** `npm run gates` green at 236 tests, from 230 at `8efbbb2`. Eleven mutations, all red for their own reason, in `docs/learning/gate-proofs.md`. `npm run verify` is byte-identical to `8efbbb2`'s apart from `Elapsed` — the same 66.25% against 56.50%, gap 9.75 pp — which is the evidence that this round is gates and comment text and nothing else. No dependency changed, so `npm run audit` was not re-run.
 
 **Not done, and deliberately.** No balance number moved; new fixtures are not new content. Nothing under `src/run/`, `src/ui/`, `src/content/unlocks.ts` or `src/sim/runmeasure.ts` was touched, because another worker is live there. The corrected engine comments are text and were not re-reviewed independently.
+
+**The rule behind F1 and F3, written down after the fact.** Both findings are one shape, and fixing the two instances left nothing that stops the third being written the same way. `docs/policies/local-rules.md` now carries **a gate whose subject is a list reads that list; it never restates it**, with both instances, their dates and `299fede` as the evidence, and a Bound saying that reading the subject is necessary rather than sufficient. Documentation only — no change under `src/`, `test/` or `tools/`, and `npm run gates` stayed at 236 tests.
+
+That entry came with a read-only sweep for the same shape elsewhere, reported to the coordinator and **not fixed here**, because `src/run/`, `src/ui/` and `src/content/unlocks.ts` have a live worker in them. The two worth acting on first are both already stale rather than merely fragile: `src/sim/ablate.ts` still ablates `['relay', 'wake']` in two separate hand-written lists — `ABLATABLE` at line 49, which nothing reads, and `sets` at line 204, which is what the runner actually uses — so the instrument `AGENTS.md` advertises as "what each cascade trait is worth" measures two of the five traits that read a neighbour, the three added by this unit among the missing. And `tools/gates/work-plans.ts:418` enumerates its own four rules by hand inside `selfTest`, which is the loop whose only job is to prove each detector fires before the gate is trusted to report an absence.
 
 ## Outcome
 

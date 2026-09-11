@@ -1,4 +1,4 @@
-# 2026-09-11 — Closing the tribes review, and a tripwire that never worked
+# 2026-09-10 — Closing the tribes review, and a tripwire that never worked
 
 Unit 11's review round, on branch `worktree-agent-aacf45b44fe4cb1d7` cut from `8efbbb2` with `main` at `5f51827` merged in. This is history, not status; `docs/work/11_tribes/plan.md` holds status.
 
