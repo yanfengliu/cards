@@ -1,6 +1,6 @@
 # Sigils: the run-long progression layer
 
-Status: implemented on `worktree-agent-a8f54ea252ca36f0b`, gated, not merged
+Status: complete
 Owner: coordinator
 Created: 2026-09-10
 Updated: 2026-09-10
@@ -20,6 +20,14 @@ Three trees, and only the third was ever run.
 **`worktree-agent-a63625c20e9925af7` at `802dae5`** — a finisher, also killed by a rate limit. It merged the above and **took the engine change back out**, replacing the rule-bending hero sigils with three that move numbers the run already owns: `maxHealth`, `heroPower`, `heroArmour`. It added the log-format migration, `migrateRunLog`, and the two golden format 1 logs under `test/golden/`. Its tree does not typecheck: the revert left `src/ui/app.ts`, `src/ui/runapp.ts` and the whole of `test/sigils.test.ts` still calling the API it had deleted.
 
 **This unit** merged `802dae5` onto `a974d04` (nine conflicts, all in files unit 10 had also touched), finished the revert, and did the work below.
+
+## Scope
+
+In: sigils as a run-long progression layer — card sigils that grant a trait, hero sigils that bend the run, the offers that grant them, their place in the choice log and the run hash, and the screens that show them.
+
+Out: any engine knowledge of what a sigil is (applied at pool resolution, like a forge upgrade); sigils for `volley` and `scorch`, whose words exist through a `Record<Trait, Term>` totality check but whose content does not; and any balance change, which `docs/policies/local-rules.md` forbids.
+
+Dependencies: unit 10 (classes) merged first, at `a974d04`, because both lanes' predecessors had edited each other's files.
 
 ## Approach
 
@@ -49,6 +57,15 @@ A sigil is applied at pool resolution in `src/run/`, exactly the way a forge upg
 - [x] The engine is unchanged. `git diff a974d04 -- src/engine/` is empty.
 - [x] UI: the reward shelf offers a card sigil, a won elite or boss offers hero sigils, the attach screen lists the deck with reasons, and both the card panel and the hero panel name them in words derived from the type system. Shot in both themes through `tools/ui-probe/run.ts`.
 - [x] Red-proofs: ten mutations in `docs/learning/gate-proofs.md`.
+
+## Implementation steps
+
+- [x] Merge both predecessors' preserved trees (`c67e92f`, `802dae5`) onto the merged classes engine.
+- [x] Card sigils (`si_relay`, `si_wake`, `si_guard`) and hero sigils (`si_oak`, `si_lance`, `si_bulwark`), applied at pool resolution so the engine stays ignorant of them.
+- [x] Grants recorded in the choice log as `{kind:'attach', deckIndex}` and covered by `hashRun`, so `replayRun` reproduces a sigil run byte-for-byte.
+- [x] Replace `runmeasure.ts`'s "sigils are out of scope" check with two real comparisons — ledger against deck, and ledger against the pool the engine is actually handed.
+- [x] Reward shelf, attach screen, and sigils listed in plain words on the card and hero panels, derived from the type system rather than hardcoded.
+- [x] Eleven red-proofs recorded in `docs/learning/gate-proofs.md`.
 
 ## Outcome
 

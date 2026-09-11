@@ -44,6 +44,18 @@
     {
       "id": 10,
       "theme": "classes"
+    },
+    {
+      "id": 11,
+      "theme": "tribes"
+    },
+    {
+      "id": 12,
+      "theme": "unlocks"
+    },
+    {
+      "id": 13,
+      "theme": "plan-gate"
     }
   ]
 }
