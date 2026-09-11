@@ -6,6 +6,49 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-11 — unlocks: sixteen mutations, and a runner asked to fail before it was believed
+
+Taken on branch `worktree-agent-a1d38fd64b9b07e60`, cut from `dcf2cdf`; the suite is **237 tests** here, 218 at the base. Sixteen mutations, each applied to the shipped tree, run against `node --test test/unlocks.test.ts`, reverted, and the file's sha256 compared before and after. All sixteen came back red for their own reason. No anchor was broken — the runner refuses to report a result when an anchor matches zero times or more than once, which is the CRLF trap this repo has now hit three times.
+
+The runner is `.probe/mutate-unlocks.mjs`, under the ignored scratch path. It is unit 9's runner rebuilt, with one guard added for the failure unit 9's own entry records.
+
+### The guard, and the runner's own probe
+
+Unit 9 recorded a mutation as RED that had died on a `ReferenceError` and measured nothing. The first draft of this round's list did it again: M16 was going to replace `cardSigils(run.content)` in `rewardOffer` with a symbol that does not exist, and it came back `RED (exit 1)` with `ReferenceError: CARD_SIGILS_UNFILTERED is not defined` — a crash the runner read as a gate catching a defect, because the expected test name is printed in the failure list either way.
+
+So the runner now rejects a red whose output holds `ReferenceError`, `SyntaxError`, `is not a function` or `Cannot find module` and calls it **NON-ZERO, REASON UNCONFIRMED**. And because a guard that is never exercised is a guard nobody is checking, it runs its own probe first, every time: `unlockedContent` returning `NOT_A_REAL_SYMBOL`. That probe has to come back unconfirmed, and the runner throws before printing its summary if it comes back red or green instead. M16 below is a real, compiling mutation.
+
+### The bound of the gate these mutations exercise
+
+`test/unlocks.test.ts` is the shipped `RUN_CONTENT` and `GATED_IDS`, over 12 seeds × 2 route styles for the whole-run checks, all three classes for the starting-deck and pick-screen checks, and the two golden format 1 logs. It proves nothing about pixels, and nothing about how *hard* a fresh profile's pool is — that is `npm run measure:run -- --unlocks none`, an instrument and not a gate, whose numbers are in `docs/work/12_unlocks/plan.md`.
+
+Two things it structurally cannot see, both covered elsewhere and named here so the gap is not mistaken for coverage: the `localStorage` round trip, which `node --test` cannot reach and `node tools/ui-probe/run.ts <seed> <theme> <class> fresh` exercises through the browser's own controls; and whether `renderPick` and `renderEnd` actually call the functions this file tests, which `node tools/ui-probe/pick.ts` and the same run probe assert against the rendered DOM.
+
+Digests after the last revert: `src/run/unlocks.ts` `70346e06…`, `src/run/run.ts` `7507ddec…`, `src/run/hash.ts` `77eceb66…`, `src/ui/profile.ts` `a3741dae…`, `src/ui/runapp.ts` `837bc308…`, `src/ui/run.ts` `6402a4e9…`, `src/ui/unlocks.ts` `d97e0c6f…`, `src/content/unlocks.ts` `948131f1…`, `test/unlocks.test.ts` `c57851c8…`.
+
+| # | mutation | site | the failure |
+|---|---|---|---|
+| M1 | `parseUnlockSet(log.unlocked, …)` → `null`, so the replay narrows by the caller's pool | `replayRun`, `src/run/run.ts` | *a run replays from the unlock set in its log* — and it **throws** rather than hashing differently: `run pool: no deck instance "u_berserker#14" in this run's deck`. The wider shelf named a card the deck never minted, which is exactly the shape unit 9's content-drift entry records |
+| M2 | `unlockedContent` returns the content whatever the set says | `src/run/unlocks.ts` | *a locked card is never offered and a locked sigil is never granted*, plus *widening only ever adds rows* at `it widened at 0 of its steps` |
+| M3 | the `unlocked=` clause dropped from the run digest | `unlockedToCanonical`, `src/run/hash.ts` | *owning everything gated plays the same run as no unlock layer, and says which it was* — `seed 1: the digest does not record which pool the run drafted from` |
+| M4 | narrowing bumps every surviving weight by 1 | `unlockedRewards`, `src/run/unlocks.ts` | *widening only ever adds rows, and never edits one* — `step 0: the narrower pool is not a subsequence of the wider one` |
+| M5 | narrowing also sets `restHealFraction` to 1.5×, an unlock that heals more | `unlockedContent`, `src/run/unlocks.ts` | *narrowing a content touches the reward tables and the sigils and nothing else* — `narrowing moved "restHealFraction" - an unlock may only add rows to a draw table`. This is the **no persistent power** claim going red |
+| M6 | the profile replaces `owned` instead of unioning it | `applyRunToProfile`, `src/ui/profile.ts` | *a profile only ever widens* — `"si_guard" was taken back` |
+| M7 | `classPickHtml` ignores the unlock set it is handed | `src/ui/runapp.ts` | *the class-pick screen promises the pool the run will actually have* |
+| M8 | `migrateRunLog` drops the unlock set on a current-format log | `src/run/run.ts` | *a log naming an unreadable unlock set is refused by name* |
+| M9 | the resume guard disabled, so a saved run is replayed against a wider pool | `createRunController`, `src/ui/run.ts` | *a saved run cannot be resumed against a pool it was not played with* — `Missing expected exception` |
+| M10 | `achievementEarned` answers for an ongoing run | `src/run/unlocks.ts` | *every achievement reads the finished run and nothing else* |
+| M11 | the digest emits `unlocked=g[]/o[]` for a run with no unlock layer | `unlockedToCanonical`, `src/run/hash.ts` | *a golden log from before unlocks replays untouched, and names no unlock set*. This is the proof that unit 12 moved no run hash recorded before it |
+| M12 | `unlockProblems` stops seeing a pool shorter than the shelf | `src/run/unlocks.ts` | *the shipped content is playable at every unlock set a player can reach* — `gating every card left no problem to report` |
+| M13 | `runUnlocksHtml` always returns the empty string | `src/ui/unlocks.ts` | *the end screen says what the run unlocked* — `"a_first_run" is not on the end screen` |
+| M14 | the collection lists only what is owned | `collectionHtml`, `src/ui/unlocks.ts` | *the collection lists every unlockable thing, owned or not* |
+| M15 | `u_squire`, a card every class starts with, added to `GATED_IDS` | `src/content/unlocks.ts` | the module-load check: `unlocks: "u_squire" is gated and a class starts with it…` |
+| M16 | the sigil list left unnarrowed while the reward tables still narrow | `unlockedContent`, `src/run/unlocks.ts` | *a locked card is never offered and a locked sigil is never granted* — `seed 3/greedy: "si_guard" was granted and a fresh profile cannot draft it` |
+
+M1 and M11 are the pair worth reading together. M1 is the new input breaking the keystone forwards; M11 is it breaking every hash recorded before it existed. The digest carries the unlock clause **only when the run had a set**, which is what lets both be true at once — `f5abcf3d2118a2b9` and `94ff2460abecaf26`, the two goldens' pre-class hashes, still reproduce byte for byte.
+
+M5 is the one the design asked for. "No persistent power" is a sentence in `docs/design/game.md`; the gate that carries it walks `Object.keys(RUN_CONTENT)` off the object rather than a list written in the test, so a field added to `RunContent` tomorrow is inside the claim from the day it exists.
+
 ## 2026-09-10 — sigils: eleven mutations, a check whose first draft could not fail, and a red that was a crash
 
 Taken on branch `worktree-agent-a8f54ea252ca36f0b`, cut from `a974d04`; the suite is **218 tests** here, 199 at the base. Eleven mutations, each applied to the shipped tree, run against the shipped command, reverted, and the file's digest read back. All eleven came back red for their own reason. No anchor was broken, and the runner refuses to report a result when an anchor matches zero times or more than once — the CRLF trap this repo has hit twice is a silent no-op that reads as a green gate.

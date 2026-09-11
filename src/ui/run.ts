@@ -91,7 +91,9 @@ import {
   type RunState,
   type ShopItem,
   type SigilGrant,
+  type UnlockSet,
 } from '../run/types.ts';
+import { parseUnlockSet, stillLocked } from '../run/unlocks.ts';
 
 /** A fight the screen finished: the engine's final state and its action list. */
 export type FightOutcome = {
@@ -189,6 +191,11 @@ export type RunController = {
   readonly seed: number;
   /** The class the run was started as. Fixed for the life of the run. */
   readonly classId: string;
+  /**
+   * What this run may draft, or null for no unlock layer. Fixed for the life
+   * of the run and written into every log this controller hands out.
+   */
+  readonly unlocked: UnlockSet | null;
   /** The canonical state: `replayRun(content, log)`. Read it, never write it. */
   readonly state: RunState;
   /** The log so far. Complete records only; the node in progress is not in it. */
@@ -250,6 +257,21 @@ function requireIndex(value: number, count: number, what: string, allowSkip: boo
   }
 }
 
+/** Two unlock sets are the same set when this agrees. `null` is its own value. */
+function unlockKey(set: UnlockSet | null): string {
+  return set === null ? 'none' : `g[${set.gated.join(',')}]/o[${set.owned.join(',')}]`;
+}
+
+/** An unlock set as a phrase, for the one error message that has to name two. */
+function unlockWords(set: UnlockSet | null): string {
+  if (set === null) return 'no unlock layer';
+  const locked = stillLocked(set);
+  const owned = set.gated.length - locked.length;
+  return locked.length === 0
+    ? `all ${set.gated.length} unlockable card(s) and sigil(s)`
+    : `${owned} of ${set.gated.length} unlockable card(s) and sigil(s), still missing ${locked.join(', ')}`;
+}
+
 /** A promise the preview made that the replay then broke. Always a bug. */
 function diverged(what: string, promised: unknown, replayed: unknown): Error {
   return new Error(
@@ -262,6 +284,18 @@ function diverged(what: string, promised: unknown, replayed: unknown): Error {
 export type RunControllerOptions = {
   /** The class to start as. Ignored when resuming: the log carries its own. */
   readonly classId?: string;
+  /**
+   * What this run may draft, from the player's profile. Fixed for the life of
+   * the run and written into the log, so the run replays from its own set and
+   * not from whatever has been unlocked since. Omitted, or null, is no unlock
+   * layer at all - the run every test and every measurement plays.
+   *
+   * A resumed log carries its own, and it wins: a saved run cannot be resumed
+   * with a wider pool than it was played with, any more than it can be resumed
+   * as another class. Asking is refused rather than quietly obeyed, because
+   * obeying would redraw its shelves and reach a different run.
+   */
+  readonly unlocked?: UnlockSet | null;
   /** A saved run's log, replayed from the seed. */
   readonly resume?: RunLog;
 };
@@ -299,6 +333,7 @@ export function createRunController(
   const nodes: NodeRecord[] = [];
   const resume = options.resume;
   let classId = options.classId ?? defaultClassId(content);
+  let unlocked = options.unlocked ?? null;
   let format = RUN_LOG_FORMAT;
   if (resume !== undefined) {
     if (resume.seed !== seed) {
@@ -314,6 +349,19 @@ export function createRunController(
       );
     }
     classId = logged;
+    // The log's unlock set wins, and a caller that asked for another one is
+    // refused rather than obeyed: the log's reward picks are indices into
+    // shelves drawn from *its* pool, so resuming it against a wider one would
+    // hand the player cards the run never offered.
+    const saved = parseUnlockSet(resume.unlocked, `the saved run on seed ${seed}`);
+    if (options.unlocked !== undefined && unlockKey(options.unlocked ?? null) !== unlockKey(saved)) {
+      throw new Error(
+        `run: cannot resume a run played with ${unlockWords(saved)} while ${unlockWords(options.unlocked ?? null)} ` +
+          'is unlocked now. A log replays only against the pool it was played with; finish or ' +
+          'abandon this run before the new unlocks apply.',
+      );
+    }
+    unlocked = saved;
     // A saved log parsed from storage may predate the field; 1 is what "no
     // field" meant, and `replayRun` is the one that refuses it.
     format = (resume as { format?: number }).format ?? 1;
@@ -323,7 +371,8 @@ export function createRunController(
   classOf(content, classId);
   // The one path. Even the empty log goes through it, so the starting state is
   // the replay of nothing rather than a second construction of the same thing.
-  let state: RunState = replayRun(content, { seed, classId, format, nodes });
+  const drafted = unlocked === null ? {} : { unlocked };
+  let state: RunState = replayRun(content, { seed, classId, ...drafted, format, nodes });
   format = RUN_LOG_FORMAT;
   let phase: RunPhase = state.result === 'ongoing' ? { kind: 'travel' } : { kind: 'over' };
   let last: NodeOutcome | null = null;
@@ -356,7 +405,7 @@ export function createRunController(
   ): void {
     const before = snapshotOf(state);
     const node = provisional;
-    const next = replayRun(content, { seed, classId, format, nodes: [...nodes, provisional] });
+    const next = replayRun(content, { seed, classId, ...drafted, format, nodes: [...nodes, provisional] });
     verify(next);
 
     const record: NodeRecord = {
@@ -716,11 +765,12 @@ export function createRunController(
     content,
     seed,
     classId,
+    unlocked,
     get state() {
       return state;
     },
     get log(): RunLog {
-      return { seed, classId, format, nodes: nodes.slice() };
+      return { seed, classId, ...drafted, format, nodes: nodes.slice() };
     },
     get phase() {
       return phase;

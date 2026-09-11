@@ -40,6 +40,18 @@ import { pathSpread } from '../run/map.ts';
 import { encounterFor, goldFor, heldHeroSigils, restAmount } from '../run/nodes.ts';
 import { currentMap, travelOptions } from '../run/run.ts';
 import { renderClassPick } from './classpick.ts';
+import { ALL_UNLOCKS, FRESH_UNLOCKS } from '../content/unlocks.ts';
+import { unlockedRewards } from '../run/unlocks.ts';
+import type { UnlockSet } from '../run/types.ts';
+import {
+  type Profile,
+  type RunUnlocks,
+  applyRunToProfile,
+  loadProfile,
+  saveProfile,
+  unlockSetFor,
+} from './profile.ts';
+import { collectionHtml, runUnlocksHtml } from './unlocks.ts';
 import type { DeckCard, EventEffect, ForgeMode, RunEventDef } from '../run/types.ts';
 import { compressedCard } from '../render/board.ts';
 import { STAT_TERMS, TRAIT_TERMS } from '../render/glossary.ts';
@@ -131,20 +143,58 @@ const FORGE_WORDS: Readonly<Record<ForgeMode, string>> = {
  */
 export const PICKABLE_CLASSES: readonly ClassDef[] = CLASSES;
 
-/** The class-pick screen as the app builds it, with the classes the app offers. */
+/**
+ * The class-pick screen as the app builds it, with the classes the app offers.
+ *
+ * `unlocked` narrows what each class's card says it drafts from, through the
+ * same `unlockedRewards` a run is narrowed by - the screen must not promise a
+ * pool the run will not have. Omitted, or null, is no unlock layer, which is
+ * the screen exactly as it was before unlocks existed.
+ */
 export function classPickHtml(opts: {
   seed: number;
   pool: CardPool;
   mount: boolean;
   hatch: boolean;
+  unlocked?: UnlockSet | null;
 }): string {
+  const set = opts.unlocked ?? null;
   return renderClassPick({
     seed: opts.seed,
-    classes: PICKABLE_CLASSES,
+    classes:
+      set === null
+        ? PICKABLE_CLASSES
+        : PICKABLE_CLASSES.map((c) => ({ ...c, rewards: unlockedRewards(set, c.rewards) })),
     pool: opts.pool,
     mount: opts.mount,
     hatch: opts.hatch,
   });
+}
+
+/**
+ * `?unlocks=` - a debug override that pins what a run may draft and **never
+ * writes the profile**, so looking at a locked or an open collection cannot
+ * spend the player's own progress. `all` is no unlock layer at all, which is
+ * the pool every measurement plays and the log every measurement writes;
+ * `none` is a fresh profile. Anything else, including absent, is the stored
+ * profile.
+ *
+ * Up here beside `pickableClassId` and for the same reason: `startRunApp`
+ * needs a document, so a decision made inside it is a decision no test can
+ * reach.
+ */
+export function unlockOverride(raw: string | null | undefined): 'all' | 'none' | null {
+  return raw === 'all' || raw === 'none' ? raw : null;
+}
+
+/** What a run started now may draft: the override if there is one, else the profile's. */
+export function unlockSetFrom(
+  override: 'all' | 'none' | null,
+  profile: Profile,
+): UnlockSet | null {
+  if (override === 'all') return null;
+  if (override === 'none') return FRESH_UNLOCKS;
+  return unlockSetFor(profile);
 }
 
 /**
@@ -202,11 +252,26 @@ export function startRunApp(): void {
    */
   const classParam = pickableClassId(params.get('class'));
   let picking = classParam === null;
-  let ctl: RunController = createRunController(
-    RUN_CONTENT,
-    startSeed,
-    classParam === null ? {} : { classId: classParam },
-  );
+  /**
+   * The player, between runs: what they have unlocked and what they have done.
+   * Loaded once. A stored profile this code cannot read is left exactly where
+   * it is and reported rather than overwritten - see `profile.ts`.
+   */
+  const override = unlockOverride(params.get('unlocks'));
+  const openedProfile = loadProfile();
+  let profile: Profile = openedProfile.profile;
+  /** False when a stored profile could not be read, or when `?unlocks=` is pinning one. */
+  const profileWritable = openedProfile.writable && override === null;
+  /** What a run started now may draft. Widens when a finished run earns something. */
+  let unlocked: UnlockSet | null = unlockSetFrom(override, profile);
+  /** What the run that just ended added. Null until it ends; the end screen reads it. */
+  let earned: RunUnlocks | null = null;
+  /** The collection, over whatever screen is up, until it is closed again. */
+  let showingCollection = false;
+  let ctl: RunController = createRunController(RUN_CONTENT, startSeed, {
+    unlocked,
+    ...(classParam === null ? {} : { classId: classParam }),
+  });
   // `?fresh=1` ignores a saved run; otherwise a run in progress on this seed
   // is replayed from its log and picks up where it stood between nodes.
   const saved = params.get('fresh') === '1' ? null : loadSaved(startSeed);
@@ -407,6 +472,11 @@ export function startRunApp(): void {
       `<b>${s.deck.length}</b></span>` +
       heroSigilChips(s) +
       `<span class="hud__stat hud__stat--seed" title="The run's seed. The same seed and the same choices replay the same run.">seed ${s.seed}</span>` +
+      // Not during a fight: the collection needs the run panel, and showing
+      // that panel idles the fight screen out from under the fight.
+      (p.kind === 'fight'
+        ? ''
+        : `<button type="button" data-run="collection" title="What you have unlocked, and what opens the rest. Nothing here makes a run stronger.">${showingCollection ? 'Back' : 'Collection'}</button>`) +
       `<button type="button" data-run="restart" title="Abandon this run and start seed ${s.seed} again from the first node">Restart</button>`;
   }
 
@@ -674,6 +744,14 @@ export function startRunApp(): void {
       `<h2 class="run__title ${won ? 'is-won' : 'is-lost'}">${iconSvg(won ? 'hero' : 'boss', { size: 22, decorative: true })} ${won ? 'The run is won' : 'The run is over'}</h2>` +
       `<p class="run__lead">${how}</p>` +
       `<dl class="run__stats">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` +
+      (earned === null ? '' : runUnlocksHtml(earned, CARD_POOL)) +
+      (earned === null || earned.newlyEarned.length === 0 || profileWritable
+        ? ''
+        : `<p class="run__warn${openedProfile.problem === null ? ' run__warn--pin' : ''}">Not saved: ${
+            openedProfile.problem === null
+              ? `unlocks are pinned by <code>?unlocks=${esc(override ?? '')}</code>`
+              : 'the stored profile could not be read and is being left alone'
+          }.</p>`) +
       `<p class="run__muted">The seed and the choice list are the whole run: this log replays it, byte for byte, through <code>replayRun</code>.</p>` +
       `<details class="run__log"><summary>Replay log</summary>` +
       `<textarea id="run-log" readonly rows="6" aria-label="Replay log as JSON">${esc(JSON.stringify(ctl.log))}</textarea>` +
@@ -695,12 +773,45 @@ export function startRunApp(): void {
     dom.subtitle.textContent = `Choose a class · seed ${ctl.seed}`;
     dom.status.innerHTML =
       `<span class="hud__stat hud__stat--seed" title="The run's seed. The same seed and the same choices replay the same run.">seed ${ctl.seed}</span>`;
-    dom.node.innerHTML = classPickHtml({
-      seed: ctl.seed,
-      pool: CARD_POOL,
-      mount: screen.mount(),
-      hatch: screen.hatch(),
-    });
+    dom.node.innerHTML =
+      classPickHtml({
+        seed: ctl.seed,
+        pool: CARD_POOL,
+        mount: screen.mount(),
+        hatch: screen.hatch(),
+        unlocked,
+      }) +
+      profileNotice() +
+      collectionHtml(profile, unlocked ?? ALL_UNLOCKS, CARD_POOL);
+    dom.node.hidden = false;
+    dom.body.hidden = true;
+  }
+
+  /**
+   * The one line a player sees when their stored profile could not be read, or
+   * when `?unlocks=` is pinning the pool. Both change what a run can draft, and
+   * a collection that quietly disagrees with the address bar is worse than a
+   * sentence saying which is in force.
+   */
+  function profileNotice(): string {
+    if (openedProfile.problem !== null) {
+      return `<p class="run__warn">${esc(openedProfile.problem)}</p>`;
+    }
+    if (override === null) return '';
+    return (
+      `<p class="run__warn run__warn--pin">Unlocks are pinned by <code>?unlocks=${esc(override)}</code>: ` +
+      `${override === 'all' ? 'everything is draftable' : 'nothing unlockable is draftable'}, and ` +
+      `nothing this run earns is saved to your profile.</p>`
+    );
+  }
+
+  /** The collection over whatever screen is up. The HUD's button closes it again. */
+  function renderCollection(): void {
+    showRun();
+    dom.node.innerHTML =
+      profileNotice() +
+      collectionHtml(profile, unlocked ?? ALL_UNLOCKS, CARD_POOL) +
+      `<p><button type="button" class="btn--primary" data-run="collection">Back</button></p>`;
     dom.node.hidden = false;
     dom.body.hidden = true;
   }
@@ -711,9 +822,19 @@ export function startRunApp(): void {
       return;
     }
     renderHud();
+    // The fight wins over the collection, and that is not a preference: the
+    // run panel's `showRun` calls `screen.idle()`, which cancels playback and
+    // drops the fight on screen. So the collection is not reachable during a
+    // fight - `renderHud` does not draw its button then - and this branch is
+    // the second guard on the same thing.
     if (ctl.phase.kind === 'fight') {
+      showingCollection = false;
       dom.run.hidden = true;
       dom.fight.hidden = false;
+      return;
+    }
+    if (showingCollection) {
+      renderCollection();
       return;
     }
     showRun();
@@ -751,10 +872,27 @@ export function startRunApp(): void {
     render();
   }
 
-  /** After anything that may have appended to the log: keep the saved run current. */
+  /**
+   * After anything that may have appended to the log: keep the saved run
+   * current, and - the first time the run is seen to have ended - work out what
+   * it unlocked and keep it.
+   *
+   * The profile moves **once**, here, when the run ends. Not during it: the
+   * unlock set is an input to the run and widening it mid-run would change the
+   * pool the run's own log is recorded against.
+   */
   function committed(): void {
-    if (ctl.state.result === 'ongoing') save(ctl.log);
-    else forget(ctl.seed);
+    if (ctl.state.result === 'ongoing') {
+      save(ctl.log);
+      return;
+    }
+    forget(ctl.seed);
+    if (earned !== null) return;
+    earned = applyRunToProfile(profile, ctl.state);
+    profile = earned.profile;
+    if (profileWritable) saveProfile(profile);
+    // The next run drafts from the wider pool; the one on screen is finished.
+    unlocked = unlockSetFrom(override, profile);
   }
 
   function finishFight(): void {
@@ -777,13 +915,15 @@ export function startRunApp(): void {
   function newRun(seed: number): void {
     forget(ctl.seed);
     forget(seed);
-    ctl = createRunController(RUN_CONTENT, seed);
+    ctl = createRunController(RUN_CONTENT, seed, { unlocked });
     picking = true;
     opened = 'fresh';
     focus = null;
     forgeIndex = null;
     interstitial = null;
     pendingFight = null;
+    earned = null;
+    showingCollection = false;
     const url = new URL(globalThis.location.href);
     url.searchParams.set('seed', String(seed));
     url.searchParams.delete('fresh');
@@ -796,7 +936,7 @@ export function startRunApp(): void {
   function pickClass(raw: string): void {
     const classId = pickableClassId(raw);
     if (!picking || classId === null) return;
-    ctl = createRunController(RUN_CONTENT, ctl.seed, { classId });
+    ctl = createRunController(RUN_CONTENT, ctl.seed, { classId, unlocked });
     picking = false;
     opened = 'fresh';
     const url = new URL(globalThis.location.href);
@@ -808,7 +948,16 @@ export function startRunApp(): void {
 
   // ------------------------------------------------------------- input
 
-  dom.run.addEventListener('click', (ev) => {
+  /**
+   * Every `[data-run]` control, wherever it is drawn.
+   *
+   * Attached to the HUD as well as to the run panel, and that is a fix rather
+   * than tidiness: the HUD lives in `<header class="hud">`, which is not
+   * inside `#run`, so a listener on `#run` alone never saw it. Restart has
+   * been in the HUD since unit 8 and has never worked; the Collection button
+   * this unit added would have been dead the same way.
+   */
+  const onRunClick = (ev: Event): void => {
     const target = ev.target as HTMLElement | null;
     if (target === null) return;
     const mapNode = target.closest('[data-node]') as HTMLElement | null;
@@ -862,6 +1011,10 @@ export function startRunApp(): void {
       case 'restart':
         newRun(ctl.seed);
         break;
+      case 'collection':
+        showingCollection = !showingCollection;
+        render();
+        break;
       case 'copy-log': {
         const log = JSON.stringify(ctl.log);
         const said = document.getElementById('run-copied');
@@ -876,7 +1029,9 @@ export function startRunApp(): void {
         break;
       }
     }
-  });
+  };
+  dom.run.addEventListener('click', onRunClick);
+  dom.status.addEventListener('click', onRunClick);
 
   dom.run.addEventListener('submit', (ev) => {
     const form = ev.target as HTMLElement | null;

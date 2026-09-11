@@ -329,6 +329,32 @@ export type RunContent = {
 // Run state
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Unlocks
+// ---------------------------------------------------------------------------
+
+/**
+ * What a run is allowed to draft: the gated ids, and the gated ids this run
+ * owns. Anything not listed in `gated` is always draftable.
+ *
+ * Both lists, not just the owned one, and that is what makes a recorded run
+ * replayable across a content change. Narrowing is `!gated.has(id) ||
+ * owned.has(id)`, so the pair fully describes the filter without reading
+ * today's `src/content/unlocks.ts`: a card added to the gated list tomorrow
+ * does not retroactively disappear from a log written today, and one removed
+ * from it does not retroactively appear.
+ *
+ * Sorted and deduped by `makeUnlockSet`, because the run hash covers the set
+ * and a hash that moved on list order would be a hash of the writer rather
+ * than of the run. See `src/run/unlocks.ts`.
+ */
+export type UnlockSet = {
+  /** Card ids and sigil ids that are only draftable once owned. */
+  readonly gated: readonly string[];
+  /** The subset of `gated` this run may draft. */
+  readonly owned: readonly string[];
+};
+
 export type RunResult = 'ongoing' | 'dead' | 'won';
 
 /** How a run that is no longer ongoing finished. `null` while it is running. */
@@ -396,6 +422,21 @@ export type RunLog = {
    */
   readonly classId?: string;
   /**
+   * The unlock set the run was played with, and so the set its shelves must be
+   * redrawn from. Absent means the run was played with no unlock layer - every
+   * log written before unlocks existed, and every log a measurement writes -
+   * and `replayRun` reads that as "nothing is gated", which is the only thing
+   * such a run could have been.
+   *
+   * Independent of `format`, for the same reason `classId` is: a log that
+   * names no set replays identically either way, so the number does not move.
+   * What is *not* optional is that the replay reads this field rather than the
+   * player's current unlocks. A reward pick is an index into a shelf; redrawing
+   * that shelf from a wider pool makes the same index name a different card,
+   * and the replay would be a different run wearing the seed.
+   */
+  readonly unlocked?: UnlockSet;
+  /**
    * The shape of the log, `RUN_LOG_FORMAT` when written by this code. A log
    * from an earlier format is upgraded by `migrateRunLog` in `run.ts` before
    * it is replayed; `replayRun` itself takes only the current format, so a
@@ -456,9 +497,17 @@ export type RunState = {
   /** The class this run was started as. Recorded in the log, covered by the hash. */
   readonly classId: string;
   /**
+   * The unlock set this run was started with, or `null` for a run with no
+   * unlock layer. Fixed for the life of the run: finishing a run widens the
+   * *next* one, never the one being played. Recorded in the log, and covered
+   * by the hash only when it is not `null`, so a run played without unlocks
+   * hashes exactly as it did before they existed.
+   */
+  readonly unlocked: UnlockSet | null;
+  /**
    * Immutable data shared by every run of this class on this content: the
    * content handed to `startRun` with the class's hero, deck and pool in
-   * place. Not hashed.
+   * place, narrowed to what `unlocked` allows. Not hashed.
    */
   readonly content: RunContent;
   /** All three act maps, generated once at setup from the seed alone. */

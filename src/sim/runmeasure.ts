@@ -45,6 +45,8 @@ import { hashMaps, hashRun } from '../run/hash.ts';
 import { branchingTypes, mapProblems } from '../run/map.ts';
 import { drawDistinctCards, fightSeedFor } from '../run/nodes.ts';
 import { contentForClass, replayRun, runRun, startRun } from '../run/run.ts';
+import { FRESH_UNLOCKS } from '../content/unlocks.ts';
+import { stillLocked, unlockProblems, unlockedContent } from '../run/unlocks.ts';
 import { fightSigilProblems, sigilProblems } from '../run/sigils.ts';
 import type {
   NodeType,
@@ -54,6 +56,7 @@ import type {
   RunLog,
   RunResult,
   RunState,
+  UnlockSet,
 } from '../run/types.ts';
 import { DEFAULT_LOOKAHEAD, lookaheadPlacer } from './bots.ts';
 import { wilson } from './measure.ts';
@@ -184,18 +187,31 @@ export function sigilReport(arm: RunArm, content: RunContent = RUN_CONTENT): Sig
   };
 }
 
+/**
+ * One arm: every seed, one route style, one placement style.
+ *
+ * `unlocked` is what the run may draft, and it goes in through the same
+ * argument `src/ui/` uses rather than by handing this function a
+ * pre-narrowed content. The difference matters for what is being measured: a
+ * pre-narrowed content would measure a *different content*, while an unlock set
+ * measures the shipped content played by a player who has not unlocked
+ * everything, which is the question `--unlocks none` is asking. `null`, the
+ * default, is no unlock layer - the arm every number in this file was measured
+ * with.
+ */
 export function runArm(
   name: string,
   route: RouteStyle,
   placement: PlacementStyle,
   seeds: readonly number[],
   content: RunContent = RUN_CONTENT,
+  unlocked: UnlockSet | null = null,
 ): RunArm {
   const outcomes: RunOutcome[] = [];
   for (const seed of seeds) {
     const agent = makeRunAgent({ route, placement, seed });
-    const { run, log } = runRun(content, seed, agent);
-    outcomes.push(outcomeOf(content, seed, run, log));
+    const { run, log } = runRun(content, seed, agent, undefined, unlocked);
+    outcomes.push(outcomeOf(run.content, seed, run, log));
   }
   return { name, route, placement, outcomes };
 }
@@ -694,6 +710,22 @@ function main(): void {
   // was before classes existed. An unknown class is refused by name.
   const content = has('class') ? contentForClass(RUN_CONTENT, arg('class', '')) : RUN_CONTENT;
   const acts = content.acts.length;
+  // `--unlocks none` measures the pool a player who has finished nothing
+  // drafts from; `--unlocks all`, and no flag at all, measure the pool with no
+  // unlock layer, which is what every other number in this report was taken
+  // at. The set is printed below rather than assumed, because a flag that was
+  // silently ignored would report the wrong population just as confidently.
+  const unlockArg = arg('unlocks', 'all');
+  if (unlockArg !== 'all' && unlockArg !== 'none') {
+    throw new Error(
+      `--unlocks takes "all" or "none", got "${unlockArg}". "all" is no unlock layer, which is ` +
+        `what every other number in this report was measured at; "none" is a fresh profile.`,
+    );
+  }
+  const unlocked: UnlockSet | null = unlockArg === 'none' ? FRESH_UNLOCKS : null;
+  for (const p of unlockProblems(RUN_CONTENT, unlocked)) {
+    throw new Error(`--unlocks ${unlockArg}: ${p}`);
+  }
 
   console.log('# How far does a run get, and where does it stop?');
   console.log('');
@@ -707,12 +739,29 @@ function main(): void {
     'A route style and a placement style are separate dials; the routing comparison holds ' +
       'placement fixed.',
   );
+  // The instrument says which pool it measured, so a --unlocks that did not
+  // take effect cannot be read as a result about the pool that was asked for.
+  if (unlocked === null) {
+    console.log(
+      `Unlocks: no unlock layer - every card and sigil the content lists is draftable ` +
+        `(\`--unlocks none\` measures a fresh profile instead).`,
+    );
+  } else {
+    const narrowed = unlockedContent(content, unlocked);
+    console.log(
+      `Unlocks: a fresh profile. ${stillLocked(unlocked).length} of ${unlocked.gated.length} ` +
+        `unlockable id(s) are locked, so the pool this arm drafts from is ` +
+        `${narrowed.rewards.length} of ${content.rewards.length} cards and ` +
+        `${narrowed.sigils.length} of ${content.sigils.length} sigils. Locked: ` +
+        `${stillLocked(unlocked).join(', ')}.`,
+    );
+  }
   console.log('');
 
-  const armGL = runArm('greedy route / search placement', 'greedy', 'lookahead', seeds, content);
-  const armRL = runArm('random route / search placement', 'random', 'lookahead', seeds, content);
-  const armGR = runArm('greedy route / right placement', 'greedy', 'right', seeds, content);
-  const armRR = runArm('random route / right placement', 'random', 'right', seeds, content);
+  const armGL = runArm('greedy route / search placement', 'greedy', 'lookahead', seeds, content, unlocked);
+  const armRL = runArm('random route / search placement', 'random', 'lookahead', seeds, content, unlocked);
+  const armGR = runArm('greedy route / right placement', 'greedy', 'right', seeds, content, unlocked);
+  const armRR = runArm('random route / right placement', 'random', 'right', seeds, content, unlocked);
   const arms = [armGL, armRL, armGR, armRR];
 
   console.log('| arm | runs won | win rate | 95% CI | mean acts cleared | mean fights | mean rounds/fight | mean end deck |');
