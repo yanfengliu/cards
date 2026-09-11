@@ -6,6 +6,103 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-10 — closing the tribes review: eleven mutations, and a tripwire that was designed for exactly this and did not fire
+
+Taken on branch `worktree-agent-aacf45b44fe4cb1d7`, cut from `8efbbb2` with `main` at `5f51827` merged in; the suite is **236 tests** here, 230 at `8efbbb2`. Eleven mutations, each applied to the shipped tree, run against the shipped command, reverted, and the restored bytes compared with the originals before anything was printed. All eleven came back red for their own reason. The runner is `.probe/mutate.mjs`, rebuilt under the ignored scratch path with the previous round's guards — anchors normalised to the file's own line ending, exactly one match or a refusal, no-op replacements refused, and the gate's own words required in the output before a red is credited.
+
+That last guard earned itself immediately. M3's first draft used `leftNeighbour`, which `src/engine/resolver.ts` does not import, so six tests went red on `ReferenceError: leftNeighbour is not defined` — and with a loose `expect` string the runner called it red for its own reason. Tightening `expect` to the assertion's own sentence turned it into the `RED-BUT-NOT-ITS-OWN` it was.
+
+**The finding this round exists for: a tripwire that named this exact event did not fire.** `ARCHITECTURE.md` said `test/resolver-order.test.ts` "pins the *reason*, so the day a second `afterActed` trait is written the test goes red and its author has to gate the order". Chorus was written into that branch at `8efbbb2` and nothing went red. The test was not changed, and it was never able to do what the document claimed: it asserted that a fixture body carrying `['relay', 'wake']` produced one effect per event. A *third* trait keyed to `afterActed` does not appear on that body, so its block never ran for that fixture and the assertion held. The tripwire could only have fired if the author of the new trait had also added it to that fixture's hand-written trait list — the one edit the author has no reason to make. **A gate built from a hand-written list of the thing it checks can only see what somebody remembered to write into it.** The replacement reads the `afterActed` branch off the AST and pins the trait names *in order*, so it cannot be blind to a trait that exists.
+
+### The eleven
+
+| # | Mutation | File | Gate that went red |
+|---|---|---|---|
+| 1 | the Chorus block moved above Relay's in `triggersFor` | `src/engine/resolver.ts` | a body carrying Relay and Chorus fires Relay first; every trait keying on afterActed is pinned |
+| 2 | a third trait keyed to `afterActed` (`guard` added to the Chorus condition) | `src/engine/resolver.ts` | every trait keying on afterActed is pinned |
+| 3 | Chorus given a second target list of adjacent living heroes | `src/engine/resolver.ts` | a Chorus beside the hero sings to nobody |
+| 4 | a new engine file `src/engine/tribecheck.ts` holding the whole-board count | `src/engine/tribecheck.ts` | the engine compares two races in exactly one place |
+| 5 | `tribalOnAct` moved inside the `swingsOf` loop in `act` | `src/engine/resolver.ts` | a tribal count is spawned once per act |
+| 6 | Chorus **moved** from `afterActed` to `acted` | `src/engine/resolver.ts` | a Chorus that died to its own swing's retaliation sings to nobody |
+| 7 | the walk's first running total, 199 → 198 | `docs/design/game.md` | Chorus, walked by hand |
+| 8 | the walk's second running total, 198 → 197 | `docs/design/game.md` | Chorus, walked by hand |
+| 8b | Chorus reaches only its left neighbour (`.slice(0, 1)`) | `src/engine/resolver.ts` | Chorus, walked by hand |
+| 9 | `u_songkeeper` changed from elf to human, id kept | `src/content/cards.ts` | a card id names a race |
+| 10 | a new pool card with no line in `RACE_OF` | `src/content/cards.ts` | a card id names a race |
+
+### What each red proved, where the wording matters
+
+**M1 and M2** are the two halves of the replaced tripwire. M1 also goes red on the behavioural fixture, which is the point of having both: the AST check says *which* traits are in the branch and in what order, and the fixture says what a body carrying two of them actually emits — `[right +2 Relay, left +2 Chorus, right +2 Chorus]`. Reachable with shipped content: `si_relay` grants Relay to a card that does not print it, and the two Chorus cards do not print Relay.
+
+**M3 was red in exactly one test, and that is the finding.** Before this round no test anywhere observed a hero's `bonusPower` after a tribal trait fired beside it — the existing hero gates all fight the *count* (what a trait sees when it looks at a hero), which is `adjacentKinOf`'s guard, not `adjacentAllies`' `isHero` skip. The board is the most ordinary one there is: the rightmost unit's right-hand neighbour is always the hero.
+
+**M4's first run left `src/engine/tribecheck.ts` behind**, because the runner shelled out to delete it through a `node -e` string that Windows path separators broke. Recorded because the file sitting in the tree would have been read as a gate failure on the next run rather than as a runner failure. Fixed by calling `rmSync` directly.
+
+**M6 had to MOVE the block, not duplicate it.** The first draft added an `acted`-keyed Chorus block alongside the `afterActed` one, which doubles every grant and turns six tests red for the wrong reason. Moved properly, it is red in exactly one test — the new fragile-singer fixture — which reproduces the reviewer's claim that all 230 tests could not tell `acted` from `afterActed`. Death is the only board that separates them: a body that dies to the retaliation its own swing drew never reaches `afterAct`, and every Chorus fixture before this one was fought into a 0-Power Guard so that nothing in the line dies.
+
+**M7 and M8 fire the document-arithmetic half; M8b fires the engine half.** They are two different bindings of the same three numbers and neither covers the other: M7 keeps the engine correct and breaks the walk's own subtraction chain, M8b keeps the document correct and moves what the engine deals per step. The running-total assertion is placed before the `bonusPower` assertions in that test precisely so M8b reaches it.
+
+**M9 is the one the canonical form does not defend against.** Equipment's two numbers are in `hashFight`'s canonical form because they are tuned values; a race is not, because it is recoverable from `cardId` — which is only true while "a card that changes race gets a new id" holds. At `8efbbb2` that rule had no gate: M9 passed `npm run gates`, `npm run verify` and `npm run verify:run` while changing what Chorus does in every fight `u_songkeeper` appears in. M10 is its sibling: a new card with no pinned race.
+
+### Bounds, stated rather than implied
+
+- The AST tripwire sees only trait tests written as `…includes('literal')` inside the `afterActed` arm of `triggersFor`. A trait read through a `Set`, a lookup table, or a variable is invisible to it, and the behavioural fixture is what covers the pair that exists today.
+- The one-comparison-site gate now walks `src/engine/` off the filesystem rather than from a list of six names, so a seventh file is covered. It still sees only `===`/`!==`/`==`/`!=` against a property named `tribe`, still only under `src/engine/`, and still nothing about how a comparison written some other way would read.
+- `RACE_OF` pins races, not numbers, and covers the shipped unit pools plus the `_nc` control derived from the player half. Spells and equipment carry no race and are outside it.
+- The Volley/tribal fixture is not reachable from shipped content: no tribal card prints Volley and no Volley card prints a tribal trait. It is written for the day a Volley sigil or a Volley tribal card lands.
+
+### What did not move
+
+`npm run verify` is byte-identical to `8efbbb2`'s, line for line apart from `Elapsed`: 66.25% optimal against 56.50% random, gap 9.75 pp (CI 5.61..13.89). That is the evidence that this round is gates and comments and nothing else — no constant, card, weight or deck was touched, and the only `src/` edits are comment text in `resolver.ts` and `state.ts`.
+
+## 2026-09-10 — tribes: sixteen mutations, two that came back green and were right to, and a claim withdrawn because nothing could falsify it
+
+Taken on branch `worktree-agent-a8d4d25fe3d5ac7c5`, cut from `dcf2cdf`; the suite is **230 tests** here, 218 at the base. Sixteen mutations, each applied to the shipped tree, run against the shipped command, reverted, and the restored bytes compared with the originals before anything was printed. All sixteen came back red for their own reason on the final run.
+
+The runner is `.probe/mutate.mjs`, under the ignored scratch path. It normalises each anchor to the file's own line ending before matching, refuses an anchor that matches zero times or more than once, refuses a replacement equal to its anchor, and matches the gate's own words rather than merely a non-zero exit — a red for some other reason is reported as `RED-BUT-NOT-ITS-OWN`, which is how two of the mutations below were caught being wrong.
+
+**Three of the sixteen edit `docs/design/game.md` rather than code.** The three walked examples parse their numbers out of the document through a `stated()` helper, so the document is the source and the engine is what is checked against it. That is the shape `test/hero-attacks.test.ts` arrived at after its own version of this gate was found to be one-way, and it is copied here deliberately: a walked example the test transcribes is a claim about a copy of the example.
+
+### The sixteen
+
+| # | Mutation | File | Gate that went red |
+|---|---|---|---|
+| 1 | Kindle counts strangers instead of kin (`'same'` → `'different'` in `tribalOnAct`) | `src/engine/resolver.ts` | Kindle, walked by hand |
+| 2 | Chorus reaches only its right-hand neighbour (`.slice(-1)` on the kin list) | `src/engine/resolver.ts` | Chorus, walked by hand |
+| 3 | `BANNER_POWER = 0` | `src/engine/resolver.ts` | Banner, walked by hand |
+| 4 | a hero counts as a neighbour (`!n.isHero` removed from `adjacentAllies`) | `src/engine/state.ts` | a hero is not a race |
+| 5 | adjacency becomes a count of the whole line (`ADJACENT` replaced by `state.board[e.side]`) | `src/engine/state.ts` | a tribal grant does not move when the line grows |
+| 6 | Chorus grants `CHORUS_POWER + ally.bonusPower` — "Power equal to mine", the wording the design says not to write | `src/engine/resolver.ts` | Chorus does not compound |
+| 7 | Relay quietly starts reading a race (`&& r.tribe !== e.tribe`) | `src/engine/resolver.ts` | exactly the traits in TRIBAL_TRAITS notice a neighbour's race |
+| 8 | a second race comparison, in `adjacentKin` rather than `adjacentKinOf` | `src/engine/state.ts` | the engine compares two races in exactly one place |
+| 9 | the odds stop projecting the tribal Power | `src/render/odds.ts` | the tribal Power shown before commit is the Power that lands |
+| 10 | a corpse still standing in the row counts as kin (`!n.alive` removed) | `src/engine/state.ts` | a dead neighbour is not kin |
+| 11 | the Knight loses both cards that print Chorus, keeping its other elves | `src/content/classes.ts` | class sets the pool; races appear across all of it |
+| 12 | the document restates what Kindle swings at (**3** → **4**) | `docs/design/game.md` | Kindle, walked by hand |
+| 13 | the document restates what Chorus grants (**+2** → **+3**) | `docs/design/game.md` | Chorus, walked by hand |
+| 14 | the document renames the walked example's heading | `docs/design/game.md` | the section-name assertion, at module load |
+| 15 | the race note goes back to its 255-character first draft | `src/render/glossary.ts` | the summary line stays inside the two lines the panel's placement can afford |
+| 16 | the race note stops naming one of the traits that reads a race | `src/render/glossary.ts` | the sentence about races names every trait that reads one |
+
+Number 14 dies at import rather than inside a test, because the section is read at module load. That is a louder red, not a weaker one, and the runner matches the assertion's own message:
+
+> `AssertionError [ERR_ASSERTION]: docs/design/game.md has no "### A tribal line, walked by hand" section. The play example these gates walk was renamed or deleted; a rule with no walked example is not specified.`
+
+### The two that came back green, and what each one meant
+
+**A `TribalTrait` union member deleted came back GREEN, correctly.** The first draft of number 7 removed `'banner'` from the union and left `const TRIBAL: Readonly<Record<TribalTrait, true>>` alone. Node strips types, so `Object.keys(TRIBAL)` still held `'banner'` at runtime, `TRIBAL_TRAITS` was unchanged, and nothing behavioural moved. The mutation did not reproduce a defect, so a green was the right answer — and it names the bound on the type-level half of this: **the compiler catches a union and its record disagreeing, and cannot catch a trait that was never put in the union at all.** That second shape is what the behavioural gate is for, so the mutation was rewritten as it: Relay, a trait outside the union, quietly starts reading a race. It compiles cleanly and goes red.
+
+**A claim with no possible falsification came back GREEN, and was withdrawn rather than kept.** `src/engine/resolver.ts` said the tribal count is read inside `apply` "so the count is taken from the board as it stands when the effect comes off the queue - not from the board as it stood when something decided to queue it", and `test/tribes.test.ts` carried a test claiming to gate it. The mutation froze the count at the spawn site — three coordinated edits, a `frozen?: number` on the effect — and the whole suite stayed green. It had to: `act` queues `tribePower` immediately ahead of the swing, so the spawn site and `apply` read the same board and no fixture can tell them apart. The comment now says so in the file, the test was rewritten around the `alive` guard, which *is* falsifiable (number 10), and the design choice is recorded as written on the general rule rather than on evidence.
+
+### What the two structural gates are bounded by
+
+**"A tribal grant does not move when the line grows"** sweeps widths 3, 5, 11 and 21, both neighbour-race polarities, for every trait in `TRIBAL_TRAITS`. Two widths would not separate a constant from something that grows and then saturates; four do. It also asserts that at least one arm per trait paid something, because every arm reading zero is what a sweep measuring silence looks like. It says nothing about a trait that scales with something other than board width.
+
+**"The engine compares two races in exactly one place"** walks the AST of the six files under `src/engine/` and requires every `===`/`!==`/`==`/`!=` with a `.tribe` on either side to sit inside `adjacentKinOf`. It reads the AST rather than the text for `tools/gates/scan.ts`'s reason — this repo's comments contain the literal strings the gates look for. It asserts it found at least one such comparison, so an engine that compares no races cannot report as one that compares them in one place. A comparison written some other way — a `switch`, a `Map` lookup, an equality helper — is invisible to it, and the behavioural gates are what cover that.
+
+### One regression this round, caught by a probe and not by a test
+
+`RACE_RULE`'s first draft was 255 characters. It wrapped to a third line in the hover panel's `xp__note` paragraph and took the panel from **266px to 280px** against a 270px band, with the area of the player's row it covered going from **2,341px² to 11,623px²**. `npm run probe:ui hover 7 even light` said so; `npm test` did not, because the existing length gate read `xp__gloss` and the paragraph that grew was `xp__note`. The sentence was shortened to 179 characters — panel back to 266px, coverage back to 2,341px² — and the gate extended to both paragraphs, with an added assertion that neither is empty, since a panel that stopped emitting one would otherwise read as a panel whose paragraphs are short enough. Mutation 15 is the red-proof for the extension.
 ## 2026-09-10 — a malformed work plan goes red at commit: sixteen mutations, and a gate that has to work without the repo it borrows its rules from
 
 Taken on branch `worktree-agent-ae829ffbddee3454e`, cut from `dcf2cdf`; the suite is **218 tests** here, the same as at the base, because this round adds no test — the gate's evidence is its own probe plus the sixteen mutations below. Each was applied to the shipped tree, run against the shipped command, reverted, and the file's digest read back. Every one came back the colour it was meant to be, which for two of them — M15 and M16, the cases where the fleet checkout is unusable — is green. No anchor was broken.

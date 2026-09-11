@@ -95,6 +95,22 @@ export const KNIGHT: ClassDef = {
     { cardId: 'u_champion', weight: 4 },
     { cardId: 'u_bulwark', weight: 3 },
     { cardId: 'u_wayfinder', weight: 3 },
+    // The tribal six. Every class pool holds all six, per "races appear across
+    // all of it": a Knight who keeps drawing elves can commit to elves. The
+    // Knight's own races come at 6/3 and the races it is short of at 2/1, which
+    // is the same lean its existing weights already have - it is not a claim
+    // that a Chorus is worth less than a Kindle.
+    //
+    // A payoff card is offered less often than the bodies it pays off, and that
+    // is the only reason these sit below the staples: a Kindler drawn into a
+    // deck with no dwarves is a 1/4 for 2, and the run has to be able to build
+    // towards it rather than trip over it.
+    { cardId: 'u_kindler', weight: 6 },
+    { cardId: 'u_runesmith', weight: 3 },
+    { cardId: 'u_bannerman', weight: 6 },
+    { cardId: 'u_marshal', weight: 3 },
+    { cardId: 'u_songkeeper', weight: 2 },
+    { cardId: 'u_elflord', weight: 1 },
   ],
 };
 
@@ -136,6 +152,14 @@ export const RANGER: ClassDef = {
     { cardId: 'u_manatarms', weight: 4 },
     { cardId: 'u_avenger', weight: 3 },
     { cardId: 'u_champion', weight: 3 },
+    // The tribal six, leaning the way the Ranger already leans: elves and
+    // humans at 6/3, the dwarves it is short of at 2/1.
+    { cardId: 'u_songkeeper', weight: 6 },
+    { cardId: 'u_elflord', weight: 3 },
+    { cardId: 'u_bannerman', weight: 6 },
+    { cardId: 'u_marshal', weight: 3 },
+    { cardId: 'u_kindler', weight: 2 },
+    { cardId: 'u_runesmith', weight: 1 },
   ],
 };
 
@@ -177,6 +201,17 @@ export const MAGE: ClassDef = {
     { cardId: 'u_wayfinder', weight: 4 },
     { cardId: 'u_bulwark', weight: 3 },
     { cardId: 'u_champion', weight: 3 },
+    // The tribal six. The Mage drafts all three races already - "all three
+    // races, dwarves most" - so its tribal weights are the flattest of the
+    // three, at 4/2 across the board with the dwarves one step up. A Mage's
+    // line is there to be attacked into while the burn works, and a Kindler
+    // between two dwarves is a cheap body that also swings.
+    { cardId: 'u_kindler', weight: 5 },
+    { cardId: 'u_runesmith', weight: 2 },
+    { cardId: 'u_songkeeper', weight: 4 },
+    { cardId: 'u_elflord', weight: 2 },
+    { cardId: 'u_bannerman', weight: 4 },
+    { cardId: 'u_marshal', weight: 2 },
   ],
 };
 

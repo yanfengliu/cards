@@ -24,7 +24,41 @@ export type Side = 'player' | 'enemy';
  * unit may carry either too, and the resolver treats a hero and a unit the
  * same way, which is what lets a Volley archer exist in the Ranger's pool.
  */
-export type Trait = 'guard' | 'relay' | 'wake' | 'volley' | 'scorch';
+export type Trait = 'guard' | 'relay' | 'wake' | 'volley' | 'scorch' | TribalTrait;
+
+/**
+ * The traits that read a race - `docs/design/game.md`'s "races are mechanical
+ * tribes". Split out of `Trait` because two places have to word a claim about
+ * exactly this set and neither may hardcode it:
+ *
+ *   - `render/glossary.ts` tells the player what being a dwarf does, by name.
+ *     The sentence is built from `TRIBAL_TRAITS`, so deleting one re-words it
+ *     and adding one adds itself. That is the same property that made deleting
+ *     Ward a compile error instead of a lying tooltip.
+ *   - `test/tribes.test.ts` fights the same board twice with one neighbour's
+ *     race changed and nothing else, and asserts that exactly the traits in
+ *     this union notice. A tribe-reading trait left out of it fails there, so
+ *     the list cannot quietly go stale.
+ *
+ * All three obey the design's own bound: **a trait reads its neighbours, never
+ * a total.** `adjacentAllies` is the only door to the board they have, and it
+ * returns at most two entities whatever the line is doing.
+ */
+export type TribalTrait = 'kindle' | 'chorus' | 'banner';
+
+/**
+ * `TRIBAL_TRAITS`, spelled as a record so the type system fills it in: a member
+ * added to `TribalTrait` and not to this object does not compile, and a key
+ * here that is not in the union does not compile either. `Object.keys` on a
+ * fully-specified `Record` is then the list, derived rather than retyped.
+ */
+const TRIBAL: Readonly<Record<TribalTrait, true>> = { kindle: true, chorus: true, banner: true };
+
+export const TRIBAL_TRAITS: readonly TribalTrait[] = Object.keys(TRIBAL) as TribalTrait[];
+
+export function isTribalTrait(t: Trait): t is TribalTrait {
+  return t in TRIBAL;
+}
 
 export type Tribe = 'human' | 'dwarf' | 'elf' | 'orc' | 'beast' | 'hero';
 
@@ -137,6 +171,23 @@ export type Entity = {
   cardId: string;
   side: Side;
   isHero: boolean;
+  /**
+   * The card's race, carried onto the board so a trait can read it.
+   *
+   * Until tribal traits existed this field was not here at all, and that was
+   * the whole of why race was decoration: `UnitCard` had a `tribe` and
+   * `makeUnit` dropped it, so nothing in a fight could see one. A hero gets
+   * `'hero'`, which `render/glossary.ts` words as "not a race" - and every
+   * tribal count below excludes heroes for exactly that reason.
+   *
+   * It is deliberately **not** in `hash.ts`'s canonical form. A tribe is a
+   * function of `cardId`, which that form already carries, and unlike a piece
+   * of equipment's two numbers it is identity rather than a tuned value:
+   * `AGENTS.md` says a rebalanced card keeps its id and a redesigned one gets
+   * a new one, and changing a card's race is a redesign. So every hash
+   * recorded before tribes existed still reproduces.
+   */
+  tribe: Tribe;
   /** Printed Power. Permanent growth would change this; nothing here does. */
   basePower: number;
   /** Buffs granted during resolution. Cleared at the start of the owner's turn. */
@@ -250,6 +301,7 @@ export function makeHero(state: GameState, side: Side, spec: HeroSpec): Entity {
     cardId: `hero:${spec.name}`,
     side,
     isHero: true,
+    tribe: 'hero',
     basePower: spec.power,
     bonusPower: 0,
     health: spec.health,
@@ -267,6 +319,7 @@ export function makeUnit(state: GameState, side: Side, card: UnitCard): Entity {
     cardId: card.id,
     side,
     isHero: false,
+    tribe: card.tribe,
     basePower: card.power,
     bonusPower: 0,
     health: card.health,
@@ -339,12 +392,115 @@ export function leftNeighbour(state: GameState, e: Entity): Entity | null {
   return board[i - 1] ?? null;
 }
 
+/**
+ * The living **units** immediately left and right of `e` on its own side - at
+ * most two entities, whatever the line is doing.
+ *
+ * This is the only door a tribal trait has to the board, and that is the
+ * design's constraint made structural rather than remembered.
+ * `docs/design/game.md`, "Why adjacency, and not counting":
+ *
+ *   > A trait that counts - "+1 Power for each friendly unit that acted before
+ *   > me" - gives the Nth unit +N. On a five-slot board that caps at +4; here
+ *   > the cap is whatever the deck economy currently allows [...] its ceiling
+ *   > is **not a number anyone controls directly**.
+ *
+ * Two rules are in the return value rather than in a comment:
+ *
+ *   - **At most two.** Nothing here walks the array, so no tribal trait can
+ *     scale with board width even by accident. Gated by "a tribal trait's
+ *     grant does not move when the line grows" in `test/tribes.test.ts`, which
+ *     fights the same trait at 2 and at 20 neighbours.
+ *   - **Never a hero.** A hero's `tribe` is `'hero'`, which the glossary words
+ *     as "Not a race". Counting it would make a race-matching trait see a
+ *     stranger and a race-differing one see a friend, purely for standing at
+ *     the right end of the line - a bonus for position rather than for race.
+ *     Relay deliberately *does* reach the hero; a count of kin deliberately
+ *     does not, and the two rules are different because one hands a neighbour
+ *     Power and the other asks what the neighbour *is*.
+ */
+const ADJACENT: readonly ((state: GameState, e: Entity) => Entity | null)[] = [
+  leftNeighbour,
+  rightNeighbour,
+];
+
+/**
+ * How many entities "adjacent" can mean: the number of directions
+ * `adjacentAllies` actually looks in, not a 2 typed somewhere.
+ *
+ * `render/glossary.ts` tells the player "the most this can ever be is +2" and
+ * builds that sentence from this, under the same rule that makes it build
+ * "+2 Power" from `RELAY_POWER`: a number retyped in a tooltip is a number
+ * that stops following the code. A third direction would move the behaviour
+ * and the sentence in one edit, because it is the same list.
+ */
+export const MOST_ADJACENT = ADJACENT.length;
+
+export function adjacentAllies(state: GameState, e: Entity): Entity[] {
+  const out: Entity[] = [];
+  for (const at of ADJACENT) {
+    const n = at(state, e);
+    if (n === null || !n.alive || n.isHero) continue;
+    out.push(n);
+  }
+  return out;
+}
+
+/**
+ * The adjacent allied units that share `e`'s race (`'same'`), or that do not
+ * (`'different'`). 0, 1 or 2 of them - never more.
+ *
+ * **This is the only place in `src/engine/` where two races are compared.**
+ * Both polarities live in one function because two shipped traits want
+ * opposite answers - Kindle rewards a dwarf for standing among dwarves, Banner
+ * rewards a human for standing between races - and one comparison site is what
+ * `test/tribes.test.ts`'s "the engine compares two races in exactly one place"
+ * check reads off the source. A second site is how a counting trait gets
+ * written by accident.
+ *
+ * **A hero counts nothing, at either polarity of the count.** "Both ways
+ * round" used to stand here and overstated what is covered: it names `'same'`
+ * and `'different'`, which are two answers to the same question, and says
+ * nothing about the *other* direction - a hero standing next to a trait that
+ * grants. That direction is `adjacentAllies`' `isHero` skip, it is the common
+ * case rather than a corner one (the rightmost unit's right-hand neighbour is
+ * always the hero), and until "a Chorus beside the hero sings to nobody" was
+ * written in `test/tribes.test.ts` nothing observed a hero's `bonusPower`
+ * after a tribal trait fired beside it.
+ *
+ * `adjacentAllies` already refuses to return one, so a hero is never somebody
+ * else's kin and never anybody's grant; this refuses to answer for one at all,
+ * so a hero is never anybody's counter either. Without
+ * the second half the two halves disagree: `'same'` would be 0 for a hero
+ * because no unit is of race `'hero'`, while `'different'` would be every unit
+ * beside it - a free +1 or +2 to any hero carrying Banner, earned by standing
+ * at the right end of the line rather than by any race. No hero carries a
+ * tribal trait today; the rule is written here rather than left to that.
+ * Gated by "a tribal count is bounded at MOST_ADJACENT on any board the
+ * accessor can be handed" in `test/tribes.test.ts`, which is where the
+ * disagreement was found.
+ */
+export function adjacentKinOf(
+  state: GameState,
+  e: Entity,
+  match: 'same' | 'different',
+): Entity[] {
+  if (e.isHero) return [];
+  return adjacentAllies(state, e).filter((a) => (a.tribe === e.tribe) === (match === 'same'));
+}
+
+/** How many of them there are: 0, 1 or 2. */
+export function adjacentKin(state: GameState, e: Entity, match: 'same' | 'different'): number {
+  return adjacentKinOf(state, e, match).length;
+}
+
 export function cloneEntity(e: Entity): Entity {
   return {
     uid: e.uid,
     cardId: e.cardId,
     side: e.side,
     isHero: e.isHero,
+    tribe: e.tribe,
     basePower: e.basePower,
     bonusPower: e.bonusPower,
     health: e.health,

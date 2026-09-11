@@ -103,6 +103,8 @@ import {
   type GameState,
   type Side,
   EQUIP_SLOTS,
+  adjacentKin,
+  adjacentKinOf,
   armourOf,
   findEntity,
   otherSide,
@@ -128,7 +130,32 @@ export type Effect =
    */
   | { kind: 'scorch'; uid: number; side: Side; amount: number }
   | { kind: 'buffAll'; uid: number; side: Side; amount: number }
-  | { kind: 'equip'; uid: number; item: EquipmentCard };
+  | { kind: 'equip'; uid: number; item: EquipmentCard }
+  /**
+   * The tribal verb: `uid` gains `per` Power for each adjacent allied unit
+   * whose race matches its own (`match: 'same'`, which is Kindle) or does not
+   * (`match: 'different'`, which is Banner).
+   *
+   * **Authorised by the coordinator for unit 11**, and recorded in
+   * `ARCHITECTURE.md` beside `scorch` for the same reason that one is: a verb
+   * that arrived without that line looks exactly like one a worker added on
+   * its own.
+   *
+   * It is a verb rather than a `gainPower` with the count worked out at the
+   * spawn site, so the count is taken inside `apply`, where every other read
+   * of the board is taken. **No gate distinguishes the two**, and that is
+   * worth writing down rather than dressing up: `act` queues this immediately
+   * ahead of the swing, so the board at the spawn site and the board at `apply`
+   * are the same board, and a mutation moving the count to the spawn site
+   * passes the whole suite. It is written this way on the general rule, not on
+   * evidence, and it stops being free the day something queues this from
+   * further away.
+   *
+   * Chorus is deliberately **not** here. It hands Power to a neighbour, which
+   * is what `gainPower` already is - so Chorus is Relay's mechanism with a
+   * race test and two recipients, and adds no verb at all.
+   */
+  | { kind: 'tribePower'; uid: number; per: number; match: 'same' | 'different' };
 
 export type GameEvent =
   | { kind: 'acted'; uid: number }
@@ -183,7 +210,55 @@ export const WAKE_POWER = 2;
  */
 export const VOLLEY_SWINGS = 2;
 export const SCORCH_DAMAGE = 1;
+
+/**
+ * The three tribal numbers, beside the five above.
+ *
+ * `docs/design/game.md` writes Kindle as "+1 Power for each adjacent friendly
+ * dwarf", so `KINDLE_POWER` is the design's own 1. `BANNER_POWER` mirrors it
+ * at the same number because Banner is the same count with the race test
+ * inverted, and a different number there would be a claim that one side of
+ * that test is worth more than the other, which nothing has measured.
+ *
+ * `CHORUS_POWER` is `RELAY_POWER`'s 2, written separately rather than aliased:
+ * they are two cards' numbers that happen to agree today, and a balance pass
+ * that moves one must not silently move the other. The design's sketch is "an
+ * elf lord might Relay to every elf beside it", and the reason a flat 2 to two
+ * neighbours is not simply twice a Relay is resolution order - the left
+ * neighbour has already acted when Chorus fires, so its share buys retaliation
+ * Power for the enemy's turn and not a swing.
+ *
+ * All three are starting guesses with a reason, in the sense
+ * `docs/policies/local-rules.md` fixes: they are options offered to the
+ * player, and a measurement saying one is weak is information rather than an
+ * instruction to re-tune it.
+ */
+export const KINDLE_POWER = 1;
+export const BANNER_POWER = 1;
+export const CHORUS_POWER = 2;
+
 export const DEFAULT_MAX_ITERATIONS = 4096;
+
+/**
+ * The tribal count a unit's own traits ask for as it acts, as effects, or the
+ * empty list.
+ *
+ * Both self-buffs are here rather than inline in `act` so that the one place
+ * that turns a trait into a tribal effect is one place. A count of zero
+ * queues nothing: `docs/policies/local-rules.md` says the resolver announces
+ * an effect that reached a target and nothing about one that found none, and
+ * a Kindle standing alone found none.
+ */
+function tribalOnAct(state: GameState, e: Entity): Effect[] {
+  const out: Effect[] = [];
+  if (e.traits.includes('kindle') && adjacentKin(state, e, 'same') > 0) {
+    out.push({ kind: 'tribePower', uid: e.uid, per: KINDLE_POWER, match: 'same' });
+  }
+  if (e.traits.includes('banner') && adjacentKin(state, e, 'different') > 0) {
+    out.push({ kind: 'tribePower', uid: e.uid, per: BANNER_POWER, match: 'different' });
+  }
+  return out;
+}
 
 /**
  * How many attacks one act spawns for `e`: `VOLLEY_SWINGS` for Volley, one for
@@ -277,15 +352,28 @@ function apply(
      *     enemy hero is not in it - and it is one effect, so every unit it
      *     kills dies at one checkpoint in board order.
      *
+     * A third kind arrived with tribes, and it is the one thing here that
+     * queues **before** the swing:
+     *
+     *   - **Kindle** and **Banner** spawn a `tribePower`, which is the count
+     *     of adjacent allied units of the acting unit's own race, or of any
+     *     other race. It has to land first or it buys nothing: `attack` reads
+     *     `power(e)` at the moment it applies, so a buff queued behind the
+     *     swing would arrive after the blow it was meant to carry. That is
+     *     exactly the mistake a trigger on `acted` would have made - a trigger
+     *     queues behind the effect's own continuations, and the swing is one.
+     *
      * Everything spawned here is a continuation of the act, so it all queues
      * ahead of any reaction to the first swing: a Volley's second swing lands
      * before a Wake answering the first swing's kill gains its Power, and a
-     * Scorch burns before it too. Gated in `test/hero-attacks.test.ts`.
+     * Scorch burns before it too. Gated in `test/hero-attacks.test.ts`, and
+     * the tribal half in `test/tribes.test.ts`.
      */
     case 'act': {
       const e = findEntity(state, effect.uid);
       if (e === null || !e.alive) return { events: [], spawned: [] };
       const spawned: Effect[] = [];
+      for (const t of tribalOnAct(state, e)) spawned.push(t);
       for (let i = 0; i < swingsOf(e); i++) spawned.push({ kind: 'attack', uid: e.uid });
       if (e.traits.includes('scorch')) {
         spawned.push({ kind: 'scorch', uid: e.uid, side: otherSide(e.side), amount: SCORCH_DAMAGE });
@@ -390,6 +478,32 @@ function apply(
         events: [{ kind: 'powerGained', uid: e.uid, amount: effect.amount }],
         spawned: [],
       };
+    }
+
+    /**
+     * The tribal count, applied. Kindle is `match: 'same'` and Banner is
+     * `match: 'different'`; nothing else in the engine spawns this.
+     *
+     * It emits `powerGained`, the same event Relay and Wake emit, because it
+     * is the same thing happening to the board and the animation layer draws
+     * one kind of buff. What it is *not* is a second way to reach the board:
+     * the count comes from `adjacentKin`, which returns 0, 1 or 2 and reads
+     * two array slots, so the amount here is bounded at `per * 2` on a line of
+     * any width. That bound is the design's "every cascade trait references
+     * neighbours, never totals", and it is gated by fighting the same trait at
+     * 2 and at 20 neighbours in `test/tribes.test.ts`.
+     *
+     * A count of zero never reaches here - `tribalOnAct` queues nothing for it
+     * - but the guard is written anyway, because an effect that found no kin
+     * must say nothing rather than announce a +0.
+     */
+    case 'tribePower': {
+      const e = findEntity(state, effect.uid);
+      if (e === null || !e.alive) return { events: [], spawned: [] };
+      const amount = effect.per * adjacentKin(state, e, effect.match);
+      if (amount === 0) return { events: [], spawned: [] };
+      e.bonusPower += amount;
+      return { events: [{ kind: 'powerGained', uid: e.uid, amount }], spawned: [] };
     }
 
     /**
@@ -589,10 +703,25 @@ function checkStateBased(state: GameState): GameEvent[] {
  * below, and this is the only place it is written down. A unit carrying two
  * traits that answer one event fires them in the order their blocks are
  * written. There is no priority number on a trait; moving a block moves the
- * rule. No shipped card carries two triggering traits, so today this decides
- * nothing - it decides everything the day one does. With Ward removed the only
- * two shipped triggers key on different events, so this tie-break is now
- * reachable only through the `extra` seam.
+ * rule.
+ *
+ * **Two shipped traits answer `afterActed`: Relay, then Chorus.** That
+ * sentence used to say the opposite - that the shipped triggers all keyed on
+ * different events, so the tie-break was unobservable - and it was made false
+ * by Chorus landing in this very branch without anything going red. It is
+ * reachable with shipped content, not hypothetically: `si_relay` grants Relay
+ * to a card that does not print it, and `u_songkeeper` and `u_elflord` print
+ * Chorus, so a run hands the resolver a body carrying both. Swapping the two
+ * blocks below changes what such a body emits, in this order:
+ * `[right +2 Relay, left +2 Chorus, right +2 Chorus]`.
+ *
+ * Both halves are gated in `test/resolver-order.test.ts`: "a body carrying
+ * Relay and Chorus fires Relay first" pins that stream, and "every trait
+ * keying on afterActed is pinned, in the order its block is written" reads
+ * this branch off the AST so a *third* `afterActed` trait goes red the moment
+ * it is written rather than the moment somebody remembers to add it to a
+ * fixture. The second is the replacement for a tripwire that did not fire; the
+ * first is the behaviour the tripwire only claimed to protect.
  *
  * `extra` is a seam for tests, and the reason it is here is worth stating.
  * Every shipped trigger is keyed to a single uid - `event.uid === e.uid`, or
@@ -637,6 +766,29 @@ function triggersFor(state: GameState, event: GameEvent, extra: TriggerRule | nu
           const r = rightNeighbour(state, e);
           if (r !== null && r.alive) {
             out.push({ kind: 'gainPower', uid: r.uid, amount: RELAY_POWER, sourceUid: e.uid });
+          }
+        }
+
+        // Chorus - after acting, each adjacent unit of my own race gains +2
+        // Power this turn. `docs/design/game.md`'s own sketch of a tribal
+        // trait: "an elf lord might Relay to every elf beside it."
+        //
+        // It is Relay's mechanism with two differences and no new verb. It
+        // grants to *both* neighbours rather than only the right one, and it
+        // grants only to its own race - so `adjacentAllies`, which is at most
+        // two entities and never a hero, is the whole of what it can reach. In
+        // board order, left then right, because the effects queue in the order
+        // they are pushed and a player watching two arrows should see them in
+        // the order the line reads.
+        //
+        // It does not compound, for Relay's reason: `CHORUS_POWER` is a flat
+        // number and not "Power equal to mine", so a line of five Chorus elves
+        // hands every unit the same +2 from each side rather than doubling
+        // down the line. `docs/design/game.md` names the wording that would
+        // and says not to write it.
+        if (e.traits.includes('chorus')) {
+          for (const ally of adjacentKinOf(state, e, 'same')) {
+            out.push({ kind: 'gainPower', uid: ally.uid, amount: CHORUS_POWER, sourceUid: e.uid });
           }
         }
       }

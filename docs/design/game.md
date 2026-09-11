@@ -145,7 +145,15 @@ Traits that reference resolution order are the core vocabulary.
 - **Echo** — repeat the **base** action of the unit that resolved immediately before me, never a copied one.
 - **Wake** — when the unit to my left dies this turn, gain +2 Power.
 - **Guard** — while I live, attacks against my side must target a Guard.
-- **Kindle** — +1 Power for each adjacent friendly dwarf.
+- **Kindle** — before it swings, +1 Power for each adjacent unit of its own race.
+- **Chorus** — after it acts, each adjacent unit of its own race gains +2 Power this turn.
+- **Banner** — before it swings, +1 Power for each adjacent unit of a *different* race.
+
+The last three are the tribal traits, and they are the whole of what a race does. **Kindle is written as "its own race" rather than "dwarf"** — it is on dwarves, but the rule reads the bearer's race, so the same word works on any card and the glossary can explain it once. Chorus is the design's own sketch of an elf trait, "an elf lord might Relay to every elf beside it", and Banner is Kindle with the race test inverted.
+
+**Their purpose is a placement tension that pulls two ways at once.** A Kindle dwarf wants to be surrounded by dwarves; a Banner human wants to stand between races. Put both in one line and they compete for the same slots: the human is worth most at the seam between two clumps, and the seam is exactly where a clump ends. That is a decision with no default answer, and it is why the two are a pair rather than one trait.
+
+**A hero is not a race.** A hero counts nothing and is counted by nothing, so a Kindle standing rightmost counts only the unit on its left. Relay deliberately does reach the hero; a count of kin deliberately does not, because the two ask different questions — one hands a neighbour Power, the other asks what the neighbour *is*.
 
 **Ward is deleted [owner].** It read "the unit to my right cannot be struck this turn", and a Ward standing to the left of your only Guard made your entire side untargetable: the targeting rule narrows to the Guards and then removes the warded ones, leaving nothing, so every enemy attack fizzled. Two one-cost cards bought that on turn one and it held for the rest of the fight. It was also the strongest trait in the game by a wide margin — an ablation had it carrying about two and a half times what Relay carried of the placement decision — and a trait that is both the best card and an unbreakable lock is not a card to tune, it is a card to remove.
 
@@ -162,6 +170,28 @@ Note that **Relay grants a flat +2 and therefore does not compound**: in a line 
 The practical rule: **a new trait may read its neighbours, its own tribe among its neighbours, and the unit that resolved immediately before it — and nothing else.** A trait that wants a board-wide total is a trait that wants a fixed board width, and this game does not have one.
 
 **Echo carries a second constraint, for a different reason.** Worded as "repeat the action of the unit before me", two adjacent Echoes walk backwards forever — and an Echo Sigil would let a player build that deliberately. Restricting Echo to the previous unit's *base* action makes it terminate by construction rather than by an engine guard, and it is one line a player can read. The general rule: **a trait that reads another trait's output needs an explicit termination argument before it is written.** `ARCHITECTURE.md` carries the engineering side of this.
+
+### A tribal line, walked by hand
+
+Three arrangements, each into the same enemy: a single **Guard with 0 Power and 200 Health**. It cannot hit back and cannot die, so nothing in your line dies either and the whole walk is arithmetic. Your hero swings for 0 and adds nothing. `test/tribes.test.ts` runs all three exactly as written.
+
+**Kindle.** Your line, left to right: a plain **dwarf** (0 Power), a **Kindler** (dwarf, 1 Power, Kindle), a plain **dwarf** (0 Power), then the hero.
+
+1. The first dwarf acts and swings for **0**.
+2. The Kindler acts. Before it swings it counts its neighbours: a dwarf on each side, both its own race, so **+2**. It swings at **3**.
+3. The second dwarf acts and swings for **0**.
+
+The wall takes **3**. Change the two neighbours to elves and nothing else: the Kindler counts 0, swings at its printed **1**, and the wall takes **1**. Same three cards, same slots, a third of the damage.
+
+**Chorus.** Your line: a plain **elf** (1 Power), a **Songkeeper** (elf, 1 Power, Chorus), a plain **elf** (1 Power), then the hero.
+
+1. The first elf acts and swings for **1**. The wall is on 199.
+2. The Songkeeper acts and swings for **1** — Chorus fires *after* it acts, so its own swing is unbuffed. The wall is on 198. Then each adjacent elf gains **+2**, left first, then right.
+3. The third elf acts at `1 + 2 = 3`. The wall is on **195**.
+
+The elf on the left also holds +2 and has already swung, so its share buys nothing this turn — it is Power to hit back with when the enemy attacks into it. **That gap is the trait.** The +2 to the right is a swing; the +2 to the left is armour of a kind. Change both neighbours to humans and the wall takes 3 instead of 5.
+
+**Banner.** Your line: a plain **dwarf** (0 Power), a **Bannerman** (human, 1 Power, Banner), a plain **elf** (0 Power), then the hero. The Bannerman counts two units of other races, takes **+2**, and swings at **3**. Make both neighbours human and it takes nothing and swings at **1** — the exact inverse of the Kindle line.
 
 ## Worked example
 
@@ -234,6 +264,8 @@ That last rule gives the design a clean split, and it is worth stating as an int
 ## Races and classes
 
 **Races are mechanical tribes [owner]** — dwarf, elf, human, dragon. Cards care about them: *Kindle* counts adjacent dwarves, an elf lord might Relay to every elf beside it.
+
+Built, as of unit 11: three tribal traits, one per race the player can field, each adjacency-bounded — **Kindle** on dwarves, **Chorus** on elves, **Banner** on humans. Six cards carry them, two per trait, and all six are in all three class pools. **Dragon is not built**: `Tribe` has no `dragon` and no card is one, so there is no dragon trait either. Adding a race is a content decision the owner has not made yet, and inventing one to fill out a list would be exactly that decision made by an agent. The orcs and beasts the enemy fields carry no tribal trait either — giving one to a shipped enemy card would be a balance change to existing content rather than a new option.
 
 **The player picks a class [owner]** — Knight, Mage, Ranger — which sets the starting deck and the card pool.
 

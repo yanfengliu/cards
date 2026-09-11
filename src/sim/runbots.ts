@@ -149,6 +149,15 @@ const CARD_SIGIL_VALUE: Readonly<Record<CardSigilDef['trait'], number>> = {
   // adding one there does not silently reach a bot with no preference for it.
   volley: 2.8,
   scorch: 2.5,
+  // The three tribal traits, also priced and also never offered. They are
+  // priced BELOW Relay and Wake on purpose, and the reason is a fact about
+  // this bot rather than about the cards: it drafts by `cardValue`, which
+  // cannot see a race at all, so the deck it assembles is not built around
+  // one. A trait that pays only when the neighbour happens to match is worth
+  // less to a bot that never arranged for a match than to a player who did.
+  kindle: 1.8,
+  chorus: 1.8,
+  banner: 1.8,
 };
 
 /**
