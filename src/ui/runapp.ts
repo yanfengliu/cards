@@ -38,8 +38,20 @@ import { RUN_CONTENT } from '../run/content.ts';
 import { grantedTraits, resolveDeckCard, runPool } from '../run/deck.ts';
 import { pathSpread } from '../run/map.ts';
 import { encounterFor, goldFor, heldHeroSigils, restAmount } from '../run/nodes.ts';
-import { currentMap, travelOptions } from '../run/run.ts';
+import { currentMap, migrateRunLog, travelOptions } from '../run/run.ts';
 import { renderClassPick } from './classpick.ts';
+import { ALL_UNLOCKS, FRESH_UNLOCKS } from '../content/unlocks.ts';
+import { unlockedRewards } from '../run/unlocks.ts';
+import type { UnlockSet } from '../run/types.ts';
+import {
+  type Profile,
+  type RunUnlocks,
+  applyRunToProfile,
+  loadProfile,
+  saveProfile,
+  unlockSetFor,
+} from './profile.ts';
+import { collectionHtml, runUnlocksHtml } from './unlocks.ts';
 import type { DeckCard, EventEffect, ForgeMode, RunEventDef } from '../run/types.ts';
 import { compressedCard } from '../render/board.ts';
 import { STAT_TERMS, TRAIT_TERMS } from '../render/glossary.ts';
@@ -59,6 +71,7 @@ import type { RunLog } from '../run/types.ts';
 import { type FightOutcome, createFightScreen, initialTheme, need } from './app.ts';
 import { type NodeOutcome, type RunController, createRunController } from './run.ts';
 import { attachHtml, heroSigilChips, heroSigilOfferHtml, sigilMarks, sigilOutcomeWords, sigilShelfButton } from './sigils.ts';
+import { escapeHtml as esc } from '../render/escape.ts';
 
 /**
  * Where a run in progress is kept between page loads: its log, which is the
@@ -68,23 +81,112 @@ import { attachHtml, heroSigilChips, heroSigilOfferHtml, sigilMarks, sigilOutcom
  * refused - a private window, a blocked origin - and every access says so
  * with a null rather than an exception.
  */
-const SAVE_PREFIX = 'cards.run.';
+export const SAVE_PREFIX = 'cards.run.';
 
-function loadSaved(seed: number): RunLog | null {
+/**
+ * A stored run, whatever format it was written in, as the format this code
+ * replays - or null when there is nothing readable there.
+ *
+ * The **migration** is the point, and it was missing: `loadSaved` used to hand
+ * the parsed JSON straight to `createRunController`, and a log written by a
+ * unit 8 build has no `format` field, so `replayRun` refused it, the caller
+ * caught the refusal and `forget()`-ed the run. A player upgrading a build lost
+ * a run in progress and got a line in the console. `migrateRunLog` is what
+ * `RUN_LOG_FORMAT`'s whole upgrade path exists for; this is the one caller that
+ * was not using it.
+ *
+ * Split out of `loadSaved` so `node --test` can reach it: it takes the stored
+ * string rather than a `localStorage`, so the shape checks, the migration and
+ * the refusal are all testable without a browser.
+ */
+/**
+ * What storage held for a seed: a run to resume, or the reason there is not
+ * one.
+ *
+ * The two are different facts and the caller has to tell them apart. A `null`
+ * log used to mean both "nothing was stored" and "something was stored and this
+ * code refused it", so `opened` stayed `'fresh'` and the notice bar said
+ * nothing - `migrateRunLog`'s carefully worded refusals reached the console and
+ * never the player, whose run had just disappeared.
+ */
+export type SavedRunRead = {
+  readonly log: RunLog | null;
+  /** A sentence for the screen. Null when there was simply nothing stored. */
+  readonly problem: string | null;
+};
+
+/** `parseSavedRun`, with the refusal kept instead of dropped. */
+export function readSavedRun(raw: string | null | undefined, seed: number): SavedRunRead {
+  if (raw === null || raw === undefined) return { log: null, problem: null };
+  let parsed: RunLog;
   try {
-    const raw = globalThis.localStorage?.getItem(`${SAVE_PREFIX}${seed}`);
-    if (raw === null || raw === undefined) return null;
-    const parsed = JSON.parse(raw) as RunLog;
-    if (typeof parsed !== 'object' || parsed === null || parsed.seed !== seed || !Array.isArray(parsed.nodes)) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
+    parsed = JSON.parse(raw) as RunLog;
+  } catch (e) {
+    console.error(`cards: the saved run on seed ${seed} is not readable JSON`, e);
+    return {
+      log: null,
+      problem:
+        `The saved run on seed ${seed} was stored in a form this build cannot read, and has ` +
+          `been discarded. Start a new run.`,
+    };
+  }
+  if (typeof parsed !== 'object' || parsed === null || !Array.isArray(parsed.nodes)) {
+    return {
+      log: null,
+      problem: `What was stored on seed ${seed} is not a run log, and has been discarded.`,
+    };
+  }
+  if (parsed.seed !== seed) {
+    return {
+      log: null,
+      problem:
+        `The run stored under seed ${seed} says it is seed ${String(parsed.seed)}, so it was ` +
+          `not resumed and has been discarded.`,
+    };
+  }
+  try {
+    return { log: migrateRunLog(parsed), problem: null };
+  } catch (e) {
+    // `migrateRunLog` refuses by name and its sentence is the only account of
+    // why a run vanished, so it is what the player is shown.
+    console.error(`cards: the saved run on seed ${seed} could not be read`, e);
+    const said = e instanceof Error ? e.message : String(e);
+    // The refusal is quoted rather than spliced into a sentence of ours. Its
+    // three shapes begin 'written in', 'not a run log' and 'the format 1 log',
+    // and no one connective fits all three - so it gets a clause of its own.
+    return {
+      log: null,
+      problem:
+        `The saved run on seed ${seed} could not be read and has been discarded. Reason: ` +
+          `${said.replace(/^run log: /, '')}`,
+    };
   }
 }
 
-function save(log: RunLog): void {
+/** The log alone, for callers that do not report. */
+export function parseSavedRun(raw: string | null | undefined, seed: number): RunLog | null {
+  return readSavedRun(raw, seed).log;
+}
+
+/**
+ * `persist` is false while `?unlocks=` is pinning the pool, and it is false for
+ * **every** stored-state call, not only the write: a pinned session must not
+ * read a stored run either, or it resumes a run played against the player's own
+ * pool and then finishes it against the pinned one. See `storageAllowed`.
+ */
+export function loadSavedRun(seed: number, persist: boolean): SavedRunRead {
+  if (!persist) return { log: null, problem: null };
+  try {
+    return readSavedRun(globalThis.localStorage?.getItem(`${SAVE_PREFIX}${seed}`), seed);
+  } catch {
+    // Storage itself threw - a blocked cookie jar, a full quota. Nothing was
+    // read, so there is nothing to report and nothing to discard.
+    return { log: null, problem: null };
+  }
+}
+
+export function saveRun(log: RunLog, persist: boolean): void {
+  if (!persist) return;
   try {
     globalThis.localStorage?.setItem(`${SAVE_PREFIX}${log.seed}`, JSON.stringify(log));
   } catch {
@@ -92,18 +194,13 @@ function save(log: RunLog): void {
   }
 }
 
-function forget(seed: number): void {
+export function forgetRun(seed: number, persist: boolean): void {
+  if (!persist) return;
   try {
     globalThis.localStorage?.removeItem(`${SAVE_PREFIX}${seed}`);
   } catch {
     // As above.
   }
-}
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&quot;' : '&quot;',
-  );
 }
 
 const FORGE_WORDS: Readonly<Record<ForgeMode, string>> = {
@@ -131,20 +228,85 @@ const FORGE_WORDS: Readonly<Record<ForgeMode, string>> = {
  */
 export const PICKABLE_CLASSES: readonly ClassDef[] = CLASSES;
 
-/** The class-pick screen as the app builds it, with the classes the app offers. */
+/**
+ * What a pinned session owes the player, in one sentence, or null when nothing
+ * is pinned.
+ *
+ * Pure and exported for the same reason as `PICKABLE_CLASSES`: `startRunApp`
+ * needs a document, so a sentence written inside it is a sentence `node --test`
+ * cannot read, and an ungated sentence can quietly stop being true. This one
+ * did. It said "nothing this run earns is saved to your profile" while
+ * `storageAllowed` was refusing the **run** as well - so a player who opened
+ * `?unlocks=all`, played for twenty minutes and reloaded lost the run, having
+ * been warned only about the unlocks.
+ */
+export function pinnedNotice(override: string | null): string | null {
+  if (override === null) return null;
+  const draftable =
+    override === 'all' ? 'everything is draftable' : 'nothing unlockable is draftable';
+  return (
+    `Unlocks are pinned by ?unlocks=${override}: ${draftable}, and this session touches no ` +
+    `stored state - nothing this run earns is saved to your profile, and the run itself is ` +
+    `not saved either, so a reload starts over.`
+  );
+}
+
+/**
+ * The class-pick screen as the app builds it, with the classes the app offers.
+ *
+ * `unlocked` narrows what each class's card says it drafts from, through the
+ * same `unlockedRewards` a run is narrowed by - the screen must not promise a
+ * pool the run will not have. Omitted, or null, is no unlock layer, which is
+ * the screen exactly as it was before unlocks existed.
+ */
 export function classPickHtml(opts: {
   seed: number;
   pool: CardPool;
   mount: boolean;
   hatch: boolean;
+  unlocked?: UnlockSet | null;
 }): string {
+  const set = opts.unlocked ?? null;
   return renderClassPick({
     seed: opts.seed,
-    classes: PICKABLE_CLASSES,
+    classes:
+      set === null
+        ? PICKABLE_CLASSES
+        : PICKABLE_CLASSES.map((c) => ({ ...c, rewards: unlockedRewards(set, c.rewards) })),
     pool: opts.pool,
     mount: opts.mount,
     hatch: opts.hatch,
   });
+}
+
+/**
+ * `?unlocks=` - a debug override that pins what a run may draft and **touches
+ * no stored state at all**, so looking at a locked or an open collection cannot
+ * spend the player's own progress and cannot disturb a run in progress. `all`
+ * is no unlock layer at all, which is the pool every measurement plays and the
+ * log every measurement writes; `none` is a fresh profile. Anything else,
+ * including absent, is the stored profile.
+ *
+ * A pinned run therefore does not survive a reload, and that is the point
+ * rather than a limitation - `storageAllowed` has the account of what the
+ * earlier "never writes the profile" wording promised and did not deliver.
+ *
+ * Up here beside `pickableClassId` and for the same reason: `startRunApp`
+ * needs a document, so a decision made inside it is a decision no test can
+ * reach.
+ */
+export function unlockOverride(raw: string | null | undefined): 'all' | 'none' | null {
+  return raw === 'all' || raw === 'none' ? raw : null;
+}
+
+/** What a run started now may draft: the override if there is one, else the profile's. */
+export function unlockSetFrom(
+  override: 'all' | 'none' | null,
+  profile: Profile,
+): UnlockSet | null {
+  if (override === 'all') return null;
+  if (override === 'none') return FRESH_UNLOCKS;
+  return unlockSetFor(profile);
 }
 
 /**
@@ -161,6 +323,33 @@ export function classPickHtml(opts: {
 export function pickableClassId(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null;
   return PICKABLE_CLASSES.some((c) => c.id === raw) ? raw : null;
+}
+
+/**
+ * May a session started under `override` touch stored state at all - the saved
+ * run under `cards.run.<seed>` and the profile under `cards.profile`?
+ *
+ * **No, whenever `?unlocks=` is pinning the pool**, and the two halves are one
+ * decision rather than two, which is the fix for what an independent review
+ * found. The old rule was "a pinned run does not write the profile", enforced
+ * only at the moment the profile is written. It leaked across a reload:
+ * `?unlocks=all` is *no unlock layer*, so the pinned run's saved log carries no
+ * `unlocked` field and is indistinguishable from a log written before unlocks
+ * existed. Reloading without the parameter resumed that log - the log is what
+ * decides, correctly - so the run carried on fully unlocked, and with no
+ * override in the address this time, `profileWritable` was true and the run
+ * wrote its deeds into the player's collection. `?unlocks=none` leaked the same
+ * way with the narrow pool instead of the wide one.
+ *
+ * So a pinned session neither reads nor writes: no saved run is loaded, none is
+ * written, none is forgotten - the last one matters, or opening
+ * `?seed=7&unlocks=all` would delete the real run in progress on seed 7 - and
+ * the profile is read for display but never written back. The pinned run lives
+ * as long as the tab and leaves nothing behind, which is what the comment on
+ * `unlockSetFrom` has always claimed and is now true across a reload.
+ */
+export function storageAllowed(override: 'all' | 'none' | null): boolean {
+  return override === null;
 }
 
 /** The three permanent bonuses on a deck card, as short marks. Empty when none. */
@@ -195,6 +384,13 @@ export function startRunApp(): void {
   /** A word for the notice bar about how this run came to be on screen. */
   let opened: 'fresh' | 'resumed' | 'refused' = 'fresh';
   /**
+   * Why a stored run is not the run on screen, in the words the refusal chose.
+   * Null when nothing was refused. The notice bar says it: a run that vanishes
+   * with only a console line is a run the player watched disappear for no
+   * stated reason.
+   */
+  let refusal: string | null = null;
+  /**
    * A run starts by choosing a class. `?class=ranger` names one and skips the
    * screen, the way `?seed=` and `?encounter=` make a run addressable; a saved
    * run carries its own class and never asks. Otherwise the class-pick screen
@@ -202,14 +398,57 @@ export function startRunApp(): void {
    */
   const classParam = pickableClassId(params.get('class'));
   let picking = classParam === null;
-  let ctl: RunController = createRunController(
-    RUN_CONTENT,
-    startSeed,
-    classParam === null ? {} : { classId: classParam },
-  );
+  /**
+   * The player, between runs: what they have unlocked and what they have done.
+   * Loaded once. A stored profile this code cannot read is left exactly where
+   * it is and reported rather than overwritten - see `profile.ts`.
+   */
+  const override = unlockOverride(params.get('unlocks'));
+  /**
+   * May this session touch `cards.run.<seed>` and `cards.profile`? No while
+   * `?unlocks=` pins the pool - see `storageAllowed`, which has the whole
+   * account. Every read, every write and every delete below goes through it.
+   */
+  const persist = storageAllowed(override);
+  const openedProfile = loadProfile();
+  let profile: Profile = openedProfile.profile;
+  /** False when a stored profile could not be read, or when `?unlocks=` is pinning one. */
+  const profileWritable = openedProfile.writable && persist;
+  /** What a run started now may draft. Widens when a finished run earns something. */
+  let unlocked: UnlockSet | null = unlockSetFrom(override, profile);
+  /** What the run that just ended added. Null until it ends; the end screen reads it. */
+  let earned: RunUnlocks | null = null;
+  /** The collection, over whatever screen is up, until it is closed again. */
+  let showingCollection = false;
+  let ctl: RunController = createRunController(RUN_CONTENT, startSeed, {
+    unlocked,
+    ...(classParam === null ? {} : { classId: classParam }),
+  });
   // `?fresh=1` ignores a saved run; otherwise a run in progress on this seed
   // is replayed from its log and picks up where it stood between nodes.
-  const saved = params.get('fresh') === '1' ? null : loadSaved(startSeed);
+  //
+  // **No `unlocked` is passed here, and that is deliberate**, which is why
+  // `createRunController`'s refusal guard is not on the app's own path. The
+  // log's set wins by design: a reward pick is an index into a shelf, so the
+  // run has to be redrawn from the pool it was played with. Handing the guard
+  // today's profile instead would refuse - and this catch would then delete -
+  // every saved run whose player unlocked something on another seed in the
+  // meantime, which is the ordinary case and not an error. The guard stays a
+  // contract for a caller that insists on a set; `test/unlocks.test.ts` holds
+  // both halves, the refusal and this resume.
+  const read =
+    params.get('fresh') === '1'
+      ? { log: null, problem: null }
+      : loadSavedRun(startSeed, persist);
+  const saved = read.log;
+  if (read.problem !== null) {
+    // Stored, and refused. The player is told, in the words the refusal chose,
+    // and the unreadable blob goes rather than sitting there to be refused
+    // again on every reload until a new run overwrites it.
+    opened = 'refused';
+    refusal = read.problem;
+    forgetRun(startSeed, persist);
+  }
   if (saved !== null && saved.nodes.length > 0) {
     try {
       ctl = createRunController(RUN_CONTENT, startSeed, { resume: saved });
@@ -217,8 +456,11 @@ export function startRunApp(): void {
       picking = false;
     } catch (e) {
       console.error('cards: the saved run did not replay and was discarded', e);
-      forget(startSeed);
+      forgetRun(startSeed, persist);
       opened = 'refused';
+      refusal =
+        `The saved run on seed ${startSeed} did not replay against this build and has been ` +
+          `discarded.`;
     }
   }
   /** A reachable node the pointer or the focus ring is on. */
@@ -407,6 +649,11 @@ export function startRunApp(): void {
       `<b>${s.deck.length}</b></span>` +
       heroSigilChips(s) +
       `<span class="hud__stat hud__stat--seed" title="The run's seed. The same seed and the same choices replay the same run.">seed ${s.seed}</span>` +
+      // Not during a fight: the collection needs the run panel, and showing
+      // that panel idles the fight screen out from under the fight.
+      (p.kind === 'fight'
+        ? ''
+        : `<button type="button" data-run="collection" title="What you have unlocked, and what opens the rest. Nothing here makes a run stronger.">${showingCollection ? 'Back' : 'Collection'}</button>`) +
       `<button type="button" data-run="restart" title="Abandon this run and start seed ${s.seed} again from the first node">Restart</button>`;
   }
 
@@ -502,6 +749,25 @@ export function startRunApp(): void {
       `<p class="run__muted">${beyond}</p>`;
   }
 
+  /**
+   * The pinned-session sentence as markup: escaped, with the parameter in a
+   * `<code>`. The sentence itself is `pinnedNotice`, which is pure and gated;
+   * this is only the wrapping, and the substitution runs on already-escaped
+   * text so it cannot introduce markup of its own.
+   */
+  function pinnedHtml(): string {
+    const said = pinnedNotice(override);
+    if (said === null) return '';
+    const param = esc(`?unlocks=${override ?? ''}`);
+    return esc(said).replace(param, `<code>${param}</code>`);
+  }
+
+  /** The same sentence on the notice bar, which is the screen a run opens on. */
+  function pinnedWords(): string {
+    const said = pinnedHtml();
+    return said === '' ? '' : ` ${said}`;
+  }
+
   function renderNotice(): void {
     const o = ctl.last;
     if (o === null) {
@@ -510,8 +776,9 @@ export function startRunApp(): void {
         opened === 'resumed'
           ? `Run resumed on seed ${ctl.seed}, ${s.nodesVisited} node${s.nodesVisited === 1 ? '' : 's'} in, replayed from its choice list. ` +
             `A node in progress is not saved, so a reload returns you here, to the map.`
-          : (opened === 'refused' ? 'The saved run on this seed did not replay and was discarded. ' : '') +
-            `A new run on seed ${ctl.seed} as the ${className()}. Your hero has ${s.hero.health} ${STAT_TERMS.health.name} for the whole run, ${s.deck.length} cards, and no gold.`;
+          : (refusal === null ? '' : `${esc(refusal)} `) +
+            `A new run on seed ${ctl.seed} as the ${className()}. Your hero has ${s.hero.health} ${STAT_TERMS.health.name} for the whole run, ${s.deck.length} cards, and no gold.` +
+            pinnedWords();
       dom.notice.className = 'run__notice';
       return;
     }
@@ -674,6 +941,14 @@ export function startRunApp(): void {
       `<h2 class="run__title ${won ? 'is-won' : 'is-lost'}">${iconSvg(won ? 'hero' : 'boss', { size: 22, decorative: true })} ${won ? 'The run is won' : 'The run is over'}</h2>` +
       `<p class="run__lead">${how}</p>` +
       `<dl class="run__stats">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` +
+      (earned === null ? '' : runUnlocksHtml(earned, CARD_POOL)) +
+      (earned === null || earned.newlyEarned.length === 0 || profileWritable
+        ? ''
+        : `<p class="run__warn${openedProfile.problem === null ? ' run__warn--pin' : ''}">Not saved: ${
+            openedProfile.problem === null
+              ? `unlocks are pinned by <code>?unlocks=${esc(override ?? '')}</code>`
+              : 'the stored profile could not be read and is being left alone'
+          }.</p>`) +
       `<p class="run__muted">The seed and the choice list are the whole run: this log replays it, byte for byte, through <code>replayRun</code>.</p>` +
       `<details class="run__log"><summary>Replay log</summary>` +
       `<textarea id="run-log" readonly rows="6" aria-label="Replay log as JSON">${esc(JSON.stringify(ctl.log))}</textarea>` +
@@ -695,12 +970,47 @@ export function startRunApp(): void {
     dom.subtitle.textContent = `Choose a class · seed ${ctl.seed}`;
     dom.status.innerHTML =
       `<span class="hud__stat hud__stat--seed" title="The run's seed. The same seed and the same choices replay the same run.">seed ${ctl.seed}</span>`;
-    dom.node.innerHTML = classPickHtml({
-      seed: ctl.seed,
-      pool: CARD_POOL,
-      mount: screen.mount(),
-      hatch: screen.hatch(),
-    });
+    dom.node.innerHTML =
+      classPickHtml({
+        seed: ctl.seed,
+        pool: CARD_POOL,
+        mount: screen.mount(),
+        hatch: screen.hatch(),
+        unlocked,
+      }) +
+      profileNotice() +
+      collectionHtml(profile, unlocked ?? ALL_UNLOCKS, CARD_POOL);
+    dom.node.hidden = false;
+    dom.body.hidden = true;
+  }
+
+  /**
+   * The one line a player sees when their stored profile could not be read, or
+   * when `?unlocks=` is pinning the pool. Both change what a run can draft, and
+   * a collection that quietly disagrees with the address bar is worse than a
+   * sentence saying which is in force.
+   *
+   * The pinned sentence says **the run is not saved either**, which it did not.
+   * `storageAllowed` is false for the whole session, so a player who opens
+   * `?unlocks=all`, plays for twenty minutes and reloads loses the run - and the
+   * only warning said that nothing *earned* would be kept. `pinnedWords` says it
+   * on the notice bar as well, which is the screen they see first.
+   */
+  function profileNotice(): string {
+    if (openedProfile.problem !== null) {
+      return `<p class="run__warn">${esc(openedProfile.problem)}</p>`;
+    }
+    const said = pinnedHtml();
+    return said === '' ? '' : `<p class="run__warn run__warn--pin">${said}</p>`;
+  }
+
+  /** The collection over whatever screen is up. The HUD's button closes it again. */
+  function renderCollection(): void {
+    showRun();
+    dom.node.innerHTML =
+      profileNotice() +
+      collectionHtml(profile, unlocked ?? ALL_UNLOCKS, CARD_POOL) +
+      `<p><button type="button" class="btn--primary" data-run="collection">Back</button></p>`;
     dom.node.hidden = false;
     dom.body.hidden = true;
   }
@@ -711,9 +1021,19 @@ export function startRunApp(): void {
       return;
     }
     renderHud();
+    // The fight wins over the collection, and that is not a preference: the
+    // run panel's `showRun` calls `screen.idle()`, which cancels playback and
+    // drops the fight on screen. So the collection is not reachable during a
+    // fight - `renderHud` does not draw its button then - and this branch is
+    // the second guard on the same thing.
     if (ctl.phase.kind === 'fight') {
+      showingCollection = false;
       dom.run.hidden = true;
       dom.fight.hidden = false;
+      return;
+    }
+    if (showingCollection) {
+      renderCollection();
       return;
     }
     showRun();
@@ -751,10 +1071,27 @@ export function startRunApp(): void {
     render();
   }
 
-  /** After anything that may have appended to the log: keep the saved run current. */
+  /**
+   * After anything that may have appended to the log: keep the saved run
+   * current, and - the first time the run is seen to have ended - work out what
+   * it unlocked and keep it.
+   *
+   * The profile moves **once**, here, when the run ends. Not during it: the
+   * unlock set is an input to the run and widening it mid-run would change the
+   * pool the run's own log is recorded against.
+   */
   function committed(): void {
-    if (ctl.state.result === 'ongoing') save(ctl.log);
-    else forget(ctl.seed);
+    if (ctl.state.result === 'ongoing') {
+      saveRun(ctl.log, persist);
+      return;
+    }
+    forgetRun(ctl.seed, persist);
+    if (earned !== null) return;
+    earned = applyRunToProfile(profile, ctl.state);
+    profile = earned.profile;
+    if (profileWritable) saveProfile(profile);
+    // The next run drafts from the wider pool; the one on screen is finished.
+    unlocked = unlockSetFrom(override, profile);
   }
 
   function finishFight(): void {
@@ -775,15 +1112,17 @@ export function startRunApp(): void {
 
   /** A new run starts by choosing a class, so this puts the pick up. */
   function newRun(seed: number): void {
-    forget(ctl.seed);
-    forget(seed);
-    ctl = createRunController(RUN_CONTENT, seed);
+    forgetRun(ctl.seed, persist);
+    forgetRun(seed, persist);
+    ctl = createRunController(RUN_CONTENT, seed, { unlocked });
     picking = true;
     opened = 'fresh';
     focus = null;
     forgeIndex = null;
     interstitial = null;
     pendingFight = null;
+    earned = null;
+    showingCollection = false;
     const url = new URL(globalThis.location.href);
     url.searchParams.set('seed', String(seed));
     url.searchParams.delete('fresh');
@@ -796,7 +1135,7 @@ export function startRunApp(): void {
   function pickClass(raw: string): void {
     const classId = pickableClassId(raw);
     if (!picking || classId === null) return;
-    ctl = createRunController(RUN_CONTENT, ctl.seed, { classId });
+    ctl = createRunController(RUN_CONTENT, ctl.seed, { classId, unlocked });
     picking = false;
     opened = 'fresh';
     const url = new URL(globalThis.location.href);
@@ -808,7 +1147,16 @@ export function startRunApp(): void {
 
   // ------------------------------------------------------------- input
 
-  dom.run.addEventListener('click', (ev) => {
+  /**
+   * Every `[data-run]` control, wherever it is drawn.
+   *
+   * Attached to the HUD as well as to the run panel, and that is a fix rather
+   * than tidiness: the HUD lives in `<header class="hud">`, which is not
+   * inside `#run`, so a listener on `#run` alone never saw it. Restart has
+   * been in the HUD since unit 8 and has never worked; the Collection button
+   * this unit added would have been dead the same way.
+   */
+  const onRunClick = (ev: Event): void => {
     const target = ev.target as HTMLElement | null;
     if (target === null) return;
     const mapNode = target.closest('[data-node]') as HTMLElement | null;
@@ -862,6 +1210,10 @@ export function startRunApp(): void {
       case 'restart':
         newRun(ctl.seed);
         break;
+      case 'collection':
+        showingCollection = !showingCollection;
+        render();
+        break;
       case 'copy-log': {
         const log = JSON.stringify(ctl.log);
         const said = document.getElementById('run-copied');
@@ -876,7 +1228,9 @@ export function startRunApp(): void {
         break;
       }
     }
-  });
+  };
+  dom.run.addEventListener('click', onRunClick);
+  dom.status.addEventListener('click', onRunClick);
 
   dom.run.addEventListener('submit', (ev) => {
     const form = ev.target as HTMLElement | null;

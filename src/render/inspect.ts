@@ -56,6 +56,7 @@ import {
   hatchWords,
   tribeTerm,
 } from './glossary.ts';
+import { escapeHtml as esc } from './escape.ts';
 
 /** The art width inside the panel. Big enough for the charge to be a picture. */
 export const INSPECT_ART_W = 116;
@@ -75,12 +76,6 @@ export interface InspectContext {
    * every enemy hero.
    */
   readonly heroSigils?: readonly Term[];
-}
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;',
-  );
 }
 
 /**

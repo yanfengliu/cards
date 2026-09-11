@@ -71,8 +71,10 @@ import {
   type RunContent,
   type RunLog,
   type RunState,
+  type UnlockSet,
   RUN_LOG_FORMAT,
 } from './types.ts';
+import { canonicalUnlockSet, parseUnlockSet, unlockedContent } from './unlocks.ts';
 
 /** The stream name the run's own generator is derived on. */
 export const RUN_STREAM = 'run';
@@ -192,19 +194,43 @@ function requirePick(value: number, count: number, what: string, allowSkip: bool
 }
 
 /**
- * Start a run as `classId`. The class decides the hero, the starting deck and
- * the pool, and nothing else: the maps are generated from the seed alone, so
- * two classes on one seed walk the same three acts and fight the same
- * encounters at the same nodes with the same fight seeds. That is what makes
- * two classes on one seed comparable at all.
+ * Start a run as `classId`, drafting from what `unlocked` allows.
+ *
+ * The class decides the hero, the starting deck and the pool, and nothing
+ * else: the maps are generated from the seed alone, so two classes on one seed
+ * walk the same three acts and fight the same encounters at the same nodes
+ * with the same fight seeds. That is what makes two classes on one seed
+ * comparable at all.
+ *
+ * `unlocked` narrows the pool the class hands over, before the class is read
+ * out of the content, so nothing inside the loop knows unlocks exist - the
+ * same trick classes used on the hero and the deck. `null`, the default, is no
+ * unlock layer at all: `unlockedContent` hands the content straight back, so
+ * every measurement and every fixture is byte-identical to what it was.
+ *
+ * The set is fixed here and never moves again. A run cannot widen its own
+ * pool mid-run, which is what lets the log record one set for the whole run
+ * and lets `replayRun` redraw every shelf from it.
+ *
+ * It is also **canonicalised** here, and that is the keystone rather than
+ * tidiness. `UnlockSet` is a structural type, so a caller may hand over an
+ * unsorted or duplicated pair of lists; the digest quotes both lists, and
+ * `replayRun` reads its set through `parseUnlockSet`, which sorts and dedupes.
+ * A run started from a list in some other order would therefore hash
+ * differently from its own replay while being, draw for draw, the same run.
+ * This is the one place both paths pass through, so it is where the shape is
+ * fixed.
  */
 export function startRun(
   content: RunContent,
   seed: number,
   classId: string = defaultClassId(content),
+  raw: UnlockSet | null = null,
 ): RunState {
-  const cls = classOf(content, classId);
-  const active = contentForClass(content, classId);
+  const unlocked = canonicalUnlockSet(raw);
+  const pooled = unlockedContent(content, unlocked);
+  const cls = classOf(pooled, classId);
+  const active = contentForClass(pooled, classId);
   const rng: Rng = makeRng(seed, RUN_STREAM);
   const maps: ActMap[] = [];
   for (let a = 0; a < active.acts.length; a++) {
@@ -216,6 +242,7 @@ export function startRun(
   return {
     seed,
     classId: cls.id,
+    unlocked,
     content: active,
     maps,
     act: 0,
@@ -477,14 +504,21 @@ function liveDriver(agent: RunAgent): Driver {
   };
 }
 
-/** Run a whole run as `classId`, asking `agent` for every decision. */
+/**
+ * Run a whole run as `classId`, drafting from `unlocked`, asking `agent` for
+ * every decision.
+ *
+ * The log carries the unlock set it was played with, and carries it only when
+ * there was one: a run with no unlock layer writes the log it always wrote.
+ */
 export function runRun(
   content: RunContent,
   seed: number,
   agent: RunAgent,
   classId: string = defaultClassId(content),
+  unlocked: UnlockSet | null = null,
 ): { run: RunState; log: RunLog } {
-  const run = startRun(content, seed, classId);
+  const run = startRun(content, seed, classId, unlocked);
   const nodes: NodeRecord[] = [];
   const driver = liveDriver(agent);
   while (run.result === 'ongoing') {
@@ -492,7 +526,16 @@ export function runRun(
     if (record === null) break;
     nodes.push(record);
   }
-  return { run, log: { seed, classId: run.classId, format: RUN_LOG_FORMAT, nodes } };
+  return {
+    run,
+    log: {
+      seed,
+      classId: run.classId,
+      ...(run.unlocked === null ? {} : { unlocked: run.unlocked }),
+      format: RUN_LOG_FORMAT,
+      nodes,
+    },
+  };
 }
 
 /**
@@ -516,6 +559,12 @@ export function runRun(
  * names no class replays as the content's default class either way; a format 1
  * log may therefore name a class or not, and both upgrade the same.
  *
+ * `unlocked` is the opposite and is **refused on a format 1 log**. Unlocks
+ * landed in unit 12, with the format already at 2, so a format 1 log naming a
+ * set is one no version of this code wrote. The class could be absent
+ * harmlessly; a set cannot be present harmlessly, because it narrows the
+ * shelves the log's picks index into.
+ *
  * A log in the current format comes back as it is. A log in a format this
  * code has never written is refused with both numbers named, because its
  * choices would index shelves drawn some other way and a "successful" replay
@@ -534,15 +583,44 @@ export function migrateRunLog(raw: unknown): RunLog {
   }
   const nodes = log.nodes as NodeRecord[];
   const named = typeof log.classId === 'string' ? { classId: log.classId } : {};
+  // The format is read **first**, and that order is the fix for a refusal that
+  // named the wrong thing. A log written in a format this code has never seen
+  // is unreadable whatever else is in it, so its own fields are not worth
+  // complaining about: with `parseUnlockSet` running first, a format 99 log
+  // carrying a malformed `unlocked` was refused for the unlock set and never
+  // named the format, which is the one fact the player needs.
   const format = log.format ?? 1;
-  if (format === RUN_LOG_FORMAT) {
-    return { seed: log.seed, ...named, format: RUN_LOG_FORMAT, nodes };
-  }
-  if (format !== 1) {
+  if (format !== 1 && format !== RUN_LOG_FORMAT) {
     throw new Error(
       `run log: written in format ${String(format)}, and this code reads formats 1 and ` +
         `${RUN_LOG_FORMAT}. Its choices index shelves that are drawn some other way, so it cannot ` +
         `be replayed; start a new run on seed ${log.seed}.`,
+    );
+  }
+  // Carried through untouched, like the class, and read strictly: a set that
+  // cannot be parsed is refused by name rather than dropped, because dropping
+  // it would replay the log against a wider pool and reach a different run.
+  const set = parseUnlockSet(
+    (raw as { unlocked?: unknown }).unlocked,
+    `the log for seed ${log.seed}`,
+  );
+  const drafted = set === null ? {} : { unlocked: set };
+  if (format === RUN_LOG_FORMAT) {
+    return { seed: log.seed, ...named, ...drafted, format: RUN_LOG_FORMAT, nodes };
+  }
+  // A format 1 log naming an unlock set is a log no version of this code ever
+  // wrote: format 1 is units 5, 8 and 10, and unlocks landed in unit 12 with
+  // the format already at 2. Refused rather than upgraded, because the one
+  // thing such a field can be is a hand-edited or forged set, and honouring it
+  // would narrow shelves the recorded picks were never taken from.
+  if (set !== null) {
+    throw new Error(
+      `run log: the format 1 log for seed ${log.seed} names an unlock set ` +
+        `(gated ${set.gated.length}, owned ${set.owned.length}), and no version of this code ` +
+        `ever wrote one - format 1 predates unlocks, and every log written since is format ` +
+        `${RUN_LOG_FORMAT}. Its picks index shelves drawn with nothing gated, so honouring the ` +
+        `set would replay a different run. Drop the \`unlocked\` field, or mark the log format ` +
+        `${RUN_LOG_FORMAT} if that is what wrote it.`,
     );
   }
   const decline: RunChoice = { kind: 'sigil', pick: -1 };
@@ -558,7 +636,7 @@ export function migrateRunLog(raw: unknown): RunLog {
     }
     return { ...n, choices: [travel, decline, ...rest] };
   });
-  return { seed: log.seed, ...named, format: RUN_LOG_FORMAT, nodes: upgraded };
+  return { seed: log.seed, ...named, ...drafted, format: RUN_LOG_FORMAT, nodes: upgraded };
 }
 
 /**
@@ -576,6 +654,14 @@ export function migrateRunLog(raw: unknown): RunLog {
  * log with no `classId` - one written before classes existed - is the
  * content's default class, which for the shipped content is the Knight: the
  * only class such a run could have been.
+ *
+ * **The unlock set is the second, and it is read from the log and from nowhere
+ * else.** Not from the player's profile, not from a module-level default: a
+ * reward pick in the log is an index into a shelf, and a shelf redrawn from a
+ * pool the run never had makes that index name a card the player never saw.
+ * A log naming no set was played with no unlock layer - nothing gated - which
+ * is the only thing such a run could have been, and is what every log written
+ * before unlocks existed is.
  */
 export function replayRun(content: RunContent, log: RunLog): RunState {
   // Only the current format is replayed. A log from an earlier one is not
@@ -590,7 +676,12 @@ export function replayRun(content: RunContent, log: RunLog): RunState {
         `be resumed, so start a new run on seed ${log.seed}.`,
     );
   }
-  const run = startRun(content, log.seed, log.classId ?? defaultClassId(content));
+  const run = startRun(
+    content,
+    log.seed,
+    log.classId ?? defaultClassId(content),
+    parseUnlockSet(log.unlocked, `the log for seed ${log.seed}`),
+  );
 
   for (const record of log.nodes) {
     if (run.result !== 'ongoing') break;

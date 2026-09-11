@@ -2105,6 +2105,111 @@ button.is-on {
   color: inherit;
 }
 
+/* ---------- unlocks: the collection, and what a run earned ---------- */
+
+.unlocks {
+  margin: var(--sp-4) 0 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.unlocks--earned {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+}
+.unlocks__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-lead);
+}
+.unlocks__list + .unlocks__title {
+  margin-top: var(--sp-4);
+}
+.unlocks__list {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.unlock {
+  display: grid;
+  grid-template-columns: 18px minmax(8em, max-content) 1fr max-content;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-size: var(--fs-small);
+}
+.unlock.is-locked {
+  opacity: 0.72;
+  border-style: dashed;
+}
+.unlock.is-owned {
+  border-color: var(--gold);
+}
+.unlock__mark {
+  display: flex;
+  color: var(--ink-3);
+}
+.unlock.is-owned .unlock__mark {
+  color: var(--gold);
+}
+.unlock__name {
+  font-weight: 700;
+  color: var(--ink);
+}
+.unlock__what {
+  color: var(--ink-2);
+}
+.unlock__how {
+  color: var(--ink-3);
+  text-align: right;
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.unlocks__deeds {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-2);
+  padding-left: var(--sp-4);
+  font-size: var(--fs-small);
+}
+.unlocks__deeds small {
+  display: block;
+  color: var(--ink-2);
+}
+.run__warn {
+  margin: var(--sp-2) 0;
+  padding: var(--sp-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-size: var(--fs-small);
+}
+/* A pinned pool is a notice, not a fault: the same box in the gold this app
+   uses for "in force" rather than the red it uses for "wrong". */
+.run__warn--pin {
+  border-color: var(--gold);
+  color: var(--ink-2);
+}
+
+@media (max-width: 720px) {
+  .unlock {
+    grid-template-columns: 18px 1fr;
+  }
+  .unlock__what,
+  .unlock__how {
+    grid-column: 2;
+    text-align: left;
+  }
+}
+
 /* ---------- after a run's fight ---------- */
 
 .fight__after {

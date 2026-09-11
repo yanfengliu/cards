@@ -23,6 +23,9 @@
  *     rather than starting a run as something else
  *   - clicking a class starts a run as that class: the HUD says so, the map
  *     appears, and the address bar carries the class
+ *   - at `?unlocks=none` each class card says the *narrowed* pool size and the
+ *     collection under it lists every gated card and sigil, locked, with the
+ *     deed that opens it
  *
  *   node tools/ui-probe/pick.ts <seed> <light|dark>
  *   node tools/ui-probe/pick.ts <seed> both
@@ -34,6 +37,10 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { launch } from './chrome.ts';
 import { CLASSES } from '../../src/content/classes.ts';
+import { CARD_POOL } from '../../src/content/cards.ts';
+import { SIGILS } from '../../src/content/sigils.ts';
+import { ACHIEVEMENTS, FRESH_UNLOCKS, GATED_IDS } from '../../src/content/unlocks.ts';
+import { unlockedRewards } from '../../src/run/unlocks.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const OUT = path.join(ROOT, '.probe-ui');
@@ -60,7 +67,7 @@ async function settle(page: Page): Promise<void> {
  * is a number nobody has read on screen.
  */
 async function shootFightAs(page: Page, seed: number, theme: string, classId: string, dir: string): Promise<void> {
-  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1`);
+  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1&unlocks=all`);
   await page.waitForSelector('[data-class-card]');
   await page.locator(`[data-run="pick-class"][data-class="${classId}"]`).click();
   await page.waitForSelector('#run-map svg');
@@ -169,7 +176,12 @@ async function shootPick(page: Page, seed: number, theme: string): Promise<void>
   const dir = path.join(OUT, `pick-${seed}-${theme}`);
   await mkdir(dir, { recursive: true });
 
-  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1`);
+  // Every shot below is taken with `unlocks=all`, which pins the pool to the
+  // whole content: the assertions compare the screen with `CLASSES`, and a
+  // browser profile that had unlocked some of the pool would draft from less
+  // than that and read as a failure. What a *locked* pool looks like is
+  // `shootCollection` below, which asks for it explicitly.
+  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1&unlocks=all`);
   await page.evaluate(() => document.fonts.ready);
   await page.waitForSelector('[data-class-card]');
   await settle(page);
@@ -211,7 +223,7 @@ async function shootPick(page: Page, seed: number, theme: string): Promise<void>
 
   // A class the game does not have: the pick screen stays up. This is the DOM
   // half of `pickableClassId`, which `test/classes.test.ts` gates headlessly.
-  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1&class=bard`);
+  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1&class=bard&unlocks=all`);
   await page.waitForSelector('[data-class-card]');
   await settle(page);
   const refused = await readPick(page);
@@ -223,7 +235,7 @@ async function shootPick(page: Page, seed: number, theme: string): Promise<void>
   // The real control: click a class and check the run that starts is that one.
   // The Ranger, because a Volley hero is what the fight screen has never been
   // photographed with.
-  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1`);
+  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1&unlocks=all`);
   await page.waitForSelector('[data-class-card]');
   await page.locator('[data-run="pick-class"][data-class="ranger"]').click();
   await page.waitForSelector('#run-map svg');
@@ -246,6 +258,81 @@ async function shootPick(page: Page, seed: number, theme: string): Promise<void>
 
   // And what each class's first fight says it is about to do.
   for (const cls of CLASSES) await shootFightAs(page, seed, theme, cls.id, dir);
+
+  await shootCollection(page, seed, theme, dir);
+}
+
+/**
+ * The same screen at a fresh profile: smaller pools on the class cards, and
+ * the collection under them.
+ *
+ * Loaded through `?unlocks=none` rather than by writing `cards.profile` into
+ * storage, for the reason the header gives: every decision here is a real
+ * control, and the address bar is one. What it is *not* is a test of the
+ * storage round trip - `test/unlocks.test.ts` holds that headlessly, and this
+ * probe deliberately cannot write a profile at all.
+ *
+ * What it asserts, so a shot nobody reads still fails loudly:
+ *   - each class card says the narrowed pool size, which is the pool a run
+ *     started from this screen would actually draft from
+ *   - the collection lists every gated id, each one locked, each one saying
+ *     what opens it
+ */
+async function shootCollection(page: Page, seed: number, theme: string, dir: string): Promise<void> {
+  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1&unlocks=none`);
+  await page.waitForSelector('#collection');
+  await settle(page);
+
+  const seen = await readPick(page);
+  for (const cls of CLASSES) {
+    const card = seen.cards.find((c) => c.id === cls.id);
+    if (card === undefined) throw new Error(`the locked pick screen lost the ${cls.name}`);
+    const narrowed = unlockedRewards(FRESH_UNLOCKS, cls.rewards).length;
+    if (narrowed >= cls.rewards.length) {
+      throw new Error(
+        `the ${cls.name}'s pool is not narrowed at a fresh profile (${narrowed} of ` +
+          `${cls.rewards.length}), so this probe is photographing nothing`,
+      );
+    }
+    if (!card.pool.includes(`Drafts from ${narrowed} cards`)) {
+      throw new Error(
+        `the ${cls.name}'s card says "${card.pool}" and a fresh profile drafts from ${narrowed}`,
+      );
+    }
+  }
+
+  const collection = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#collection .unlock'));
+    return {
+      heading: document.querySelector('#collection .unlocks__title')?.textContent?.trim() ?? '',
+      locked: rows.filter((r) => r.classList.contains('is-locked')).length,
+      owned: rows.filter((r) => r.classList.contains('is-owned')).length,
+      text: document.getElementById('collection')?.textContent ?? '',
+    };
+  });
+  // The card rows and the deed rows share the list shape, so the count is
+  // gated ids plus achievements rather than gated ids alone.
+  const wanted = GATED_IDS.length + ACHIEVEMENTS.length;
+  if (collection.locked !== wanted || collection.owned !== 0) {
+    throw new Error(
+      `the collection shows ${collection.locked} locked and ${collection.owned} owned rows; a ` +
+        `fresh profile has ${wanted} locked and none owned`,
+    );
+  }
+  for (const id of GATED_IDS) {
+    const name = SIGILS.find((s) => s.id === id)?.name ?? CARD_POOL.card(id).name;
+    if (!collection.text.includes(name)) {
+      throw new Error(`the collection does not name "${name}" (${id})`);
+    }
+  }
+  for (const a of ACHIEVEMENTS) {
+    if (!collection.text.includes(a.how)) {
+      throw new Error(`the collection does not say how to earn "${a.id}"`);
+    }
+  }
+  console.log(`[pick] seed ${seed} ${theme}: locked collection - ${collection.heading}`);
+  await page.screenshot({ path: path.join(dir, 'collection-locked.png'), fullPage: true });
+  await page.locator('#collection').screenshot({ path: path.join(dir, 'collection-panel.png') });
 }
 
 async function manifest(): Promise<number> {

@@ -22,6 +22,7 @@
 import { pathSpread } from '../run/map.ts';
 import { NODE_TYPES, type ActMap, type MapNode, type NodeType } from '../run/types.ts';
 import { iconSvg, type IconName } from './icons.ts';
+import { escapeHtml as esc } from './escape.ts';
 
 /** The icon each node type wears. One per `NodeType`, so a new type fails here. */
 export const NODE_ICON: Readonly<Record<NodeType, IconName>> = {
@@ -165,12 +166,6 @@ export function spreadWords(spread: ReadonlyMap<NodeType, { min: number; max: nu
     parts.push(v.min === v.max ? `${v.min} ${plural(v.min)}` : `${v.min}–${v.max} ${plural(v.max)}`);
   }
   return parts.length === 0 ? 'only the boss' : parts.join(', ');
-}
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;',
-  );
 }
 
 const r1 = (n: number): string => String(Math.round(n * 10) / 10);

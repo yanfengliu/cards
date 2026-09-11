@@ -17,6 +17,15 @@
 // is no "nothing worn" case to leave the line off for, as `engine/hash.ts`
 // does for equipment.
 //
+// The unlock line is the opposite case and is handled the opposite way: a run
+// can genuinely have no unlock layer - that is what every measurement and
+// every log written before unlocks existed is - so the line is appended only
+// when there is a set, and no recorded run hash moves. It is in the digest at
+// all because two runs that drafted from different pools are different runs
+// even where their states happen to coincide: a run that declines every reward
+// reaches the same deck, the same gold and the same generator position whatever
+// was on the shelf, and without this line those two would hash the same.
+//
 // `hashString` is the engine's. Sharing it is the point: two digests produced
 // by the same function are comparable, and a run digest that quoted a fight
 // digest computed some other way would not be.
@@ -50,6 +59,22 @@ export function mapToCanonical(map: ActMap): string {
   return `act=${map.act};rows=[${map.rows.map((r) => r.join('.')).join('|')}];nodes=[${nodes}]`;
 }
 
+/**
+ * The unlock set, appended only when the run had one.
+ *
+ * The same rule as a deck card's sigils just above, and for the same reason: a
+ * run played with no unlock layer - every measurement, every fixture, every
+ * log written before unlocks existed - canonicalises to exactly the string it
+ * did before, so no recorded run hash moves. A run that *was* narrowed carries
+ * both lists, because two runs that drafted from different pools are different
+ * runs even when they declined every card and their states coincide.
+ */
+function unlockedToCanonical(run: RunState): string[] {
+  const u = run.unlocked;
+  if (u === null) return [];
+  return [`unlocked=g[${u.gated.join(',')}]/o[${u.owned.join(',')}]`];
+}
+
 export function runToCanonical(run: RunState): string {
   return [
     `seed=${run.seed}`,
@@ -77,6 +102,7 @@ export function runToCanonical(run: RunState): string {
     `cards=${run.cardsGained}`,
     `rng=${run.rng.s}/${run.rng.n}`,
     `maps=[${run.maps.map(mapToCanonical).join('||')}]`,
+    ...unlockedToCanonical(run),
   ].join(';');
 }
 

@@ -32,7 +32,14 @@
  * run structure, so one class proves the wiring; it proves nothing about the
  * two classes whose own verbs draw their own beats.
  *
- *   node tools/ui-probe/run.ts <seed> <light|dark> [knight|ranger|mage|all]
+ * The last argument is the unlock arm. `all`, the default, pins the pool
+ * through `?unlocks=all` and writes no profile - the run the hash comparison
+ * needs. `fresh` clears the stored profile, plays the run the app's own
+ * `loadProfile` decides, and at the end reads `cards.profile` back out of the
+ * browser and holds it to what the run earned. That round trip is the one part
+ * of the unlock layer no headless test can reach.
+ *
+ *   node tools/ui-probe/run.ts <seed> <light|dark> [knight|ranger|mage|all] [all|fresh]
  *   node tools/ui-probe/run.ts find-win [max] [class]   headless: seeds the bot wins
  *   node tools/ui-probe/run.ts find-sigil [max] [class] headless: seeds where act 1
  *                                                       attaches a card sigil
@@ -44,9 +51,16 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { launch } from './chrome.ts';
 import { runFight, selectPlays } from '../../src/engine/fight.ts';
+import { CARD_POOL } from '../../src/content/cards.ts';
+import { classById } from '../../src/content/classes.ts';
+import { SIGILS } from '../../src/content/sigils.ts';
+import { ACHIEVEMENTS, FRESH_UNLOCKS } from '../../src/content/unlocks.ts';
+import { PROFILE_KEY, parseProfile, unlockSetFor } from '../../src/ui/profile.ts';
 import { RUN_CONTENT } from '../../src/run/content.ts';
 import { hashRun } from '../../src/run/hash.ts';
 import { runRun, travelOptions } from '../../src/run/run.ts';
+import type { RunState } from '../../src/run/types.ts';
+import { earnedBy, unlockedRewards } from '../../src/run/unlocks.ts';
 import { makeRunAgent } from '../../src/sim/runbots.ts';
 import { createRunController } from '../../src/ui/run.ts';
 
@@ -92,19 +106,180 @@ async function look(page: Page): Promise<{ subtitle: string; screen: string; rea
   });
 }
 
-async function playRun(page: Page, seed: number, theme: string, classId: string): Promise<void> {
-  const dir = path.join(OUT, `run-${seed}-${classId}-${theme}`);
+/**
+ * The end screen's unlock block, against what the finished run actually earned.
+ *
+ * Computed here from `earnedBy` on the state the mirror reached, so the check
+ * is "the screen says what this run earned" rather than "the screen says
+ * something". Deterministic in a probe because `?unlocks=all` never writes a
+ * profile, so every run this probe plays is a run by a player who has nothing.
+ */
+async function checkUnlocks(
+  page: Page,
+  state: RunState,
+  seed: number,
+  classId: string,
+  arm: UnlockArm,
+): Promise<void> {
+  const earned = earnedBy(state, ACHIEVEMENTS);
+  if (earned.length === 0) {
+    throw new Error(`seed ${seed} as the ${classId}: a finished run earned nothing at all`);
+  }
+  const block = await page.evaluate(() => document.getElementById('run-unlocked')?.textContent ?? null);
+  if (block === null) {
+    throw new Error(
+      `seed ${seed} as the ${classId}: the run ended having earned ` +
+        `${earned.map((a) => a.id).join(', ')} and the end screen says nothing about it`,
+    );
+  }
+  for (const a of earned) {
+    if (!block.includes(a.name)) {
+      throw new Error(`seed ${seed} as the ${classId}: "${a.name}" was earned and is not on screen`);
+    }
+    for (const id of a.unlocks) {
+      const name = SIGILS.find((s) => s.id === id)?.name ?? CARD_POOL.card(id).name;
+      if (!block.includes(name)) {
+        throw new Error(`seed ${seed} as the ${classId}: "${name}" was unlocked and is not on screen`);
+      }
+    }
+  }
+  console.log(`[run] seed ${seed} ${classId}: earned ${earned.map((a) => a.name).join(', ')}`);
+
+  // The storage round trip, on the arm that has one. Read out of the browser
+  // rather than out of the app's own state: what has to survive the page is
+  // the bytes in `localStorage`, and a profile the app is holding in a closure
+  // is not a profile that survived anything.
+  const stored = await page.evaluate((key) => globalThis.localStorage.getItem(key), PROFILE_KEY);
+  if (arm === 'all') {
+    if (stored !== null) {
+      throw new Error(`?unlocks=all wrote a profile (${stored}); a pinned pool must never save`);
+    }
+    return;
+  }
+  if (stored === null) {
+    throw new Error(
+      `seed ${seed} as the ${classId}: the run ended and nothing was written to ${PROFILE_KEY}`,
+    );
+  }
+  const profile = parseProfile(JSON.parse(stored));
+  const wantedEarned = earned.map((a) => a.id).sort();
+  const wantedOwned = [...new Set(earned.flatMap((a) => a.unlocks))].sort();
+  if (profile.earned.join(',') !== wantedEarned.join(',')) {
+    throw new Error(
+      `the stored profile holds [${profile.earned.join(', ')}] and the run earned ` +
+        `[${wantedEarned.join(', ')}]`,
+    );
+  }
+  if (profile.owned.join(',') !== wantedOwned.join(',')) {
+    throw new Error(
+      `the stored profile owns [${profile.owned.join(', ')}] and the run unlocked ` +
+        `[${wantedOwned.join(', ')}]`,
+    );
+  }
+  if (profile.runsFinished !== 1 || profile.runsWon !== (state.result === 'won' ? 1 : 0)) {
+    throw new Error(
+      `the stored profile counts ${profile.runsFinished} finished and ${profile.runsWon} won ` +
+        `after one ${state.result} run`,
+    );
+  }
+
+  console.log(
+    `[run] seed ${seed} ${classId}: profile survived the page - ${profile.earned.length} deed(s), ` +
+      `${profile.owned.length} unlock(s)`,
+  );
+}
+
+/**
+ * The next run drafts from the wider pool.
+ *
+ * Separate from `checkUnlocks` because it navigates: "Same seed again" leaves
+ * the end screen, and the run hash the page prints is read off that screen.
+ * Called last, after the hash comparison, for exactly that reason.
+ */
+async function checkNextRunWidens(page: Page, seed: number, classId: string, dir: string): Promise<void> {
+  const stored = await page.evaluate((key) => globalThis.localStorage.getItem(key), PROFILE_KEY);
+  if (stored === null) throw new Error('the profile vanished between the two checks');
+  const profile = parseProfile(JSON.parse(stored));
+  const before = unlockedRewards(FRESH_UNLOCKS, classById(classId).rewards).length;
+  const after = unlockedRewards(unlockSetFor(profile), classById(classId).rewards).length;
+  await page.locator('[data-run="same-seed"]').click();
+  await page.waitForSelector('#collection');
+  const pick = await page.evaluate(() => ({
+    pool: document.querySelector(`[data-class-card] .run__h + *`)?.textContent ?? '',
+    text: document.getElementById('run-node')?.textContent ?? '',
+    collection: document.querySelector('#collection .unlocks__title')?.textContent ?? '',
+  }));
+  if (after <= before) {
+    throw new Error(
+      `the run unlocked ${profile.owned.length} thing(s) and the ${classId}'s pool did not widen ` +
+        `(${before} then ${after}); this probe is checking nothing`,
+    );
+  }
+  if (!pick.text.includes(`Drafts from ${after} cards`)) {
+    throw new Error(
+      `after the unlock the ${classId} should draft from ${after} cards and the pick screen says ` +
+        `otherwise: ${pick.text.slice(0, 400)}`,
+    );
+  }
+  if (!pick.collection.includes(`${profile.owned.length} of `)) {
+    throw new Error(`the collection does not count the unlocks: "${pick.collection}"`);
+  }
+  console.log(
+    `[run] seed ${seed} ${classId}: the ${classId} now drafts from ${after} cards, was ${before}`,
+  );
+  await page.screenshot({ path: path.join(dir, 'after-unlock-pick.png'), fullPage: true });
+}
+
+/**
+ * Which pool the browser plays with, and whether the profile is live.
+ *
+ *   `all`    `?unlocks=all` - no unlock layer, and no profile is written. The
+ *            default, because it is the pool the headless comparison below
+ *            plays and the one every other number in this repo is taken at.
+ *   `fresh`  the profile, with the stored profile **cleared first**, so the
+ *            browser starts at a fresh player and the set is `FRESH_UNLOCKS`
+ *            deterministically. This is the arm that exercises the storage:
+ *            the run ends, the app writes the profile, and the probe reads it
+ *            back and holds it to what the run earned.
+ */
+type UnlockArm = 'all' | 'fresh';
+
+async function playRun(
+  page: Page,
+  seed: number,
+  theme: string,
+  classId: string,
+  arm: UnlockArm = 'all',
+): Promise<void> {
+  const dir = path.join(OUT, `run-${seed}-${classId}-${theme}${arm === 'all' ? '' : `-${arm}`}`);
   const taken = new Set<string>();
   const agent = makeRunAgent({ route: 'greedy', placement: 'right', seed });
-  const mirror = createRunController(RUN_CONTENT, seed, { classId });
+  const unlocked = arm === 'fresh' ? FRESH_UNLOCKS : null;
+  const mirror = createRunController(RUN_CONTENT, seed, { classId, unlocked });
   const headless = runRun(
     RUN_CONTENT,
     seed,
     makeRunAgent({ route: 'greedy', placement: 'right', seed }),
     classId,
+    unlocked,
   );
 
-  await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1`);
+  // `unlocks=all` pins the pool to the whole content, which is what the
+  // headless mirror above and `runRun` both play. Without it the browser would
+  // draft from whatever this browser profile happens to hold, and the run hash
+  // the page prints would be a run nothing else played.
+  //
+  // The `fresh` arm is the exception and gets its determinism the other way:
+  // the stored profile is wiped first, so "whatever this browser holds" is
+  // exactly a fresh player, and the app's own `loadProfile` is then in the
+  // loop rather than pinned out of it.
+  if (arm === 'fresh') {
+    await page.goto(`${BASE}?seed=${seed}&theme=${theme}&fresh=1&unlocks=all`);
+    await page.evaluate((key) => globalThis.localStorage.removeItem(key), PROFILE_KEY);
+  }
+  await page.goto(
+    `${BASE}?seed=${seed}&theme=${theme}&fresh=1${arm === 'all' ? '&unlocks=all' : ''}`,
+  );
   await page.evaluate(() => document.fonts.ready);
   // A run now starts at the class pick, and this probe walked straight past it
   // into a 30-second timeout for a whole unit: classes shipped, `#run-map` was
@@ -321,11 +496,14 @@ async function playRun(page: Page, seed: number, theme: string, classId: string)
       // The log sits in a closed <details>, so "attached" is the state to wait for.
       await page.waitForSelector('#run-log', { state: 'attached' });
       await shoot(page, dir, `end-${mirror.state.result}`, taken);
+      await checkUnlocks(page, mirror.state, seed, classId, arm);
       break;
     }
   }
 
   // The page's own hash against the headless run's: the invariant across the DOM.
+  // Read as the last `dd` of the stats list, so the unlock block below it must
+  // stay below it.
   const shown = await page.evaluate(() => {
     const dd = Array.from(document.querySelectorAll('.run__stats dd'));
     return dd[dd.length - 1]?.textContent ?? '';
@@ -344,6 +522,9 @@ async function playRun(page: Page, seed: number, theme: string, classId: string)
         `DOM is playing a different fight from the engine.`,
     );
   }
+
+  // Last, because it navigates away from the end screen the hash was read off.
+  if (arm === 'fresh') await checkNextRunWidens(page, seed, classId, dir);
 }
 
 async function manifest(): Promise<number> {
@@ -427,7 +608,15 @@ async function main(): Promise<void> {
       if (m.type() === 'error') console.error(`[page error] ${m.text()}`);
     });
     page.on('pageerror', (e) => console.error(`[page crash] ${e.message}`));
-    for (const classId of classes) await playRun(page, seed, theme, classId);
+    const arm: UnlockArm = args[3] === 'fresh' ? 'fresh' : 'all';
+    if (args[3] !== undefined && args[3] !== 'all' && args[3] !== 'fresh') {
+      throw new Error(
+        `tools/ui-probe/run.ts: "${args[3]}" is not an unlock arm. Pass "all" (the default: no ` +
+          `unlock layer, and no profile is written) or "fresh" (a cleared profile, the app's own ` +
+          `unlock set, and the stored profile read back at the end).`,
+      );
+    }
+    for (const classId of classes) await playRun(page, seed, theme, classId, arm);
     await ctx.close();
   } finally {
     await browser.close();

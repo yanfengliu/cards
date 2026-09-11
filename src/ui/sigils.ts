@@ -31,12 +31,7 @@ import { STAT_TERMS, TRAIT_TERMS } from '../render/glossary.ts';
 import { iconSvg } from '../render/icons.ts';
 import { CARD_SIGIL_TERMS, SIGIL_TERM, heroEffectWords } from '../render/sigil-terms.ts';
 import type { NodeOutcome, RunPhase } from './run.ts';
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;',
-  );
-}
+import { escapeHtml as esc } from '../render/escape.ts';
 
 /** The one line that says what a card sigil does when attached. */
 function cardSigilWords(sigil: CardSigilDef): string {
