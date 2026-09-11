@@ -6,6 +6,58 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-10 — the report's word and the API's value: nine mutations, and a wrong answer returned quietly
+
+Taken on `main` in the primary checkout, uncommitted, against `299fede`; `e7dc895` landed in the same tree while this ran and changed docs only, so `git diff 299fede e7dc895 -- src/ test/ tools/` is empty and every mutation below is a mutation of both revisions' bytes. The suite is **243 tests** here, 236 at the base — `test/runbots.test.ts` is the seven new ones. Nine mutations, each applied to the shipped tree, run against the shipped command, reverted, and the restored bytes compared with the originals before anything was printed. All nine came back red for their own reason. Digests after the last revert: `src/sim/runbots.ts` `ee5c73d0…`, `src/sim/runmeasure.ts` `f6d2ade4…`, `test/runbots.test.ts` `c300e818…`. The whole list was re-run against these exact bytes after the test file's header was extended — a review bound to bytes that no longer exist is not a review of what shipped.
+
+The runner is `.probe/mutate-styles.mjs`, rebuilt under the ignored scratch path with the guards every previous round arrived at: the anchor is normalised to the file's own line ending, must match exactly once or the mutation is refused rather than run, the replacement may not be a no-op, the file is restored and its bytes compared before anything is printed, and a red is credited only when the gate's **own words** appear in the output. That last guard fired once here: M9's first `expect` named the `number` row of a five-row table and the test fails on the `undefined` row above it, so a real red for the right reason was reported as `RED-BUT-NOT-ITS-OWN` until the expected sentence was corrected. The assertion's wording was improved in the same pass (`was a undefined` → `was of type undefined`), which is the readable half of the same fix.
+
+### The defect, reproduced before it was gated
+
+`docs/learning/defect-register.md` holds the incident. The two probes that reproduce it are `.probe/search-probe.mjs` and `.probe/route-probe.mjs`, both `.mjs` on purpose — the compiler is not in the room for the caller that found this.
+
+With `placementFor`'s `default:` arm deleted, the probe that started it all:
+
+> `makeRunAgent returned; agent.placement is undefined` / `TypeError: policy is not a function`
+
+With `makeRunAgent`'s old ternary restored, the route dial, at seed 5 with placement held at `right`:
+
+> `route "greedy" -> 58794c0c3f1ae76d` / `route "random" -> 334776f7879e8dba` / `route "greedy-ish" -> 334776f7879e8dba`
+
+**The route half never crashed, and that is why the gate covers the class rather than the word "search".** A misspelt route was not an error, it was the random router: a complete, plausible, wrong measurement under the label the caller asked for.
+
+### The nine
+
+| # | mutation | site | command | the failure |
+|---|---|---|---|---|
+| M1 | `placementFor`'s whole `default:` arm deleted — the shipped state before today | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *placement "search" was accepted rather than refused; nothing was thrown* — exit 1, two tests red |
+| M2 | `makeRunAgent` back to `opts.route === 'greedy' ? GREEDY_CHOICES : randomAgentChoices(...)` | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *route "greedy-ish" was accepted rather than refused; nothing was thrown* |
+| M3 | a fourth `PLACEMENT_STYLES` member, `'left'`, with no `case` | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *runbots: makeRunAgent was given placement "left" … which is not a placement style this repo has*, thrown out of "every PLACEMENT_STYLES member builds a policy that can play a fight through"; **and** `npm run typecheck` exit 2: `src/sim/runbots.ts(114,13): error TS2322: Type '"left"' is not assignable to type 'never'.` |
+| M4 | a third `ROUTE_STYLES` member, `'kin'`, with no `case` | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *…was given route "kin"…* out of "every ROUTE_STYLES member builds an agent that answers a whole run"; **and** `npm run typecheck` exit 2: `error TS2322: Type '"kin"' is not assignable to type 'never'.` |
+| M5 | `armLabel` prints the old word: `'lookahead'` labelled `search` | `src/sim/runmeasure.ts` | `node --test test/runbots.test.ts` | *the arm label "greedy route / search placement" contains "search", which is not a style makeRunAgent accepts* |
+| M6 | `runArm` given back a hand-written name, ignoring its own styles | `src/sim/runmeasure.ts` | `node --test test/runbots.test.ts` | *an arm built from ("greedy", "lookahead") named itself "greedy route / search placement"* |
+| M7 | the refusal stops naming the accepted set | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *the refusal does not offer "lookahead", which is a style makeRunAgent accepts* — red on both dials' tests |
+| M8 | `String(got)` simplified to `` `${got}` `` | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *the refusal lost the value Symbol(lookahead): Cannot convert a Symbol value to a string* |
+| M9 | the refusal drops its `typeof` clause | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *the refusal does not say the value was of type undefined* |
+
+### What the wording of two of them is doing
+
+**M8 is the reason `String(...)` is in the code rather than plain interpolation.** Under the mutation the error thrown is not the refusal at all — it is `TypeError: Cannot convert a Symbol value to a string`, raised while the refusal was being built. An error message that throws while being assembled reports nothing about the input that caused it, which is the exact failure mode this whole entry is about, one layer up.
+
+**M5 and M6 are two different ways for the label to lie and neither covers the other.** M5 keeps `runArm`'s derivation and corrupts the formatter; M6 keeps the formatter and stops `runArm` using it. The label test is written as "every word in the label that is not boilerplate is a value `makeRunAgent` accepts" rather than by rebuilding the format string, because a check built from the same expression as the thing it checks proves only that the code agrees with itself — and `greedy route / search placement` would have satisfied a check that rebuilt the format.
+
+### Bounds, stated rather than implied
+
+- The seven tests exercise one fight per placement style and one shipped run per route style, at the seeds named in the file. A style that works on those seeds and fails on others is not covered.
+- Their subject is a list, so `docs/policies/local-rules.md`'s "a gate whose subject is a list reads that list" applies and is satisfied at the strongest binding available here: the arrays are not retyped into the tests, and the unions are `(typeof ARRAY)[number]`, so a member added to an array *is* a member of the union and its missing `case` fails `npm run typecheck`. Per that rule's Bound the two supporting assertions are present — each loop asserts its array is non-empty, and the label test asserts it checked all six pairs, so a sweep over nothing cannot report as a pass.
+- They gate the *names* and the *refusals*, never a number. Whether an arm's win rate is right stays `npm run verify:run`'s question.
+- They prove `runArm` gives a caller no place to put a hand-written label — the parameter is gone. They do **not** prove some other file will not invent one; nothing checks that, and nothing in the tree does it today.
+- `src/sim/measure.ts` keeps its prose arm names (`A optimal placement`, `C append right`). Those are bot names in a fight report, not values any API takes, and they are outside this gate on purpose.
+
+### What did not move
+
+`npm run verify` is byte-identical to `299fede`'s: A optimal 66.25%, B random 56.50%, gap 9.75 pp (CI 5.61..13.89). `npm run verify:run` diffs against `299fede`'s in **eleven lines, every one of them a label**, plus `Elapsed`: the four arms still read 178/200, 99/200, 154/200 and 65/200, the route table still reads 39.50 pp (CI 31.53..47.47) and 44.50 pp (CI 35.75..53.25), and every count, rate, interval and mean in all six tables is unchanged. That is the evidence that this round renamed what a reader sees and moved nothing that is measured.
+
 ## 2026-09-10 — closing the tribes review: eleven mutations, and a tripwire that was designed for exactly this and did not fire
 
 Taken on branch `worktree-agent-aacf45b44fe4cb1d7`, cut from `8efbbb2` with `main` at `5f51827` merged in; the suite is **236 tests** here, 230 at `8efbbb2`. Eleven mutations, each applied to the shipped tree, run against the shipped command, reverted, and the restored bytes compared with the originals before anything was printed. All eleven came back red for their own reason. The runner is `.probe/mutate.mjs`, rebuilt under the ignored scratch path with the previous round's guards — anchors normalised to the file's own line ending, exactly one match or a refusal, no-op replacements refused, and the gate's own words required in the output before a red is credited.

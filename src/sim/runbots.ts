@@ -16,6 +16,19 @@
 // hero's Health; `random` walks uniformly. Holding the placement policy
 // constant across the two is what makes the difference between them a statement
 // about routing rather than about the fights.
+//
+// **Both style unions are derived from a list, and an unknown style is refused
+// by name.** `ROUTE_STYLES` and `PLACEMENT_STYLES` are the single source for
+// the accepted set: the union is read off the array, so the error message and
+// the type cannot drift apart, and the `never` guard in each `default:` arm
+// makes a member added to an array with no `case` a typecheck failure as well
+// as a runtime one. The refusal is not defensive decoration - `.mjs` probes
+// call `makeRunAgent` with no typecheck in front of them, and before this the
+// two switches had no `default:`: an unknown placement fell off the end as
+// `undefined` and died four layers down in `src/engine/fight.ts` as `policy is
+// not a function`, and an unknown route silently became the *random* router,
+// which is worse, because it answers rather than stopping. See
+// `docs/learning/defect-register.md`.
 
 import { type Rng, makeRng, mixSeeds, nextInt } from '../engine/rng.ts';
 import { VOLLEY_SWINGS } from '../engine/resolver.ts';
@@ -36,8 +49,17 @@ import type {
 } from '../run/types.ts';
 import { DEFAULT_LOOKAHEAD, appendRightPlacer, lookaheadPlacer, randomPlacer } from './bots.ts';
 
-export type RouteStyle = 'greedy' | 'random';
-export type PlacementStyle = 'lookahead' | 'random' | 'right';
+/**
+ * Every route style `makeRunAgent` accepts, in report order. The union is read
+ * off this array rather than written beside it, so the accepted set a refusal
+ * prints is the accepted set the type describes.
+ */
+export const ROUTE_STYLES = ['greedy', 'random'] as const;
+export type RouteStyle = (typeof ROUTE_STYLES)[number];
+
+/** Every placement style `makeRunAgent` accepts, same rule as `ROUTE_STYLES`. */
+export const PLACEMENT_STYLES = ['lookahead', 'random', 'right'] as const;
+export type PlacementStyle = (typeof PLACEMENT_STYLES)[number];
 
 export type RunBotOptions = {
   readonly route: RouteStyle;
@@ -56,6 +78,25 @@ function rngFor(run: RunState, seed: number, decision: number): Rng {
   );
 }
 
+/**
+ * What an unrecognised style says, for both dials.
+ *
+ * The caller that reaches this has no typecheck in front of it, so `got` can be
+ * anything at all - a misspelt string, `undefined`, a number, an object. It is
+ * printed through `String(...)` rather than interpolated directly, because
+ * interpolating a symbol throws and an error that throws while being built
+ * reports nothing; the `typeof` is carried alongside because `3` and `"3"`
+ * print identically and are two different mistakes.
+ */
+function refuseStyle(field: 'route' | 'placement', got: unknown, accepted: readonly string[]): never {
+  const shown = typeof got === 'string' ? `"${got}"` : String(got);
+  throw new Error(
+    `runbots: makeRunAgent was given ${field} ${shown} (typeof ${typeof got}), which is not a ` +
+      `${field} style this repo has. Pass one of ${accepted.map((s) => `"${s}"`).join(', ')} as ` +
+      `\`${field}\`.`,
+  );
+}
+
 function placementFor(style: PlacementStyle, seed: number): PlacementPolicy {
   switch (style) {
     case 'lookahead':
@@ -64,6 +105,15 @@ function placementFor(style: PlacementStyle, seed: number): PlacementPolicy {
       return randomPlacer(seed, 'run-placement');
     case 'right':
       return appendRightPlacer();
+    default: {
+      // Compile-time half: a style added to `PLACEMENT_STYLES` with no `case`
+      // is not assignable to `never` and fails `npm run typecheck`. Run-time
+      // half: the refusal below, for a caller the compiler never saw. The
+      // guard is passed to `refuseStyle` rather than left dangling because
+      // `noUnusedLocals` rejects a local nothing reads.
+      const unreachable: never = style;
+      return refuseStyle('placement', unreachable, PLACEMENT_STYLES);
+    }
   }
 }
 
@@ -328,7 +378,25 @@ const GREEDY_CHOICES: Omit<RunAgent, 'placement'> = {
   event: greedyEvent,
 };
 
+function choicesFor(style: RouteStyle, seed: number): Omit<RunAgent, 'placement'> {
+  switch (style) {
+    case 'greedy':
+      return GREEDY_CHOICES;
+    case 'random':
+      return randomAgentChoices(seed);
+    default: {
+      // This one was written as `opts.route === 'greedy' ? GREEDY : random(...)`
+      // until 2026-09-10, so an unknown route did not crash - it routed at
+      // random and reported a number. A wrong answer returned quietly is worse
+      // than a stopped one, which is why the refusal covers both dials rather
+      // than only the one a probe happened to trip over.
+      const unreachable: never = style;
+      return refuseStyle('route', unreachable, ROUTE_STYLES);
+    }
+  }
+}
+
 export function makeRunAgent(opts: RunBotOptions): RunAgent {
-  const choices = opts.route === 'greedy' ? GREEDY_CHOICES : randomAgentChoices(opts.seed);
+  const choices = choicesFor(opts.route, opts.seed);
   return { ...choices, placement: placementFor(opts.placement, opts.seed) };
 }
