@@ -45,7 +45,7 @@ import {
   NUMBERS_SUMMARY,
   POSITION_HERO,
   POSITION_UNIT,
-  RACE_HAS_NO_RULE,
+  RACE_RULE,
   RETALIATION_HERO,
   RETALIATION_UNIT,
   STAT_TERMS,
@@ -281,7 +281,7 @@ export function explainCard(e: EntityView, card: CardView, ctx: InspectContext):
     `<p class="xp__gloss">${esc(numbersLine)}</p>` +
     `<ul class="xp__rules">${rules.join('')}</ul>` +
     `<ul class="xp__channels">${channels.join('')}</ul>` +
-    `<p class="xp__note">${esc(RACE_HAS_NO_RULE)}</p>` +
+    `<p class="xp__note">${esc(RACE_RULE)}</p>` +
     '</div>'
   );
 }

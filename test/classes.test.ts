@@ -40,8 +40,8 @@ import assert from 'node:assert/strict';
 import { CARD_POOL, PLAYER_CARDS, PLAYER_HERO } from '../src/content/cards.ts';
 import { CLASSES, CLASS_IDS, classById } from '../src/content/classes.ts';
 import { swingsOf } from '../src/engine/resolver.ts';
-import { makeHero } from '../src/engine/state.ts';
-import type { CardPool, GameState, Tribe, UnitCard } from '../src/engine/state.ts';
+import { TRIBAL_TRAITS, makeHero } from '../src/engine/state.ts';
+import type { CardPool, GameState, Trait, Tribe, UnitCard } from '../src/engine/state.ts';
 import { CLASS_TERMS, classTermFor } from '../src/render/class-terms.ts';
 import { TRAIT_TERMS } from '../src/render/glossary.ts';
 import { RUN_CONTENT } from '../src/run/content.ts';
@@ -89,20 +89,46 @@ test('the three classes are the design’s three, and each is a hero, a starting
   assert.throws(() => classById('bard'), /no class "bard".*knight, ranger, mage/);
 });
 
-test('class sets the pool; races appear across all of it: every pool holds every player race', () => {
+test('class sets the pool; races appear across all of it: every pool holds every player race, and every tribal trait', () => {
   // Mutation watched going red: the two elves removed from the Knight's pool.
+  // For the second half, watched going red on its own: the Songkeeper and the
+  // Elf Lord removed from the Knight's pool, which leaves the Knight holding
+  // elves - the Wayfinder and the Sentinel - so the first half stays green
+  // while no Knight can ever draft a Chorus.
   //
   // "A Knight drafts dwarves, elves and humans alike" is the design's own
-  // example, and the gate is the general form of it, read off the cards: the
-  // races a class can draft are all the races the player's cards come in.
+  // example, and the first half is the general form of it, read off the cards:
+  // the races a class can draft are all the races the player's cards come in.
+  //
+  // The second half is what unit 11 made checkable. Once a race is a rule, a
+  // pool that holds a race but none of the cards that *read* it does not offer
+  // that race as a direction - the design's "tribal identity is a direction you
+  // commit to mid-run" fails for that class while the race count looks fine. So
+  // every pool must also be able to draft every tribal trait, and the list of
+  // those comes from the engine's `TRIBAL_TRAITS` rather than from this file.
+  //
+  // Bound: this reads the pool, not a run. It proves a class *can* be offered
+  // one, not that any seed is - which is the shelf's business and
+  // `test/run.test.ts`'s.
   assert.ok(playerRaces.size > 1, `the player's cards come in ${playerRaces.size} race(s); this gate needs more than one`);
+  assert.ok(TRIBAL_TRAITS.length > 0, 'this gate needs at least one tribal trait to be worth running');
   for (const cls of CLASSES) {
-    const drafted = new Set<Tribe>(cls.rewards.map((r) => CARD_POOL.card(r.cardId).tribe));
+    const cards = cls.rewards.map((r) => CARD_POOL.card(r.cardId));
+    const drafted = new Set<Tribe>(cards.map((c) => c.tribe));
     for (const race of playerRaces) {
       assert.ok(
         drafted.has(race),
         `the ${cls.name}'s pool has no ${race}. Class sets the pool and races appear across all of it; ` +
           `the pool holds ${[...drafted].join(', ')} and the player's cards come in ${[...playerRaces].join(', ')}.`,
+      );
+    }
+    const traits = new Set<Trait>(cards.flatMap((c) => c.traits));
+    for (const trait of TRIBAL_TRAITS) {
+      assert.ok(
+        traits.has(trait),
+        `the ${cls.name}'s pool holds no card printing ${trait}. Race is a rule now, so a pool ` +
+          `that cannot draft the traits that read a race does not offer that race as a ` +
+          `direction. The pool prints [${[...traits].join(', ')}].`,
       );
     }
   }

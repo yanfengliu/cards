@@ -70,6 +70,28 @@ export const CARD_SIGIL_TERMS: Readonly<Record<Trait, Term>> = {
     icon: 'sigil',
     line: 'Attached at a reward. This card has Scorch for the rest of the run, on top of what it was printed with.',
   },
+  // The three tribal traits, worded here and offered by nothing: unit 11 added
+  // the traits and deliberately shipped no sigil for any of them, because a
+  // tribal sigil is a second way to author a tribe and whether the run wants
+  // one is a content decision `src/content/sigils.ts` owns. Each sentence says
+  // what attaching one would do, and the trait's own rule stays in
+  // `TRAIT_TERMS` beside it - including that a card sigil cannot change what
+  // race the card is, which is what these three read.
+  kindle: {
+    name: 'Kindle Sigil',
+    icon: 'sigil',
+    line: 'Attached at a reward. This card has Kindle for the rest of the run, on top of what it was printed with. It still counts its own race, which the sigil does not change.',
+  },
+  chorus: {
+    name: 'Chorus Sigil',
+    icon: 'sigil',
+    line: 'Attached at a reward. This card has Chorus for the rest of the run, on top of what it was printed with. It still sings to its own race, which the sigil does not change.',
+  },
+  banner: {
+    name: 'Banner Sigil',
+    icon: 'sigil',
+    line: 'Attached at a reward. This card has Banner for the rest of the run, on top of what it was printed with. It still counts the races beside it, which the sigil does not change.',
+  },
 };
 
 /**

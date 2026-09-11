@@ -21,14 +21,21 @@
  *   constant re-words the tooltip. Retyping the number here is how a tooltip
  *   starts lying without anyone editing it.
  *
- *   **What is not yet true is said plainly.** `RACE_HAS_NO_RULE` is the honest
- *   answer to "what does being a dwarf do", and `test/explain.test.ts` fails the
- *   day the resolver starts reading `tribe`, so the copy cannot outlive the
- *   claim.
+ *   **A sentence about a set of traits names them from the set.** `RACE_RULE`
+ *   answers "what does being a dwarf do" by reading `TRIBAL_TRAITS` out of the
+ *   engine, so the copy cannot outlive the rules it describes. It replaced
+ *   `RACE_HAS_NO_RULE`, which was the honest answer for as long as nothing in
+ *   a fight read a race - unit 11 is when that stopped being true.
  */
 
-import type { Trait, Tribe } from '../engine/state.ts';
-import { RELAY_POWER, WAKE_POWER } from '../engine/resolver.ts';
+import { type Trait, type Tribe, MOST_ADJACENT, TRIBAL_TRAITS } from '../engine/state.ts';
+import {
+  BANNER_POWER,
+  CHORUS_POWER,
+  KINDLE_POWER,
+  RELAY_POWER,
+  WAKE_POWER,
+} from '../engine/resolver.ts';
 import { CLASS_TRAIT_TERMS } from './class-terms.ts';
 import type { IconName } from './icons.ts';
 import { type HatchPattern, type Tincture, TINCTURES, hatchOf } from './heraldry/tinctures.ts';
@@ -118,6 +125,32 @@ export const TRAIT_TERMS: Readonly<Record<Trait, Term>> = {
       `When the unit immediately to its left dies this turn, this gains +${WAKE_POWER} Power ` +
       'until the end of the turn.',
   },
+  kindle: {
+    name: 'Kindle',
+    icon: 'kindle',
+    line:
+      `Before it swings, this gains +${KINDLE_POWER} Power for each unit of its own race standing ` +
+      'immediately beside it, until the end of the turn. Two neighbours is the most any card ' +
+      'has, so the most this can ever be is ' +
+      `+${KINDLE_POWER * MOST_ADJACENT}. Your hero has no race and never counts.`,
+  },
+  chorus: {
+    name: 'Chorus',
+    icon: 'chorus',
+    line:
+      `After this acts, each unit of its own race standing immediately beside it — left and ` +
+      `right — gains +${CHORUS_POWER} Power until the end of the turn. The one on its left has ` +
+      'already swung, so that half is Power to hit back with rather than Power to attack with.',
+  },
+  banner: {
+    name: 'Banner',
+    icon: 'banner',
+    line:
+      `Before it swings, this gains +${BANNER_POWER} Power for each unit of a DIFFERENT race ` +
+      'standing immediately beside it, until the end of the turn. It is Kindle upside down: this ' +
+      'one wants to stand between races rather than among its own. Your hero has no race and ' +
+      'never counts.',
+  },
   ...CLASS_TRAIT_TERMS,
 };
 
@@ -172,17 +205,44 @@ export const POSITION_HERO =
 // ----------------------------------------------------------------- the races
 
 /**
- * Races carry no rule yet, and saying so is the point.
+ * What being a dwarf does, in one sentence the code writes for itself.
  *
- * `docs/design/game.md` reserves races as mechanical tribes - *Kindle* counts
- * adjacent dwarves - but no shipped card reads a unit's tribe, and a tooltip
- * hinting at depth that is not there is worse than one admitting there is none.
- * `test/explain.test.ts` fails the day `engine/resolver.ts` mentions `tribe`,
- * which is when this sentence has to be rewritten.
+ * This used to be `RACE_HAS_NO_RULE` - "nothing in the card pool reads it" -
+ * and it was true for ten units. `docs/design/game.md` reserved races as
+ * mechanical tribes the whole time, and unit 11 built them, so the sentence
+ * had to be replaced rather than edited.
+ *
+ * **The trait names in it are not typed here.** They are read out of
+ * `TRIBAL_TRAITS`, which the engine's own type system fills in - a tribal
+ * trait added to that union and not to its record does not compile, and one
+ * deleted takes its name out of this sentence in the same edit. That is the
+ * property that made deleting Ward a compile error instead of a lying tooltip,
+ * pointed at a sentence rather than at a table.
+ *
+ * The claim "and nothing else does" is held by `test/tribes.test.ts`, which
+ * fights the same board twice with one neighbour's race changed and asserts
+ * that exactly the traits named here notice.
+ *
+ * **It is short because the panel is 4px from covering the board.** The first
+ * draft of this sentence was 255 characters, wrapped to a third line and took
+ * the panel from 266px to 280px against a 270px band - measured with
+ * `npm run probe:ui hover 7 even light`, where the area of the player's row it
+ * covered went from 2,341px² to 11,623px². The gate above `RETALIATION_UNIT`
+ * says the same thing about the summary paragraph; this note is under the same
+ * limit now, in the same test, for the same reason.
  */
-export const RACE_HAS_NO_RULE =
-  'Race is identity, not yet a rule: nothing in the card pool reads it, so a dwarf and an ' +
-  'elf with the same numbers fight identically. It sets the card’s field colour and no more.';
+const TRIBAL_NAMES: readonly string[] = TRIBAL_TRAITS.map((t) => TRAIT_TERMS[t].name);
+
+export const RACE_RULE =
+  `Race is a rule, not just a colour: ${listWords(TRIBAL_NAMES)} read the races next to a card. ` +
+  'Each sees its two neighbours and no further, so where a card stands is the whole of it.';
+
+/** "a, b and c" — the list a player would read aloud, from however many there are. */
+function listWords(words: readonly string[]): string {
+  if (words.length === 0) return 'nothing';
+  if (words.length === 1) return words[0]!;
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]!}`;
+}
 
 /**
  * A tribe by name, for callers holding a `string` rather than a `Tribe`.

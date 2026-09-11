@@ -78,6 +78,17 @@ const DEVICE: Readonly<Record<string, { charge: ChargeId; on: Tincture; bordure:
   u_thane: { charge: 'eagle', on: 'or', bordure: 'argent' },
   u_bulwark: { charge: 'tower', on: 'argent', bordure: 'or' },
 
+  // The six that arrived with tribes. Same rule as the ten above: within one
+  // tribe no two cards share a charge and its metal, because the field already
+  // separates the tribes and the charge is all that is left to tell two cards
+  // of one race apart. None of them is a Guard, so none draws a bordure.
+  u_kindler: { charge: 'mullet', on: 'argent', bordure: 'or' },
+  u_runesmith: { charge: 'hammer', on: 'or', bordure: 'argent' },
+  u_songkeeper: { charge: 'crescent', on: 'or', bordure: 'or' },
+  u_elflord: { charge: 'eagle', on: 'or', bordure: 'or' },
+  u_bannerman: { charge: 'leaf', on: 'argent', bordure: 'or' },
+  u_marshal: { charge: 'tower', on: 'or', bordure: 'or' },
+
   e_goblin: { charge: 'wyvern', on: 'argent', bordure: 'or' },
   e_shieldwall: { charge: 'tower', on: 'or', bordure: 'or' },
   e_ogre: { charge: 'hammer', on: 'or', bordure: 'argent' },

@@ -59,7 +59,7 @@ export type BoardView = {
 /** How a buff reached its target. `via` is what the arrow on screen is labelled. */
 export type BuffSource = {
   readonly sourceUid: number | null;
-  readonly via: 'relay' | 'wake' | 'unknown';
+  readonly via: 'relay' | 'wake' | 'chorus' | 'kindle' | 'banner' | 'unknown';
 };
 
 export type Beat =
@@ -271,11 +271,26 @@ export function leftOf(view: BoardView, e: EntityView): EntityView | null {
  * the arrow was simply not drawn. So every death in the phase is kept and the
  * newest matching one wins.
  *
+ * **The three tribal traits are reconstructed the same way**, and each is as
+ * exact as the rule it mirrors:
+ *
+ *   Chorus fires on `afterActed{X}` and targets an adjacent unit of X's own
+ *   race, on X's side - so it is Relay's case with two candidates instead of
+ *   one and a race test on each. Kindle and Banner fire as part of X's own act
+ *   and target X itself, so the buff arrives on the unit that just acted; the
+ *   arrow is a self-arrow and the label is what carries the meaning.
+ *
  * That argument holds for the shipped trait set and is exactly as strong as
  * that set. `via: 'unknown'` is the honest answer for anything else, and the
- * arrow is simply not drawn. **The clean fix is one field**: put `sourceUid` on
- * the `powerGained` event, which costs the engine nothing and no `GameState`
- * field. That is an engine change, so it is reported rather than made here.
+ * arrow is simply not drawn. It is also the answer when one card carries two
+ * traits that could both have produced the same buff - a Relay and a Chorus
+ * both reaching the right-hand neighbour, or a Kindle and a Banner on one
+ * body. No shipped card does, and guessing between them would put a wrong name
+ * on screen where no name is the truth.
+ *
+ * **The clean fix is one field**: put `sourceUid` on the `powerGained` event,
+ * which costs the engine nothing and no `GameState` field. That is an engine
+ * change, so it is reported rather than made here.
  */
 function attributeBuff(
   view: BoardView,
@@ -283,21 +298,35 @@ function attributeBuff(
   lastActed: number | null,
   deaths: readonly { uid: number; rightUid: number | null }[],
 ): BuffSource {
+  const target = findView(view, targetUid);
   if (lastActed !== null) {
     const actor = findView(view, lastActed);
-    if (actor !== null && actor.traits.includes('relay')) {
+    if (actor !== null) {
       const right = rightOf(view, actor);
-      if (right !== null && right.uid === targetUid) {
-        return { sourceUid: actor.uid, via: 'relay' };
-      }
+      const relayed = actor.traits.includes('relay') && right !== null && right.uid === targetUid;
+      // Chorus reaches a neighbour of the actor's own race, on either side, and
+      // never a hero - `engine/state.ts`'s `adjacentAllies` is what it is
+      // reconstructing and that excludes heroes outright.
+      const kin = [leftOf(view, actor), rightOf(view, actor)].filter(
+        (n) => n !== null && !n.isHero && n.alive && n.tribe === actor.tribe,
+      );
+      const chorused = actor.traits.includes('chorus') && kin.some((n) => n!.uid === targetUid);
+      if (relayed && chorused) return { sourceUid: null, via: 'unknown' };
+      if (relayed) return { sourceUid: actor.uid, via: 'relay' };
+      if (chorused) return { sourceUid: actor.uid, via: 'chorus' };
     }
   }
-  const target = findView(view, targetUid);
   if (target !== null && target.traits.includes('wake')) {
     for (let i = deaths.length - 1; i >= 0; i--) {
       const d = deaths[i]!;
       if (d.rightUid === targetUid) return { sourceUid: d.uid, via: 'wake' };
     }
+  }
+  // The two self-buffs. They land inside the acting unit's own act, so the
+  // unit that gained the Power is the unit that just acted.
+  if (target !== null && targetUid === lastActed) {
+    const self = (['kindle', 'banner'] as const).filter((t) => target.traits.includes(t));
+    if (self.length === 1) return { sourceUid: target.uid, via: self[0]! };
   }
   return { sourceUid: null, via: 'unknown' };
 }

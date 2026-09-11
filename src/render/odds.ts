@@ -38,10 +38,19 @@
  * must" in `test/explain.test.ts`, which is a text check and says why.
  */
 
-import { SCORCH_DAMAGE, legalTargets, swingsOf } from '../engine/resolver.ts';
+import {
+  BANNER_POWER,
+  CHORUS_POWER,
+  KINDLE_POWER,
+  SCORCH_DAMAGE,
+  legalTargets,
+  swingsOf,
+} from '../engine/resolver.ts';
 import {
   type GameState,
   type Side,
+  adjacentKin,
+  adjacentKinOf,
   armourOf,
   cloneState,
   heroOf,
@@ -49,7 +58,15 @@ import {
   power,
 } from '../engine/state.ts';
 
-/** Relay's flat grant, mirrored from `engine/resolver.ts`. */
+/**
+ * Relay's flat grant, mirrored from `engine/resolver.ts`.
+ *
+ * The three tribal numbers beside it are **imported** rather than mirrored,
+ * and the difference is not tidiness: this file is a second implementation of
+ * the engine's arithmetic, and every mirrored number is a place the two can
+ * drift. `RELAY` is left as it was because moving it is a change to a number
+ * every measured placement figure was taken with; the new ones start right.
+ */
 const RELAY = 2;
 
 /**
@@ -83,6 +100,22 @@ export function projectOwnPhase(state: GameState, side: Side): GameState {
   for (let i = 0; i < row.length; i++) {
     const e = row[i]!;
     if (!e.alive) continue;
+    // The tribal self-buffs, read from the line as it stands. They land BEFORE
+    // the unit swings, so they come first here too - `engine/resolver.ts`'s
+    // `act` queues them ahead of the attack, and a projection that added them
+    // afterwards would show a number the swing never had.
+    if (e.traits.includes('kindle')) {
+      e.bonusPower += KINDLE_POWER * adjacentKin(projected, e, 'same');
+    }
+    if (e.traits.includes('banner')) {
+      e.bonusPower += BANNER_POWER * adjacentKin(projected, e, 'different');
+    }
+    // Chorus, which hands Power to both neighbours of its own race. The left
+    // one has already acted by then, so its share is Power to hit back with on
+    // the enemy's turn - which is exactly what this projection is read for.
+    if (e.traits.includes('chorus')) {
+      for (const ally of adjacentKinOf(projected, e, 'same')) ally.bonusPower += CHORUS_POWER;
+    }
     const right = row[i + 1];
     if (right === undefined || !right.alive) continue;
     if (e.traits.includes('relay')) right.bonusPower += RELAY;

@@ -61,6 +61,7 @@ import {
 import {
   type Beat,
   type BoardView,
+  type BuffSource,
   type EntityView,
   type SigilTraitsOf,
   cardEntityView,
@@ -760,12 +761,18 @@ export function createFightScreen(hooks: FightHooks = {}): FightScreen {
         break;
       }
       case 'buff': {
-        const from =
-          beat.source.via === 'relay'
-            ? `<b>${nameOf(beat.source.sourceUid ?? -1)}</b>'s Relay sends`
-            : beat.source.via === 'wake'
-              ? `<b>${nameOf(beat.uid)}</b>'s Wake answers a death with`
-              : 'a buff of';
+        // One branch per `BuffSource['via']`. A `via` added to that union and
+        // not to this record does not compile, which is what stops a new trait
+        // from being narrated as the generic "a buff of" by default.
+        const phrases: Readonly<Record<BuffSource['via'], string>> = {
+          relay: `<b>${nameOf(beat.source.sourceUid ?? -1)}</b>'s Relay sends`,
+          wake: `<b>${nameOf(beat.uid)}</b>'s Wake answers a death with`,
+          chorus: `<b>${nameOf(beat.source.sourceUid ?? -1)}</b>'s Chorus sings`,
+          kindle: `<b>${nameOf(beat.uid)}</b>'s Kindle takes`,
+          banner: `<b>${nameOf(beat.uid)}</b>'s Banner takes`,
+          unknown: 'a buff of',
+        };
+        const from = phrases[beat.source.via];
         logLine(
           `${from} <b>+${beat.amount} Power</b> to <b>${nameOf(beat.uid)}</b> for this turn.`,
           'is-buff',

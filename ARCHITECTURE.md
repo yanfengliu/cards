@@ -85,13 +85,19 @@ Five properties this buys, each of which is a bug class it forecloses:
 
 **Guard the loop.** A cap of some thousands of iterations that throws with the full queue trace. A hang is strictly worse than a crash: a crash names its cause, a hang produces a bug report saying "it froze."
 
-### The verbs, and the one added since the vocabulary was frozen
+### The verbs, and the two added since the vocabulary was frozen
 
-Point 8 of the delegation plan below freezes the effect vocabulary and makes adding a verb a coordinator decision, never a worker's. The `Effect` union in `src/engine/resolver.ts` is that vocabulary: `act`, `attack`, `afterAct`, `gainPower`, `damageOne`, `damageAll`, `buffAll`, `equip` — and `scorch`.
+Point 8 of the delegation plan below freezes the effect vocabulary and makes adding a verb a coordinator decision, never a worker's. The `Effect` union in `src/engine/resolver.ts` is that vocabulary: `act`, `attack`, `afterAct`, `gainPower`, `damageOne`, `damageAll`, `buffAll`, `equip` — and `scorch` and `tribePower`.
 
 **`scorch` was authorised by the coordinator as part of the classes unit,** in the assignment that produced it, and it is recorded here because a verb that arrived without this line looks exactly like one a worker added on its own. It is the Mage's rider: after the hero's swing, every enemy unit takes a flat amount less its Armour, as spell damage. It shares `damageAll`'s loop rather than copying it, so "one effect, no target-selection rule, units and not heroes" holds for both by construction; it is a separate `kind` because it differs in one line — a spell cast into an empty line fizzles, a rider with nothing to burn says nothing.
 
-The Ranger's Volley needed no verb. It is `act` spawning `VOLLEY_SWINGS` `attack` effects instead of one, which is why each swing picks its own target, draws its own retaliation, and has the state-based checkpoint run before the next.
+**`tribePower` was authorised by the coordinator as part of the tribes unit,** in the assignment that produced it, and is recorded here for the same reason. It is the tribal count: the acting entity gains `per` Power for each adjacent allied unit whose race matches its own (`match: 'same'`, which is Kindle) or does not (`match: 'different'`, which is Banner). It is queued by `act` *ahead of* the swing rather than behind it, because `attack` reads `power()` at the moment it applies and a buff queued behind the swing arrives after the blow it was meant to carry — which is exactly the mistake a trigger on `acted` would have made.
+
+Its whole reach into the board is `adjacentKinOf` in `src/engine/state.ts`, which returns at most `MOST_ADJACENT` entities and never a hero. That is `docs/design/game.md`'s "every cascade trait references neighbours, never totals" made structural: a trait that counts has a ceiling nobody controls, and this board has no fixed width to bound one. Two gates hold it — the same trait fought at 2 and at 20 neighbours must grant the same number, and `src/engine/` may compare two races in exactly one function — both in `test/tribes.test.ts`.
+
+The elves' Chorus needed no verb, and neither did the Ranger's Volley. Chorus is Relay's mechanism with a race test and two recipients: a trigger on `afterActed` pushing `gainPower` at each adjacent ally of its own race. Volley is `act` spawning `VOLLEY_SWINGS` `attack` effects instead of one, which is why each swing picks its own target, draws its own retaliation, and has the state-based checkpoint run before the next.
+
+**A race is not in `hashFight`'s canonical form, and that is deliberate.** A tribe is a function of `cardId`, which the canonical form already carries, and unlike a piece of equipment's two numbers it is identity rather than a tuned value: a rebalanced card keeps its id and a redesigned one gets a new one, so changing a card's race mints a new id. Every hash recorded before tribes existed still reproduces.
 
 ### An act that ended the fight still finishes
 
