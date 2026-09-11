@@ -41,6 +41,13 @@ export type IconName =
   | 'wake'
   | 'volley'
   | 'scorch'
+  // The three tribal traits, bound by `glossary.ts` like the first three. Each
+  // is about who is standing next to you, so none of them is a picture of the
+  // race it is flavoured for: Kindle and Banner are on cards of every race the
+  // player fields, and the icon has to mean the same thing on all of them.
+  | 'kindle'
+  | 'chorus'
+  | 'banner'
   // The classes. One per `ClassId` in `content/classes.ts`; `class-terms.ts`
   // binds them, and the hero plate wears its class's as a crest.
   | 'knight'
@@ -161,6 +168,43 @@ const ICONS: Readonly<Record<IconName, IconDef>> = {
       ' M12 19.6 C13.9 19.6 15.2 18.3 15.2 16.5 C15.2 14.9 13.9 13.9 13.2 12.6' +
       ' C12.8 13.9 12.2 14.5 11.5 14.9 C11.1 13.9 11 13.1 11.2 12.2 C9.9 13.4 8.8 14.7' +
       ' 8.8 16.5 C8.8 18.3 10.1 19.6 12 19.6 Z',
+  },
+
+  // ---- the three tribal traits. Silhouettes chosen to be told apart from the
+  // five above at eleven pixels: a round cluster, a double-ended arrow, and a
+  // flag on a pole share no outline with a shield, an arrow, a rising arrow, a
+  // pair of arrows or a flame.
+
+  // Three rings in a trefoil: your own kind, clustered. Deliberately not a
+  // flame - `scorch` is a lone flame and `rest` is a campfire, and a third
+  // fire would be three fires at eleven pixels.
+  kindle: {
+    shape: 'three rings in a trefoil',
+    fillRule: 'evenodd',
+    d:
+      'M7.4 6.6 a4.6 4.6 0 1 0 9.2 0 a4.6 4.6 0 1 0 -9.2 0 Z' +
+      ' M9.7 6.6 a2.3 2.3 0 1 0 4.6 0 a2.3 2.3 0 1 0 -4.6 0 Z' +
+      ' M2.6 15.6 a4.6 4.6 0 1 0 9.2 0 a4.6 4.6 0 1 0 -9.2 0 Z' +
+      ' M4.9 15.6 a2.3 2.3 0 1 0 4.6 0 a2.3 2.3 0 1 0 -4.6 0 Z' +
+      ' M12.2 15.6 a4.6 4.6 0 1 0 9.2 0 a4.6 4.6 0 1 0 -9.2 0 Z' +
+      ' M14.5 15.6 a2.3 2.3 0 1 0 4.6 0 a2.3 2.3 0 1 0 -4.6 0 Z',
+  },
+  // Relay's arrow, doubled and pointed both ways: Relay hands Power to the
+  // right, Chorus hands it to both sides. The relationship between the two
+  // shapes is the relationship between the two rules.
+  chorus: {
+    shape: 'two arrows flying apart, left and right',
+    fillRule: 'nonzero',
+    d:
+      'M12.8 9.4 H18 V5.6 L23 12 L18 18.4 V14.6 H12.8 Z' +
+      ' M11.2 9.4 H6 V5.6 L1 12 L6 18.4 V14.6 H11.2 Z',
+  },
+  // A pennon on a staff. The most heraldic shape in the set, for the trait
+  // that pays a card for standing between races rather than among its own.
+  banner: {
+    shape: 'a swallow-tailed pennon on a staff',
+    fillRule: 'nonzero',
+    d: 'M3 1.6 H5.4 V22.4 H3 Z M5.4 3 H21.4 L16.9 7.6 L21.4 12.2 H5.4 Z',
   },
 
   // ---- the classes, worn as the hero plate's crest and shown on the class

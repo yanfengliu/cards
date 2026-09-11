@@ -17,14 +17,15 @@
 // at all: they are absent from `PLAYER_DECK`, so no measured number depends on
 // them yet, and what they cost is the balance node's question.
 
-import type {
-  CardPool,
-  CastableCard,
-  EquipmentCard,
-  HeroSpec,
-  SpellCard,
-  Trait,
-  UnitCard,
+import {
+  type CardPool,
+  type CastableCard,
+  type EquipmentCard,
+  type HeroSpec,
+  type SpellCard,
+  type Trait,
+  type UnitCard,
+  TRIBAL_TRAITS,
 } from '../engine/state.ts';
 
 export const PLAYER_CARDS: readonly UnitCard[] = [
@@ -62,6 +63,34 @@ export const PLAYER_CARDS: readonly UnitCard[] = [
   { id: 'u_veteran', name: 'Dwarf Veteran', cost: 2, power: 3, health: 2, armour: 0, tribe: 'dwarf', traits: ['wake'] },
   { id: 'u_thane', name: 'Dwarf Thane', cost: 3, power: 4, health: 4, armour: 1, tribe: 'dwarf', traits: [] },
   { id: 'u_bulwark', name: 'Dwarf Bulwark', cost: 3, power: 1, health: 7, armour: 2, tribe: 'dwarf', traits: ['guard'] },
+
+  // The six that arrived with tribes: two per tribal trait, one cheap and one
+  // dear, so a run can commit to a race early or late. `docs/design/game.md`,
+  // "Class sets the pool; races appear across all of it", is why all six sit in
+  // all three class pools rather than one per class - tribal identity is a
+  // direction the player commits to mid-run, not something the class hands out.
+  //
+  // Every number is a starting guess written against a shipped card of the same
+  // cost, and none has been tuned - `docs/policies/local-rules.md`: a
+  // measurement saying one of these is weak is information for the player, not
+  // a licence to re-cost it.
+  //
+  //   - **Kindle** and **Banner** are 0..+2 on the body's own Power, so both
+  //     cheap bodies are the Hornblower's 1/4 at 2 energy: it hands an
+  //     unconditional +2 to its right, these keep 0..+2 for themselves.
+  //   - The Runesmith is the Captain's 3/4/Armour 1 at one less printed Power,
+  //     because Kindle can put its +2 on the body that swings where the
+  //     Captain's Relay must hand it away.
+  //   - The Elf Lord is the design's own example card - "an elf lord might
+  //     Relay to every elf beside it" - on the Longbow's 2/5 without Volley.
+  //   - The Marshal is 3/4 at 3 energy, reaching the Champion's printed 5 only
+  //     with two non-humans beside it. The Champion pays nothing for its 5.
+  { id: 'u_kindler', name: 'Dwarf Kindler', cost: 2, power: 1, health: 4, armour: 0, tribe: 'dwarf', traits: ['kindle'] },
+  { id: 'u_runesmith', name: 'Dwarf Runesmith', cost: 3, power: 2, health: 4, armour: 1, tribe: 'dwarf', traits: ['kindle'] },
+  { id: 'u_songkeeper', name: 'Elf Songkeeper', cost: 2, power: 1, health: 4, armour: 0, tribe: 'elf', traits: ['chorus'] },
+  { id: 'u_elflord', name: 'Elf Lord', cost: 3, power: 2, health: 5, armour: 0, tribe: 'elf', traits: ['chorus'] },
+  { id: 'u_bannerman', name: 'Human Bannerman', cost: 2, power: 1, health: 4, armour: 0, tribe: 'human', traits: ['banner'] },
+  { id: 'u_marshal', name: 'Human Marshal', cost: 3, power: 3, health: 4, armour: 0, tribe: 'human', traits: ['banner'] },
 ];
 
 export const ENEMY_CARDS: readonly UnitCard[] = [
@@ -74,11 +103,14 @@ export const ENEMY_CARDS: readonly UnitCard[] = [
 /**
  * The negative control for the whole measurement.
  *
- * The same cards with every trait that reads a neighbour - Relay and Wake -
- * removed. Guard stays, because Guard does not care where it stands, and so do
+ * The same cards with every trait that reads a neighbour removed: Relay, Wake
+ * and every tribal trait, the last spliced in from `TRIBAL_TRAITS` rather than
+ * retyped, so a tribal trait added to the engine joins the control in the same
+ * edit. Guard stays, because Guard does not care where it stands, and so do
  * Volley and Scorch: neither reads a neighbour, so neither is a cascade trait.
  * Only the eighteen cards of `PLAYER_DECK` are ever measured, and none of them
- * carries either.
+ * carries any of them - so the six tribal cards changed no measured number by
+ * arriving here.
  *
  * If the optimal-placement bot still beats the random one by as much on this
  * set, the measurement is picking up something other than the cascade and the
@@ -89,7 +121,7 @@ export const ENEMY_CARDS: readonly UnitCard[] = [
  * only Guard emptied `legalTargets` and made that whole side untargetable, for
  * two cheap cards on turn one.
  */
-const POSITIONAL: readonly Trait[] = ['relay', 'wake'];
+const POSITIONAL: readonly Trait[] = ['relay', 'wake', ...TRIBAL_TRAITS];
 
 export const PLAYER_CARDS_NO_CASCADE: readonly UnitCard[] = PLAYER_CARDS.map((c) => ({
   ...c,

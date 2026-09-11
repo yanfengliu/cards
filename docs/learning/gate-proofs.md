@@ -122,6 +122,201 @@ Digests after the last revert: `src/run/unlocks.ts` `70346e06…`, `src/run/run.
 M1 and M11 are the pair worth reading together. M1 is the new input breaking the keystone forwards; M11 is it breaking every hash recorded before it existed. The digest carries the unlock clause **only when the run had a set**, which is what lets both be true at once — `f5abcf3d2118a2b9` and `94ff2460abecaf26`, the two goldens' pre-class hashes, still reproduce byte for byte.
 
 M5 is the one the design asked for. "No persistent power" is a sentence in `docs/design/game.md`; the gate that carries it walks `Object.keys(RUN_CONTENT)` off the object rather than a list written in the test, so a field added to `RunContent` tomorrow is inside the claim from the day it exists.
+## 2026-09-10 — the report's word and the API's value: nine mutations, and a wrong answer returned quietly
+
+Taken on `main` in the primary checkout, uncommitted, against `299fede`; `e7dc895` landed in the same tree while this ran and changed docs only, so `git diff 299fede e7dc895 -- src/ test/ tools/` is empty and every mutation below is a mutation of both revisions' bytes. The suite is **243 tests** here, 236 at the base — `test/runbots.test.ts` is the seven new ones. Nine mutations, each applied to the shipped tree, run against the shipped command, reverted, and the restored bytes compared with the originals before anything was printed. All nine came back red for their own reason. Digests after the last revert: `src/sim/runbots.ts` `ee5c73d0…`, `src/sim/runmeasure.ts` `f6d2ade4…`, `test/runbots.test.ts` `c300e818…`. The whole list was re-run against these exact bytes after the test file's header was extended — a review bound to bytes that no longer exist is not a review of what shipped.
+
+The runner is `.probe/mutate-styles.mjs`, rebuilt under the ignored scratch path with the guards every previous round arrived at: the anchor is normalised to the file's own line ending, must match exactly once or the mutation is refused rather than run, the replacement may not be a no-op, the file is restored and its bytes compared before anything is printed, and a red is credited only when the gate's **own words** appear in the output. That last guard fired once here: M9's first `expect` named the `number` row of a five-row table and the test fails on the `undefined` row above it, so a real red for the right reason was reported as `RED-BUT-NOT-ITS-OWN` until the expected sentence was corrected. The assertion's wording was improved in the same pass (`was a undefined` → `was of type undefined`), which is the readable half of the same fix.
+
+### The defect, reproduced before it was gated
+
+`docs/learning/defect-register.md` holds the incident. The two probes that reproduce it are `.probe/search-probe.mjs` and `.probe/route-probe.mjs`, both `.mjs` on purpose — the compiler is not in the room for the caller that found this.
+
+With `placementFor`'s `default:` arm deleted, the probe that started it all:
+
+> `makeRunAgent returned; agent.placement is undefined` / `TypeError: policy is not a function`
+
+With `makeRunAgent`'s old ternary restored, the route dial, at seed 5 with placement held at `right`:
+
+> `route "greedy" -> 58794c0c3f1ae76d` / `route "random" -> 334776f7879e8dba` / `route "greedy-ish" -> 334776f7879e8dba`
+
+**The route half never crashed, and that is why the gate covers the class rather than the word "search".** A misspelt route was not an error, it was the random router: a complete, plausible, wrong measurement under the label the caller asked for.
+
+### The nine
+
+| # | mutation | site | command | the failure |
+|---|---|---|---|---|
+| M1 | `placementFor`'s whole `default:` arm deleted — the shipped state before today | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *placement "search" was accepted rather than refused; nothing was thrown* — exit 1, two tests red |
+| M2 | `makeRunAgent` back to `opts.route === 'greedy' ? GREEDY_CHOICES : randomAgentChoices(...)` | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *route "greedy-ish" was accepted rather than refused; nothing was thrown* |
+| M3 | a fourth `PLACEMENT_STYLES` member, `'left'`, with no `case` | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *runbots: makeRunAgent was given placement "left" … which is not a placement style this repo has*, thrown out of "every PLACEMENT_STYLES member builds a policy that can play a fight through"; **and** `npm run typecheck` exit 2: `src/sim/runbots.ts(114,13): error TS2322: Type '"left"' is not assignable to type 'never'.` |
+| M4 | a third `ROUTE_STYLES` member, `'kin'`, with no `case` | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *…was given route "kin"…* out of "every ROUTE_STYLES member builds an agent that answers a whole run"; **and** `npm run typecheck` exit 2: `error TS2322: Type '"kin"' is not assignable to type 'never'.` |
+| M5 | `armLabel` prints the old word: `'lookahead'` labelled `search` | `src/sim/runmeasure.ts` | `node --test test/runbots.test.ts` | *the arm label "greedy route / search placement" contains "search", which is not a style makeRunAgent accepts* |
+| M6 | `runArm` given back a hand-written name, ignoring its own styles | `src/sim/runmeasure.ts` | `node --test test/runbots.test.ts` | *an arm built from ("greedy", "lookahead") named itself "greedy route / search placement"* |
+| M7 | the refusal stops naming the accepted set | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *the refusal does not offer "lookahead", which is a style makeRunAgent accepts* — red on both dials' tests |
+| M8 | `String(got)` simplified to `` `${got}` `` | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *the refusal lost the value Symbol(lookahead): Cannot convert a Symbol value to a string* |
+| M9 | the refusal drops its `typeof` clause | `src/sim/runbots.ts` | `node --test test/runbots.test.ts` | *the refusal does not say the value was of type undefined* |
+
+### What the wording of two of them is doing
+
+**M8 is the reason `String(...)` is in the code rather than plain interpolation.** Under the mutation the error thrown is not the refusal at all — it is `TypeError: Cannot convert a Symbol value to a string`, raised while the refusal was being built. An error message that throws while being assembled reports nothing about the input that caused it, which is the exact failure mode this whole entry is about, one layer up.
+
+**M5 and M6 are two different ways for the label to lie and neither covers the other.** M5 keeps `runArm`'s derivation and corrupts the formatter; M6 keeps the formatter and stops `runArm` using it. The label test is written as "every word in the label that is not boilerplate is a value `makeRunAgent` accepts" rather than by rebuilding the format string, because a check built from the same expression as the thing it checks proves only that the code agrees with itself — and `greedy route / search placement` would have satisfied a check that rebuilt the format.
+
+### Bounds, stated rather than implied
+
+- The seven tests exercise one fight per placement style and one shipped run per route style, at the seeds named in the file. A style that works on those seeds and fails on others is not covered.
+- Their subject is a list, so `docs/policies/local-rules.md`'s "a gate whose subject is a list reads that list" applies and is satisfied at the strongest binding available here: the arrays are not retyped into the tests, and the unions are `(typeof ARRAY)[number]`, so a member added to an array *is* a member of the union and its missing `case` fails `npm run typecheck`. Per that rule's Bound the two supporting assertions are present — each loop asserts its array is non-empty, and the label test asserts it checked all six pairs, so a sweep over nothing cannot report as a pass.
+- They gate the *names* and the *refusals*, never a number. Whether an arm's win rate is right stays `npm run verify:run`'s question.
+- They prove `runArm` gives a caller no place to put a hand-written label — the parameter is gone. They do **not** prove some other file will not invent one; nothing checks that, and nothing in the tree does it today.
+- `src/sim/measure.ts` keeps its prose arm names (`A optimal placement`, `C append right`). Those are bot names in a fight report, not values any API takes, and they are outside this gate on purpose.
+
+### What did not move
+
+`npm run verify` is byte-identical to `299fede`'s: A optimal 66.25%, B random 56.50%, gap 9.75 pp (CI 5.61..13.89). `npm run verify:run` diffs against `299fede`'s in **eleven lines, every one of them a label**, plus `Elapsed`: the four arms still read 178/200, 99/200, 154/200 and 65/200, the route table still reads 39.50 pp (CI 31.53..47.47) and 44.50 pp (CI 35.75..53.25), and every count, rate, interval and mean in all six tables is unchanged. That is the evidence that this round renamed what a reader sees and moved nothing that is measured.
+
+## 2026-09-10 — closing the tribes review: eleven mutations, and a tripwire that was designed for exactly this and did not fire
+
+Taken on branch `worktree-agent-aacf45b44fe4cb1d7`, cut from `8efbbb2` with `main` at `5f51827` merged in; the suite is **236 tests** here, 230 at `8efbbb2`. Eleven mutations, each applied to the shipped tree, run against the shipped command, reverted, and the restored bytes compared with the originals before anything was printed. All eleven came back red for their own reason. The runner is `.probe/mutate.mjs`, rebuilt under the ignored scratch path with the previous round's guards — anchors normalised to the file's own line ending, exactly one match or a refusal, no-op replacements refused, and the gate's own words required in the output before a red is credited.
+
+That last guard earned itself immediately. M3's first draft used `leftNeighbour`, which `src/engine/resolver.ts` does not import, so six tests went red on `ReferenceError: leftNeighbour is not defined` — and with a loose `expect` string the runner called it red for its own reason. Tightening `expect` to the assertion's own sentence turned it into the `RED-BUT-NOT-ITS-OWN` it was.
+
+**The finding this round exists for: a tripwire that named this exact event did not fire.** `ARCHITECTURE.md` said `test/resolver-order.test.ts` "pins the *reason*, so the day a second `afterActed` trait is written the test goes red and its author has to gate the order". Chorus was written into that branch at `8efbbb2` and nothing went red. The test was not changed, and it was never able to do what the document claimed: it asserted that a fixture body carrying `['relay', 'wake']` produced one effect per event. A *third* trait keyed to `afterActed` does not appear on that body, so its block never ran for that fixture and the assertion held. The tripwire could only have fired if the author of the new trait had also added it to that fixture's hand-written trait list — the one edit the author has no reason to make. **A gate built from a hand-written list of the thing it checks can only see what somebody remembered to write into it.** The replacement reads the `afterActed` branch off the AST and pins the trait names *in order*, so it cannot be blind to a trait that exists.
+
+### The eleven
+
+| # | Mutation | File | Gate that went red |
+|---|---|---|---|
+| 1 | the Chorus block moved above Relay's in `triggersFor` | `src/engine/resolver.ts` | a body carrying Relay and Chorus fires Relay first; every trait keying on afterActed is pinned |
+| 2 | a third trait keyed to `afterActed` (`guard` added to the Chorus condition) | `src/engine/resolver.ts` | every trait keying on afterActed is pinned |
+| 3 | Chorus given a second target list of adjacent living heroes | `src/engine/resolver.ts` | a Chorus beside the hero sings to nobody |
+| 4 | a new engine file `src/engine/tribecheck.ts` holding the whole-board count | `src/engine/tribecheck.ts` | the engine compares two races in exactly one place |
+| 5 | `tribalOnAct` moved inside the `swingsOf` loop in `act` | `src/engine/resolver.ts` | a tribal count is spawned once per act |
+| 6 | Chorus **moved** from `afterActed` to `acted` | `src/engine/resolver.ts` | a Chorus that died to its own swing's retaliation sings to nobody |
+| 7 | the walk's first running total, 199 → 198 | `docs/design/game.md` | Chorus, walked by hand |
+| 8 | the walk's second running total, 198 → 197 | `docs/design/game.md` | Chorus, walked by hand |
+| 8b | Chorus reaches only its left neighbour (`.slice(0, 1)`) | `src/engine/resolver.ts` | Chorus, walked by hand |
+| 9 | `u_songkeeper` changed from elf to human, id kept | `src/content/cards.ts` | a card id names a race |
+| 10 | a new pool card with no line in `RACE_OF` | `src/content/cards.ts` | a card id names a race |
+
+### What each red proved, where the wording matters
+
+**M1 and M2** are the two halves of the replaced tripwire. M1 also goes red on the behavioural fixture, which is the point of having both: the AST check says *which* traits are in the branch and in what order, and the fixture says what a body carrying two of them actually emits — `[right +2 Relay, left +2 Chorus, right +2 Chorus]`. Reachable with shipped content: `si_relay` grants Relay to a card that does not print it, and the two Chorus cards do not print Relay.
+
+**M3 was red in exactly one test, and that is the finding.** Before this round no test anywhere observed a hero's `bonusPower` after a tribal trait fired beside it — the existing hero gates all fight the *count* (what a trait sees when it looks at a hero), which is `adjacentKinOf`'s guard, not `adjacentAllies`' `isHero` skip. The board is the most ordinary one there is: the rightmost unit's right-hand neighbour is always the hero.
+
+**M4's first run left `src/engine/tribecheck.ts` behind**, because the runner shelled out to delete it through a `node -e` string that Windows path separators broke. Recorded because the file sitting in the tree would have been read as a gate failure on the next run rather than as a runner failure. Fixed by calling `rmSync` directly.
+
+**M6 had to MOVE the block, not duplicate it.** The first draft added an `acted`-keyed Chorus block alongside the `afterActed` one, which doubles every grant and turns six tests red for the wrong reason. Moved properly, it is red in exactly one test — the new fragile-singer fixture — which reproduces the reviewer's claim that all 230 tests could not tell `acted` from `afterActed`. Death is the only board that separates them: a body that dies to the retaliation its own swing drew never reaches `afterAct`, and every Chorus fixture before this one was fought into a 0-Power Guard so that nothing in the line dies.
+
+**M7 and M8 fire the document-arithmetic half; M8b fires the engine half.** They are two different bindings of the same three numbers and neither covers the other: M7 keeps the engine correct and breaks the walk's own subtraction chain, M8b keeps the document correct and moves what the engine deals per step. The running-total assertion is placed before the `bonusPower` assertions in that test precisely so M8b reaches it.
+
+**M9 is the one the canonical form does not defend against.** Equipment's two numbers are in `hashFight`'s canonical form because they are tuned values; a race is not, because it is recoverable from `cardId` — which is only true while "a card that changes race gets a new id" holds. At `8efbbb2` that rule had no gate: M9 passed `npm run gates`, `npm run verify` and `npm run verify:run` while changing what Chorus does in every fight `u_songkeeper` appears in. M10 is its sibling: a new card with no pinned race.
+
+### Bounds, stated rather than implied
+
+- The AST tripwire sees only trait tests written as `…includes('literal')` inside the `afterActed` arm of `triggersFor`. A trait read through a `Set`, a lookup table, or a variable is invisible to it, and the behavioural fixture is what covers the pair that exists today.
+- The one-comparison-site gate now walks `src/engine/` off the filesystem rather than from a list of six names, so a seventh file is covered. It still sees only `===`/`!==`/`==`/`!=` against a property named `tribe`, still only under `src/engine/`, and still nothing about how a comparison written some other way would read.
+- `RACE_OF` pins races, not numbers, and covers the shipped unit pools plus the `_nc` control derived from the player half. Spells and equipment carry no race and are outside it.
+- The Volley/tribal fixture is not reachable from shipped content: no tribal card prints Volley and no Volley card prints a tribal trait. It is written for the day a Volley sigil or a Volley tribal card lands.
+
+### What did not move
+
+`npm run verify` is byte-identical to `8efbbb2`'s, line for line apart from `Elapsed`: 66.25% optimal against 56.50% random, gap 9.75 pp (CI 5.61..13.89). That is the evidence that this round is gates and comments and nothing else — no constant, card, weight or deck was touched, and the only `src/` edits are comment text in `resolver.ts` and `state.ts`.
+
+## 2026-09-10 — tribes: sixteen mutations, two that came back green and were right to, and a claim withdrawn because nothing could falsify it
+
+Taken on branch `worktree-agent-a8d4d25fe3d5ac7c5`, cut from `dcf2cdf`; the suite is **230 tests** here, 218 at the base. Sixteen mutations, each applied to the shipped tree, run against the shipped command, reverted, and the restored bytes compared with the originals before anything was printed. All sixteen came back red for their own reason on the final run.
+
+The runner is `.probe/mutate.mjs`, under the ignored scratch path. It normalises each anchor to the file's own line ending before matching, refuses an anchor that matches zero times or more than once, refuses a replacement equal to its anchor, and matches the gate's own words rather than merely a non-zero exit — a red for some other reason is reported as `RED-BUT-NOT-ITS-OWN`, which is how two of the mutations below were caught being wrong.
+
+**Three of the sixteen edit `docs/design/game.md` rather than code.** The three walked examples parse their numbers out of the document through a `stated()` helper, so the document is the source and the engine is what is checked against it. That is the shape `test/hero-attacks.test.ts` arrived at after its own version of this gate was found to be one-way, and it is copied here deliberately: a walked example the test transcribes is a claim about a copy of the example.
+
+### The sixteen
+
+| # | Mutation | File | Gate that went red |
+|---|---|---|---|
+| 1 | Kindle counts strangers instead of kin (`'same'` → `'different'` in `tribalOnAct`) | `src/engine/resolver.ts` | Kindle, walked by hand |
+| 2 | Chorus reaches only its right-hand neighbour (`.slice(-1)` on the kin list) | `src/engine/resolver.ts` | Chorus, walked by hand |
+| 3 | `BANNER_POWER = 0` | `src/engine/resolver.ts` | Banner, walked by hand |
+| 4 | a hero counts as a neighbour (`!n.isHero` removed from `adjacentAllies`) | `src/engine/state.ts` | a hero is not a race |
+| 5 | adjacency becomes a count of the whole line (`ADJACENT` replaced by `state.board[e.side]`) | `src/engine/state.ts` | a tribal grant does not move when the line grows |
+| 6 | Chorus grants `CHORUS_POWER + ally.bonusPower` — "Power equal to mine", the wording the design says not to write | `src/engine/resolver.ts` | Chorus does not compound |
+| 7 | Relay quietly starts reading a race (`&& r.tribe !== e.tribe`) | `src/engine/resolver.ts` | exactly the traits in TRIBAL_TRAITS notice a neighbour's race |
+| 8 | a second race comparison, in `adjacentKin` rather than `adjacentKinOf` | `src/engine/state.ts` | the engine compares two races in exactly one place |
+| 9 | the odds stop projecting the tribal Power | `src/render/odds.ts` | the tribal Power shown before commit is the Power that lands |
+| 10 | a corpse still standing in the row counts as kin (`!n.alive` removed) | `src/engine/state.ts` | a dead neighbour is not kin |
+| 11 | the Knight loses both cards that print Chorus, keeping its other elves | `src/content/classes.ts` | class sets the pool; races appear across all of it |
+| 12 | the document restates what Kindle swings at (**3** → **4**) | `docs/design/game.md` | Kindle, walked by hand |
+| 13 | the document restates what Chorus grants (**+2** → **+3**) | `docs/design/game.md` | Chorus, walked by hand |
+| 14 | the document renames the walked example's heading | `docs/design/game.md` | the section-name assertion, at module load |
+| 15 | the race note goes back to its 255-character first draft | `src/render/glossary.ts` | the summary line stays inside the two lines the panel's placement can afford |
+| 16 | the race note stops naming one of the traits that reads a race | `src/render/glossary.ts` | the sentence about races names every trait that reads one |
+
+Number 14 dies at import rather than inside a test, because the section is read at module load. That is a louder red, not a weaker one, and the runner matches the assertion's own message:
+
+> `AssertionError [ERR_ASSERTION]: docs/design/game.md has no "### A tribal line, walked by hand" section. The play example these gates walk was renamed or deleted; a rule with no walked example is not specified.`
+
+### The two that came back green, and what each one meant
+
+**A `TribalTrait` union member deleted came back GREEN, correctly.** The first draft of number 7 removed `'banner'` from the union and left `const TRIBAL: Readonly<Record<TribalTrait, true>>` alone. Node strips types, so `Object.keys(TRIBAL)` still held `'banner'` at runtime, `TRIBAL_TRAITS` was unchanged, and nothing behavioural moved. The mutation did not reproduce a defect, so a green was the right answer — and it names the bound on the type-level half of this: **the compiler catches a union and its record disagreeing, and cannot catch a trait that was never put in the union at all.** That second shape is what the behavioural gate is for, so the mutation was rewritten as it: Relay, a trait outside the union, quietly starts reading a race. It compiles cleanly and goes red.
+
+**A claim with no possible falsification came back GREEN, and was withdrawn rather than kept.** `src/engine/resolver.ts` said the tribal count is read inside `apply` "so the count is taken from the board as it stands when the effect comes off the queue - not from the board as it stood when something decided to queue it", and `test/tribes.test.ts` carried a test claiming to gate it. The mutation froze the count at the spawn site — three coordinated edits, a `frozen?: number` on the effect — and the whole suite stayed green. It had to: `act` queues `tribePower` immediately ahead of the swing, so the spawn site and `apply` read the same board and no fixture can tell them apart. The comment now says so in the file, the test was rewritten around the `alive` guard, which *is* falsifiable (number 10), and the design choice is recorded as written on the general rule rather than on evidence.
+
+### What the two structural gates are bounded by
+
+**"A tribal grant does not move when the line grows"** sweeps widths 3, 5, 11 and 21, both neighbour-race polarities, for every trait in `TRIBAL_TRAITS`. Two widths would not separate a constant from something that grows and then saturates; four do. It also asserts that at least one arm per trait paid something, because every arm reading zero is what a sweep measuring silence looks like. It says nothing about a trait that scales with something other than board width.
+
+**"The engine compares two races in exactly one place"** walks the AST of the six files under `src/engine/` and requires every `===`/`!==`/`==`/`!=` with a `.tribe` on either side to sit inside `adjacentKinOf`. It reads the AST rather than the text for `tools/gates/scan.ts`'s reason — this repo's comments contain the literal strings the gates look for. It asserts it found at least one such comparison, so an engine that compares no races cannot report as one that compares them in one place. A comparison written some other way — a `switch`, a `Map` lookup, an equality helper — is invisible to it, and the behavioural gates are what cover that.
+
+### One regression this round, caught by a probe and not by a test
+
+`RACE_RULE`'s first draft was 255 characters. It wrapped to a third line in the hover panel's `xp__note` paragraph and took the panel from **266px to 280px** against a 270px band, with the area of the player's row it covered going from **2,341px² to 11,623px²**. `npm run probe:ui hover 7 even light` said so; `npm test` did not, because the existing length gate read `xp__gloss` and the paragraph that grew was `xp__note`. The sentence was shortened to 179 characters — panel back to 266px, coverage back to 2,341px² — and the gate extended to both paragraphs, with an added assertion that neither is empty, since a panel that stopped emitting one would otherwise read as a panel whose paragraphs are short enough. Mutation 15 is the red-proof for the extension.
+## 2026-09-10 — a malformed work plan goes red at commit: sixteen mutations, and a gate that has to work without the repo it borrows its rules from
+
+Taken on branch `worktree-agent-ae829ffbddee3454e`, cut from `dcf2cdf`; the suite is **218 tests** here, the same as at the base, because this round adds no test — the gate's evidence is its own probe plus the sixteen mutations below. Each was applied to the shipped tree, run against the shipped command, reverted, and the file's digest read back. Every one came back the colour it was meant to be, which for two of them — M15 and M16, the cases where the fleet checkout is unusable — is green. No anchor was broken.
+
+The runner is `.probe/mutate-plans.mjs`, under the ignored scratch path, and it keeps `.probe/mutate.mjs`'s guards: the anchor is normalised to the file's own line ending, it must match exactly once, the replacement must not be a no-op, and the restored bytes are compared with the original before anything is printed. The line-ending guard is not decoration here — `tools/` is CRLF and `docs/work/` is LF, because `docs/work/.gitattributes` says `* -text`, so one runner writing `\n` anchors into both would have silently no-opped half the list.
+
+Digests after the last revert: `tools/gates/work-plans.ts` `86a28923…`, `package.json` `9945f761…`, `docs/work/9_sigils/plan.md` `db520f15…`. The whole list was re-run against these exact bytes after the gate's header argument was corrected — an earlier pass at `1c6e11c6…` is superseded, because a review bound to bytes that no longer exist is not a review of what shipped.
+
+### What the gate claims, and the bound in its own header
+
+`npm run gate:work-plans` claims: **every `plan.md` under `docs/work/` is one `work-docs.mjs create` would accept.** Status is one bare word from the six; `Owner`, `Created` and `Updated` are present and nonempty; the two dates name real days or carry the `Unknown (historical record; reason)` form; all six required `## ` sections exist with something under them; every unit folder is `<id>_<theme>` and holds a `plan.md`.
+
+Its bound, stated in the file header and worth repeating because it is where the next defect comes from: the gate says nothing about whether a plan is **true**. `Status: complete` on unfinished work passes. An `## Outcome` reading "Pending" on a closed unit passes. It does not check `registry.json` contiguity, the allocation lock, the reservation journal, the registry's Git history, or Git attributes — those are the allocator's, run in the primary checkout. And it does not check `reviews/<round>_<stage>.md`, because no review round exists in this repo yet and a rule with no inputs reports "did not run" as "passed"; the hole is named rather than covered.
+
+### The judgement the gate rests on, and the three mutations that test it
+
+The rules are **reimplemented** from `fleet/docs/work-docs.md` rather than shelled out to `node ../fleet/scripts/work-docs.mjs check`. The decisive reason is that a gate whose only implementation lives outside the repo degrades to a no-op the moment that outside thing is missing, and a skipped gate is indistinguishable from a passing one. `../fleet` in particular does not resolve from a worktree: this file's `ROOT` is the worktree root, so from `C:\…\cards\.claude\worktrees\agent-ae829ffbddee3454e` the path `../fleet` is `C:\…\cards\.claude\worktrees\fleet`, which does not exist, and nearly every commit here is made in a worktree. **That one spelling is fixable, and this round's own cross-check proves it** — a search up the ancestors finds `C:\…\github\fleet` from inside the worktree, which is how M14 through M16 were run at all. What no path search fixes is a fresh clone, a CI runner, or any machine with no `fleet/` on it: there a shell-out gate reports "fleet is not here" and skips, in the exact place the defect lives. With the rules here, the gate still runs and only the cross-check is skipped — which is what M13, M15 and M16 measure. Two supporting reasons: `checkWorkDocs` fails hard on a live allocation lock in the Git common directory, so a coordinator allocating unit 14 while a worker commits would turn the per-commit gate red for a reason unrelated to the code; and it replays `registry.json` through every revision that ever touched it, which is allocation identity, not plan format.
+
+The cost of reimplementing is drift, so drift is gated rather than promised. When a `fleet/` checkout is reachable — beside this repo or beside any ancestor of it, or named by `FLEET_DIR` — the gate imports fleet's own `validatePlan` and compares **verdicts** over 23 texts: the nine probe cases and the fourteen real plans. Verdicts and not source text, so a refactor upstream is not a failure and a rule change is. M14 is that check made to fire; M15 and M16 are the two ways it must decline to fire.
+
+M13 is the one that answers the objection directly. With `FLEET_DIR` pointing at a path that does not exist, a plan carrying `Status: complete, on branch worktree-agent-…` still exits 1. The gate is not a no-op without fleet — which is precisely what a shell-out would have been.
+
+| # | mutation | site | command | the failure |
+|---|---|---|---|---|
+| M1 | `Status: complete` → `Status: complete, on branch worktree-agent-a8f54ea252ca36f0b`, the first shape that blocked the allocator | `docs/work/9_sigils/plan.md` | `npm run gate:work-plans` | *docs/work/9_sigils/plan.md:3 says Status: "complete, on branch worktree-agent-a8f54ea252ca36f0b", which is not one of planned, active, blocked, complete, cancelled, legacy* — exit 1 |
+| M2 | `Status: complete` → `Status: implemented, on a branch`, the second shape | `docs/work/9_sigils/plan.md` | `npm run gate:work-plans` | *says Status: "implemented, on a branch", which is not one of …* — exit 1 |
+| M3 | `Status: complete` → `Status: implemented on 2026-09-09`, the third shape | `docs/work/9_sigils/plan.md` | `npm run gate:work-plans` | *says Status: "implemented on 2026-09-09", which is not one of …* — exit 1 |
+| M4 | the whole `## Scope` block deleted, heading and body | `docs/work/9_sigils/plan.md` | `npm run gate:work-plans` | *has no line reading exactly "## Scope"* — exit 1 |
+| M5 | the `## Scope` body deleted, the heading left standing | `docs/work/9_sigils/plan.md` | `npm run gate:work-plans` | *docs/work/9_sigils/plan.md:24 has nothing under "## Scope"* — exit 1 |
+| M6 | `Owner: ` → `Ownr: `, so the label is present and the metadata is not | `docs/work/9_sigils/plan.md` | `npm run gate:work-plans` | *has no "Owner: \<value\>" line with a value on it* — exit 1 |
+| M7 | `Updated: 2026-09-10` → `Updated: 2026-02-30`, an ISO-shaped date naming no real day | `docs/work/9_sigils/plan.md` | `npm run gate:work-plans` | *says Updated: "2026-02-30", which is neither an ISO date naming a real day nor "Unknown (historical record; \<reason\>)"* — exit 1 |
+| M8 | `plan.md` renamed away, leaving the allocated folder bare | `docs/work/9_sigils/` | `npm run gate:work-plans` | *docs/work/9_sigils holds no plan.md* — exit 1, over 13 plans instead of 14 |
+| M9 | `docs/work/scratch-notes/` created beside the units, holding a valid plan | `docs/work/` | `npm run gate:work-plans` | *docs/work/scratch-notes is not named \<id\>_\<theme\>* — exit 1, over 15 plans |
+| M10 | `} else if (!STATUSES.includes(status.value.trim())) {` → `} else if (false) {`, the status rule killed | `planProblems`, `tools/gates/work-plans.ts` | `npm run gate:work-plans` | *GATE BROKEN: on the probe case "status carries a branch name" the "status" rule fired 0 time(s), expected 1* — exit 2 |
+| M11 | the heading lookup clamped to line 0 when the heading is absent, so a missing `## <name>` reads as present | `planProblems`, `tools/gates/work-plans.ts` | `npm run gate:work-plans` | *GATE BROKEN: on the probe case "status is free text and two sections are gone" the "section" rule fired 0 time(s), expected 2* — exit 2 |
+| M12 | the probe's own anchor `'Status: planned'` → `'Status: PLANNED'`, so the case it builds would be the well-formed text | `probeCases`, `tools/gates/work-plans.ts` | `npm run gate:work-plans` | *GATE BROKEN: the probe anchor "Status: PLANNED" matched 0 time(s) in the well-formed plan; it must match exactly once, or the probe case it builds is a no-op that reads as a pass* — exit 2 |
+| M13 | M1's bad Status, with `FLEET_DIR=C:/nope/not/here` | `docs/work/9_sigils/plan.md` | `npm run gate:work-plans` | red for the plan, not for the missing fleet: *says Status: "complete, on branch …"* — exit 1 |
+| M14 | `FLEET_DIR` pointed at `export function validatePlan() {}`, a validator that accepts everything | `.probe/fleet-stub/` | `npm run gate:work-plans` | *GATE BROKEN: this gate and …work-docs-format.mjs disagree about probe case "status carries a branch name". This gate rejects it and fleet accepts it, so this gate has drifted stricter than the allocator it exists to protect* — exit 2, **on a clean tree** |
+| M15 | `FLEET_DIR` pointed at a `validatePlan` that throws on everything | `.probe/fleet-stub/` | `npm run gate:work-plans` | **green, deliberately**: *Fleet cross-check: skipped … rejected this gate's well-formed plan (stub rejects everything), so it cannot be used as an authority* — a fleet inconsistent with its own `renderPlan` is not a reason to block a commit here |
+| M16 | `FLEET_DIR` pointed at a module exporting no `validatePlan` | `.probe/fleet-stub/` | `npm run gate:work-plans` | **green, deliberately**: *skipped … exports no validatePlan function*, with the 14 plans still checked and every probe rule still fired |
+
+M10 and M11 are two different ways for the same rule to die, and they fail on different probe cases, which is the point of counting per rule rather than in total: M11 leaves the status rule firing, so a self-test that only summed violations would have found the expected total on the case it broke.
+
+M12 is the guard on the probe itself. The probe's malformed cases are built from the well-formed text by anchored edits, and an edit whose anchor stops matching would leave that case *identical to the control* — a probe case that can only pass. The 2026-09-10 class round lost eight of its first fifteen mutations to exactly that shape and caught them only because the runner asserted its anchors; the gate now makes the same assertion about its own probe, at the moment the case is built rather than at the moment it is run.
+
+M15 is the case that would be easiest to get wrong in the other direction. A borrowed validator is an instrument, and an instrument is checked before it is trusted: the gate first asks fleet's `validatePlan` to accept the well-formed control — which is fleet's own `renderPlan` output — and declines to use it as an authority when it does not. Without that check, a fleet that had broken itself would have turned every `cards` commit red.
 
 ## 2026-09-10 — sigils: eleven mutations, a check whose first draft could not fail, and a red that was a crash
 

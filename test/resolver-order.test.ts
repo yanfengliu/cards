@@ -214,18 +214,17 @@ test('trigger order is board index, not uid: a later-made unit standing left goe
   );
 });
 
-test('the two shipped triggers key on different events, so no unit fires both at once', () => {
-  // This is what is left of "inside one unit, traits fire in the source order of
-  // the blocks in triggersFor" now that Ward is gone. That tie-break used to be
-  // gated by a unit carrying Relay and Ward, both keyed to `afterActed`; the
-  // only two shipped traits left key on different events, so no fixture and no
-  // seam rule can make two shipped blocks answer one event, and the tie-break is
-  // currently unobservable. Recorded in docs/learning/gate-proofs.md.
+test('Relay and Wake key on different events, so one unit answers each with one effect', () => {
+  // The half of the old tripwire that was true: Relay and Wake do key on
+  // different events, and a unit carrying both gets exactly one effect out of
+  // each. What this test used to *also* claim - that it would go red the day a
+  // second `afterActed` trait was written - was never true of it, and Chorus
+  // proved so by landing in that branch with this test green. The claim moved
+  // to the AST check below, which reads the branch instead of a fixture's
+  // hand-written trait list. `docs/learning/gate-proofs.md` records the
+  // failure.
   //
-  // What this test does instead is pin the reason. A unit carrying both traits
-  // gets exactly one effect out of each event, never two out of one, so the day
-  // a second `afterActed` trait is written this goes red and whoever writes it
-  // has to gate the order it fires in.
+  // Mutation watched going red: Wake's block re-keyed to `afterActed`.
   const f = fixture();
   const both = f.add('player', card('test:relay+wake', 1, 5, 0, ['relay', 'wake']));
   const corpse = f.add('player', card('test:corpse', 0, 5, 0), 0);
@@ -249,6 +248,125 @@ test('the two shipped triggers key on different events, so no unit fires both at
     'died reaches Wake and nothing else',
   );
   assert.equal(both.bonusPower, 2, 'Wake, not Relay: the unit to my left died');
+});
+
+/**
+ * The traits whose blocks answer `afterActed` inside `triggersFor`, in the
+ * order those blocks are written. Relay grants to the right-hand neighbour;
+ * Chorus grants to each adjacent unit of its own race, left then right.
+ *
+ * Pinned as an ordered list rather than a set, because the order *is* the rule
+ * under test: `triggersFor`'s own header says moving a block moves the rule,
+ * and this is the list that says which way round the blocks stand.
+ */
+const AFTER_ACTED_TRAITS: readonly Trait[] = ['relay', 'chorus'];
+
+test('a body carrying Relay and Chorus fires Relay first, then Chorus left to right', () => {
+  // Reachable with shipped content: `si_relay` grants Relay to a card that does
+  // not print it, and `u_songkeeper` and `u_elflord` print Chorus, so a run can
+  // hand the engine a body carrying both. No test anywhere put two triggering
+  // traits on one body until this one, which is why moving the Chorus block
+  // above Relay's left the whole suite green.
+  //
+  // Mutation watched going red: the Chorus block moved above Relay's in
+  // `triggersFor`.
+  const f = fixture();
+  const left = f.add('player', card('test:left', 1, 5, 0));
+  const both = f.add('player', card('test:relay+chorus', 1, 5, 0, ['relay', 'chorus']));
+  const right = f.add('player', card('test:right', 1, 5, 0));
+
+  const out = drain(f.state, [{ kind: 'afterAct', uid: both.uid }], makeRng(4, 'combat'));
+
+  // Three grants out of one event, and the stream order is the whole
+  // observable: the final state is the same whichever way round they come.
+  assert.deepEqual(
+    out.events.map((e) => (e.kind === 'powerGained' ? `${e.uid}` : e.kind)),
+    ['afterActed', `${right.uid}`, `${left.uid}`, `${right.uid}`],
+    'Relay first, then Chorus left to right. Relay reaches the right-hand neighbour, so that ' +
+      'unit is announced twice and the first of the two announcements is Relay’s.',
+  );
+  assert.equal(right.bonusPower, 4, 'the right-hand neighbour is in both traits’ reach');
+  assert.equal(left.bonusPower, 2, 'the left-hand one is only in Chorus’s');
+  assert.equal(both.bonusPower, 0, 'neither trait buffs its own body');
+});
+
+test('every trait keying on afterActed is pinned, in the order its block is written', () => {
+  // The tripwire the old test claimed to be, built so that it cannot fail the
+  // way that one did.
+  //
+  // The old one was a fixture body carrying `['relay', 'wake']` asserting that
+  // `afterActed` produced one effect. A *third* trait keyed to `afterActed`
+  // does not appear on that body, so its block never ran and the test stayed
+  // green - which is exactly what happened when Chorus was added inside the
+  // same branch. A gate built from a hand-written trait list can only see the
+  // traits somebody remembered to write into it.
+  //
+  // So this reads the branch itself. Every `…includes('x')` inside the
+  // `afterActed` arm of `triggersFor`, in source order, must be exactly
+  // AFTER_ACTED_TRAITS. A new trait there goes red at the moment it is written,
+  // and its author has to say where in the order it belongs.
+  //
+  // Mutations watched going red: the Chorus block moved above Relay's; a third
+  // trait added to the branch.
+  //
+  // Bound: the `afterActed` arm of `triggersFor` in `src/engine/resolver.ts`,
+  // and only trait tests written as a call to `.includes('literal')`. A trait
+  // read some other way - a `Set`, a lookup table, a variable holding the name
+  // - is not seen here, and the behavioural test above is what covers the pair
+  // that exists today.
+  const sf = parse(path.join(ROOT, 'src', 'engine', 'resolver.ts'));
+
+  let branch: ts.Node | null = null;
+  const findBranch = (node: ts.Node, inTriggersFor: boolean): void => {
+    const here =
+      inTriggersFor ||
+      (ts.isFunctionDeclaration(node) && node.name?.getText(sf) === 'triggersFor');
+    if (
+      here &&
+      ts.isIfStatement(node) &&
+      /event\.kind === 'afterActed'/.test(node.expression.getText(sf))
+    ) {
+      assert.equal(branch, null, 'triggersFor has more than one afterActed arm');
+      branch = node.thenStatement;
+    }
+    ts.forEachChild(node, (c) => findBranch(c, here));
+  };
+  findBranch(sf, false);
+
+  assert.notEqual(
+    branch,
+    null,
+    'found no `event.kind === \'afterActed\'` arm in triggersFor. Either the branch was ' +
+      'renamed or this check stopped being able to see it - and it cannot tell those apart, ' +
+      'so it fails rather than reporting an empty list as agreement.',
+  );
+
+  const found: string[] = [];
+  const collect = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'includes' &&
+      node.arguments.length === 1 &&
+      node.arguments[0] !== undefined &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      found.push((node.arguments[0] as ts.StringLiteral).text);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(branch!);
+
+  assert.deepEqual(
+    found,
+    [...AFTER_ACTED_TRAITS],
+    `the traits keying on afterActed in triggersFor are now [${found.join(', ')}], not ` +
+      `[${AFTER_ACTED_TRAITS.join(', ')}].\n\n` +
+      'Inside one unit, traits fire in the source order of those blocks, and there is no ' +
+      'priority number anywhere - so a trait added here, or two blocks swapped, changes what a ' +
+      'body carrying both emits. Update this list once the order is a decision rather than an ' +
+      'accident, and gate the new order with a fixture the way the Relay/Chorus test above does.',
+  );
 });
 
 test('it is a queue, not a stack: the first effect queued is the first applied', () => {

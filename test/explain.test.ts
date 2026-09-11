@@ -54,15 +54,18 @@ import { makeRng } from '../src/engine/rng.ts';
 import {
   type Entity,
   type GameState,
+  type Trait,
   type Tribe,
+  TRIBAL_TRAITS,
   heroOf,
   insertUnit,
+  isTribalTrait,
   makeHero,
   makeUnit,
   unitCount,
 } from '../src/engine/state.ts';
 import {
-  RACE_HAS_NO_RULE,
+  RACE_RULE,
   RETALIATION_HERO,
   RETALIATION_UNIT,
   STAT_TERMS,
@@ -436,18 +439,46 @@ test('the odds read Armour the way every damage site must: through armourOf', ()
   assert.ok(odds.includes('armourOf('), 'src/render/odds.ts no longer computes damage at all');
 });
 
-test('the "race carries no rule" claim is still true of the resolver', () => {
-  // `RACE_HAS_NO_RULE` tells the player that nothing reads a unit's race. That
-  // is a claim about `engine/resolver.ts`, and the day a Kindle-style trait
-  // lands there the sentence becomes a lie that nothing else would catch.
-  const code = codeOf('src/engine/resolver.ts');
-  assert.ok(
-    !/\btribe\b/i.test(code),
-    `src/engine/resolver.ts now mentions "tribe", so something in the fight reads a unit's ` +
-      `race. RACE_HAS_NO_RULE in src/render/glossary.ts still tells the player nothing does. ` +
-      `Rewrite it before this ships.`,
-  );
-  assert.match(RACE_HAS_NO_RULE, /not yet a rule/);
+test('the sentence about races names every trait that reads one, and no other', () => {
+  // This replaced "the race carries no rule claim is still true of the
+  // resolver", which read `src/engine/resolver.ts` for the word "tribe" and
+  // failed if it found one. That gate's whole job was to fire the day a
+  // Kindle-style trait landed. Unit 11 landed three, so it fired, and it is
+  // retired here rather than relaxed - the sentence it guarded no longer says
+  // what it was guarding.
+  //
+  // What replaces it is in two halves, because the claim has two halves:
+  //
+  //   - **Every tribal trait is named in the sentence**, checked here off
+  //     `TRIBAL_TRAITS` and `TRAIT_TERMS`. A trait added to the union with no
+  //     mention in the copy fails right here.
+  //   - **Nothing outside that union reads a race**, which is not a text
+  //     question at all and is checked by fighting the same board twice with
+  //     one neighbour's race changed, in `test/tribes.test.ts`.
+  //
+  // Bound: this half is a text check over one sentence. It cannot tell whether
+  // the rule the sentence states is the rule the engine runs - that is the
+  // other half's job, and neither is worth much alone.
+  for (const trait of TRIBAL_TRAITS) {
+    assert.ok(
+      RACE_RULE.includes(TRAIT_TERMS[trait].name),
+      `${TRAIT_TERMS[trait].name} reads a card's race and RACE_RULE never names it:\n\n` +
+        `${RACE_RULE}\n\nThe player is told which traits care about race; this one is missing.`,
+    );
+  }
+  // Every trait the engine has, read off the record the glossary keys by the
+  // `Trait` union - so a trait added to the engine is in this loop without
+  // anyone adding it here.
+  for (const trait of Object.keys(TRAIT_TERMS) as Trait[]) {
+    if (isTribalTrait(trait)) continue;
+    assert.ok(
+      !RACE_RULE.includes(TRAIT_TERMS[trait].name),
+      `RACE_RULE names ${TRAIT_TERMS[trait].name}, which reads no race:\n\n${RACE_RULE}`,
+    );
+  }
+  // The bound itself, said to the player: a tribal trait reads two neighbours,
+  // so a wider line never makes it bigger.
+  assert.match(RACE_RULE, /two neighbours/);
 });
 
 // --------------------------------------------------------------- the panel
@@ -547,17 +578,27 @@ test('the summary line stays inside the two lines the panel’s placement can af
   // devlog for this panel says it in one line: "Adding a paragraph to
   // render/inspect.ts can push it past 270px."
   //
-  // Bound: 235 characters is where this paragraph wraps to a third line in the
+  // **Both free-flowing paragraphs are in it, and the second one was added
+  // after it caught nothing.** `xp__gloss` was gated; `xp__note`, the sentence
+  // under the channel list, was not - and unit 11 rewrote that note from 175
+  // characters to 255, which wrapped to a third line and took the panel from
+  // 266px to 280px. The probe said so and this test did not, because the
+  // paragraph it reads was not the paragraph that grew. They carry the same
+  // font size in the same column, so they carry the same limit.
+  //
+  // Bound: 235 characters is where a paragraph wraps to a third line in the
   // 532px text column at `--fs-micro`, measured in Chrome at 1440x900 through
   // `npm run probe:ui hover 7 even light`. It is a proxy for a pixel and it is
   // stated as one - a font change or a width change moves it, and the probe,
-  // not this number, is what says whether the panel still fits.
+  // not this number, is what says whether the panel still fits. It is also
+  // only two paragraphs: a rule row costs 54px and nothing here counts those.
   const LIMIT = 235;
-  const glossOf = (html: string): string => {
-    const m = /<p class="xp__gloss">([\s\S]*?)<\/p>/.exec(html);
-    assert.ok(m !== null, 'the panel has no summary line at all');
+  const paragraphOf = (html: string, cls: string): string => {
+    const m = new RegExp(`<p class="${cls}">([\\s\\S]*?)</p>`).exec(html);
+    assert.ok(m !== null, `the panel has no ${cls} paragraph at all`);
     return m[1] ?? '';
   };
+  const glossOf = (html: string): string => paragraphOf(html, 'xp__gloss');
   const cases: { what: string; html: string }[] = [];
   for (const card of ALL_CARDS) {
     for (const chance of [0.5, 0]) {
@@ -576,13 +617,25 @@ test('the summary line stays inside the two lines the panel’s placement can af
     });
   }
   for (const c of cases) {
-    const line = glossOf(c.html);
+    for (const cls of ['xp__gloss', 'xp__note'] as const) {
+      const line = paragraphOf(c.html, cls);
+      assert.ok(
+        line.length <= LIMIT,
+        `The ${cls} paragraph for ${c.what} is ${line.length} characters, over the ${LIMIT} ` +
+          `that fit in two lines. A third line makes the panel too tall for the band it places ` +
+          `itself in, and it starts covering the row the player is reading. Shorten it, or move ` +
+          `the sentence onto a chip's own rule, where length is free.\n\n${line}`,
+      );
+    }
+  }
+  // The gate is worth nothing if it is reading empty strings, and a panel that
+  // stopped emitting one of these would read as a panel whose paragraphs are
+  // short enough.
+  for (const c of cases) {
+    assert.ok(glossOf(c.html).length > 40, `${c.what}: the summary paragraph is empty or near it`);
     assert.ok(
-      line.length <= LIMIT,
-      `The summary line for ${c.what} is ${line.length} characters, over the ${LIMIT} that fit ` +
-        `in two lines. A third line makes the panel too tall for the band it places itself in, ` +
-        `and it starts covering the row the player is reading. Shorten it, or move the sentence ` +
-        `onto a chip's own rule, where length is free.\n\n${line}`,
+      paragraphOf(c.html, 'xp__note').length > 40,
+      `${c.what}: the race note is empty or near it`,
     );
   }
 });

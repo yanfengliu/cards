@@ -125,6 +125,23 @@ export type RunArm = {
   readonly outcomes: RunOutcome[];
 };
 
+/**
+ * What an arm is called in every table below, built from the two style values
+ * the arm was constructed with.
+ *
+ * **This is the only place an arm gets a name, and it takes no free text.** The
+ * report used to hand-write "greedy route / search placement" for an arm built
+ * from `'lookahead'`, so the word a reader saw was not a word `makeRunAgent`
+ * accepts: a probe that read the table and passed `placement: 'search'` got
+ * `undefined` back out of `placementFor` and died inside the fight. Deriving
+ * the label means the report cannot print a style the API would refuse, and
+ * `runbots.ts`'s refusal means a style the report cannot print is rejected by
+ * name. `docs/learning/defect-register.md` records the incident.
+ */
+export function armLabel(route: RouteStyle, placement: PlacementStyle): string {
+  return `${route} route / ${placement} placement`;
+}
+
 function outcomeOf(content: RunContent, seed: number, run: RunState, log: RunLog): RunOutcome {
   return {
     seed,
@@ -198,9 +215,11 @@ export function sigilReport(arm: RunArm, content: RunContent = RUN_CONTENT): Sig
  * everything, which is the question `--unlocks none` is asking. `null`, the
  * default, is no unlock layer - the arm every number in this file was measured
  * with.
+ *
+ * It takes no `name`. The arm names itself through `armLabel`, so there is no
+ * parameter a caller could fill with a word the API does not accept.
  */
 export function runArm(
-  name: string,
   route: RouteStyle,
   placement: PlacementStyle,
   seeds: readonly number[],
@@ -213,7 +232,7 @@ export function runArm(
     const { run, log } = runRun(content, seed, agent, undefined, unlocked);
     outcomes.push(outcomeOf(run.content, seed, run, log));
   }
-  return { name, route, placement, outcomes };
+  return { name: armLabel(route, placement), route, placement, outcomes };
 }
 
 // ---------------------------------------------------------------------------
@@ -850,10 +869,10 @@ function main(): void {
   }
   console.log('');
 
-  const armGL = runArm('greedy route / search placement', 'greedy', 'lookahead', seeds, content, unlocked);
-  const armRL = runArm('random route / search placement', 'random', 'lookahead', seeds, content, unlocked);
-  const armGR = runArm('greedy route / right placement', 'greedy', 'right', seeds, content, unlocked);
-  const armRR = runArm('random route / right placement', 'random', 'right', seeds, content, unlocked);
+  const armGL = runArm('greedy', 'lookahead', seeds, content, unlocked);
+  const armRL = runArm('random', 'lookahead', seeds, content, unlocked);
+  const armGR = runArm('greedy', 'right', seeds, content, unlocked);
+  const armRR = runArm('random', 'right', seeds, content, unlocked);
   const arms = [armGL, armRL, armGR, armRR];
 
   console.log('| arm | runs won | win rate | 95% CI | mean acts cleared | mean fights | mean rounds/fight | mean end deck |');
@@ -938,20 +957,31 @@ function main(): void {
   console.log('Paired, same seeds, placement held fixed. A bot comparison, so it bounds itself.');
   console.log('');
   const wins = (a: RunArm): number[] => a.outcomes.map((o) => (o.result === 'won' ? 1 : 0));
-  const gapSearch = pairedWinGap(wins(armGL), wins(armRL));
-  const gapRight = pairedWinGap(wins(armGR), wins(armRR));
   console.log('| placement held at | greedy route | random route | gap | 95% CI |');
   console.log('|---|---|---|---|---|');
   const winRate = (a: RunArm): number =>
     a.outcomes.filter((o) => o.result === 'won').length / a.outcomes.length;
-  console.log(
-    `| search | ${pct(winRate(armGL))} | ${pct(winRate(armRL))} | ${pct(gapSearch.gap)} | ` +
-      `${pct(gapSearch.ci95[0])}..${pct(gapSearch.ci95[1])} |`,
-  );
-  console.log(
-    `| append right | ${pct(winRate(armGR))} | ${pct(winRate(armRR))} | ${pct(gapRight.gap)} | ` +
-      `${pct(gapRight.ci95[0])}..${pct(gapRight.ci95[1])} |`,
-  );
+  // The row label is the arm's own `PlacementStyle`, so it is a word
+  // `makeRunAgent` accepts rather than a synonym for one. The pair is checked
+  // rather than assumed: the column header claims placement was held fixed, and
+  // a row labelled with one arm's style while the other arm used a different
+  // one would be a false label, not merely an untidy one.
+  const routeRow = (greedyArm: RunArm, randomArm: RunArm): void => {
+    if (greedyArm.placement !== randomArm.placement) {
+      throw new Error(
+        `runmeasure: this row says placement was held fixed and the two arms used ` +
+          `"${greedyArm.placement}" and "${randomArm.placement}". A paired route comparison ` +
+          `must vary the route alone; build both arms with the same placement style.`,
+      );
+    }
+    const gap = pairedWinGap(wins(greedyArm), wins(randomArm));
+    console.log(
+      `| ${greedyArm.placement} | ${pct(winRate(greedyArm))} | ${pct(winRate(randomArm))} | ` +
+        `${pct(gap.gap)} | ${pct(gap.ci95[0])}..${pct(gap.ci95[1])} |`,
+    );
+  };
+  routeRow(armGL, armRL);
+  routeRow(armGR, armRR);
   console.log('');
 
   if (has('encounters')) {
