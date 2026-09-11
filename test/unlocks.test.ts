@@ -123,6 +123,8 @@ import {
   forgetRun,
   loadSavedRun,
   parseSavedRun,
+  pinnedNotice,
+  readSavedRun,
   saveRun,
   storageAllowed,
   unlockOverride,
@@ -869,7 +871,63 @@ test('an unlock moves nothing in the run but the pool it drafts from', () => {
   // `startRun`, is outside it and survived every check. So this walks the
   // *state* a run begins in, key by key off the object, and every key but the
   // two that are the pool itself must be identical whatever is owned.
+  //
+  // `content` is one of those two, and skipping it wholesale was the second
+  // escape, found by an independent review. `RunState` copies only `hero`,
+  // `startingGold`, `mapShape` and `startingDeck` out of `RunContent`; every
+  // other number a run obeys - `restHealFraction`, `shopBasePrice`,
+  // `maxRounds`, `rewardOffers`, `cardSigilChance` - reaches it through
+  // `run.content` alone. `unlockedContent`'s walk stops at that function's
+  // boundary, `contentForClass` sits between the two, and so a catch-up bonus
+  // written onto the content in `startRun` was outside **both**:
+  // `restHealFraction + 0.25` while anything is still locked passed all 273
+  // tests, and so did `shopBasePrice: 0` with `maxRounds + 5`. Both are
+  // literally what this test's own message forbids.
+  //
+  // So `content` is walked too, and its three exceptions are not a new list:
+  // they are exactly what the sibling test above already enumerates as the
+  // only things `unlockedContent` may touch.
   const MAY_DIFFER = new Set(['content', 'unlocked']);
+  const CONTENT_MAY_DIFFER = new Set(['rewards', 'sigils', 'classes']);
+
+  const sameContent = (want: RunContent, got: RunContent, where: string): void => {
+    const ckeys = Object.keys(want) as (keyof RunContent)[];
+    assert.ok(ckeys.length >= 18, `RunContent has ${ckeys.length} fields; the walk looks wrong`);
+    assert.deepEqual(
+      Object.keys(got).sort(),
+      ckeys.slice().sort(),
+      `${where}: a content field appeared or vanished`,
+    );
+    for (const key of ckeys) {
+      if (CONTENT_MAY_DIFFER.has(key)) continue;
+      assert.deepEqual(
+        got[key],
+        want[key],
+        `${where}: the unlock set moved "content.${key}". An unlock adds rows to a draw ` +
+          `table; it may not move a number, a card or a map.`,
+      );
+    }
+    // The class the run is played as travels inside `content.classes`, so its
+    // non-pool fields are on the same rule - and the walk is off the class
+    // object rather than a list written here.
+    const wantCls = want.classes ?? [];
+    const gotCls = got.classes ?? [];
+    assert.equal(gotCls.length, wantCls.length, `${where}: the class list changed length`);
+    for (let i = 0; i < wantCls.length; i++) {
+      const clsKeys = Object.keys(wantCls[i]!) as (keyof RunClass)[];
+      assert.ok(clsKeys.length >= 5, `RunClass has ${clsKeys.length} fields; the walk looks wrong`);
+      for (const key of clsKeys) {
+        if (key === 'rewards') continue;
+        assert.deepEqual(
+          gotCls[i]![key],
+          wantCls[i]![key],
+          `${where}: the unlock set moved "content.classes[${i}].${key}". An unlock adds ` +
+            `rows to a draw table; it may not move a number, a card or a map.`,
+        );
+      }
+    }
+  };
+
   for (const cls of CLASSES) {
     for (const seed of [1, 4, 9]) {
       const base = startRun(RUN_CONTENT, seed, cls.id, ALL_UNLOCKS);
@@ -887,6 +945,7 @@ test('an unlock moves nothing in the run but the pool it drafts from', () => {
               `rows to a draw table; it may not move a number, a card or a map.`,
           );
         }
+        sameContent(base.content, other.content, `${cls.name} seed ${seed}, ${name}`);
       }
       // And with no unlock layer at all, which is what every measurement plays.
       const open = startRun(RUN_CONTENT, seed, cls.id, null);
@@ -894,6 +953,7 @@ test('an unlock moves nothing in the run but the pool it drafts from', () => {
         if (MAY_DIFFER.has(key)) continue;
         assert.deepEqual(open[key], base[key], `${cls.name} seed ${seed}: null and ALL differ in "${key}"`);
       }
+      sameContent(base.content, open.content, `${cls.name} seed ${seed}, no unlock layer`);
     }
   }
 });
@@ -1044,6 +1104,129 @@ test('a run saved by an older build still loads, instead of being read then thro
   );
 });
 
+test('a refused save says why on screen, instead of vanishing into the console', () => {
+  // `parseSavedRun` returned `null` for "nothing stored" and for "stored and
+  // refused" alike, so `startRunApp` left `opened` at 'fresh' and the notice bar
+  // said nothing: `migrateRunLog`'s refusals - written to name the format, the
+  // seed and what to do next - reached the console and never the player, whose
+  // run had just disappeared. `readSavedRun` keeps the sentence.
+  const fixture = JSON.parse(
+    readFileSync('test/golden/run-log-format-1-seed-7-greedy.json', 'utf8'),
+  ) as { log: RunLog };
+
+  // Nothing stored is not a problem, and must not produce a sentence.
+  assert.deepEqual(readSavedRun(null, 7), { log: null, problem: null });
+  assert.deepEqual(readSavedRun(undefined, 7), { log: null, problem: null });
+
+  // A readable save is read, and says nothing.
+  const good = readSavedRun(JSON.stringify(fixture.log), 7);
+  assert.equal(good.problem, null, 'a readable save produced a problem');
+  assert.equal(good.log?.format, RUN_LOG_FORMAT, 'a readable save was not upgraded');
+
+  // Every way a stored run can be refused produces a sentence, and each names
+  // the seed so a player with several runs knows which one went.
+  const refusals: readonly (readonly [string, string, RegExp])[] = [
+    ['not JSON at all', '{not json', /cannot read|not a run log|could not/i],
+    [
+      'an unknown format',
+      JSON.stringify({ ...fixture.log, format: 99 }),
+      /format 99/,
+    ],
+    [
+      'a format 1 log carrying an unlock set',
+      JSON.stringify({ ...fixture.log, unlocked: { gated: ["u_x"], owned: [] } }),
+      /unlock set/,
+    ],
+    ['a log for another seed', JSON.stringify({ ...fixture.log, seed: 8 }), /seed 8/],
+    ['not a run log', JSON.stringify({ hello: 'world' }), /not a run log/],
+  ];
+  const silent: string[] = [];
+  for (const [what, raw, shape] of refusals) {
+    const r = readSavedRun(raw, 7);
+    assert.equal(r.log, null, `${what}: a refused save was returned as a log`);
+    if (r.problem === null) {
+      silent.push(what);
+      continue;
+    }
+    assert.match(r.problem, shape, `${what}: the sentence does not say what happened`);
+    assert.match(
+      r.problem,
+      /discarded|new run/i,
+      `${what}: the sentence does not tell the player what becomes of the run`,
+    );
+    assert.doesNotMatch(
+      r.problem,
+      /^run log: /,
+      `${what}: the sentence still wears the internal 'run log:' prefix`,
+    );
+  }
+  assert.deepEqual(
+    silent,
+    [],
+    'a stored run was refused with no sentence for the screen. A run that vanishes with only a console line is a run the player watched disappear for no stated reason.',
+  );
+
+  // H, in the same walk: a log in an unknown format that *also* carries a
+  // malformed set is refused for the format. `parseUnlockSet` ran first, so
+  // the one fact the player needs - this build cannot read that format - was
+  // replaced by a complaint about a field inside a log it was never going to
+  // read.
+  const both = readSavedRun(
+    JSON.stringify({ ...fixture.log, format: 99, unlocked: 'not a set' }),
+    7,
+  );
+  assert.equal(both.log, null);
+  assert.match(
+    both.problem ?? "",
+    /format 99/,
+    'a log in an unknown format was refused for something other than its format',
+  );
+});
+
+test('a pinned session says on screen that the run itself is not saved', () => {
+  // `storageAllowed` is false for the whole session, so `?unlocks=` costs the
+  // player the **run** as well as the unlocks. The only warning said "nothing
+  // this run earns is saved to your profile", which is the smaller half: a
+  // player who opens `?unlocks=all`, plays for twenty minutes and reloads loses
+  // the run, having been told the opposite of what they needed.
+  //
+  // The sentence is gated rather than trusted because it lived inside
+  // `startRunApp`, which needs a document - the same reason `PICKABLE_CLASSES`
+  // is exported, and the same failure: a wiring nobody can test is a wiring
+  // nobody is checking.
+  assert.equal(pinnedNotice(null), null, 'an unpinned session was warned about nothing');
+
+  for (const override of ['all', 'none'] as const) {
+    const said = pinnedNotice(override);
+    assert.notEqual(said, null, `?unlocks=${override} produced no sentence`);
+    assert.equal(
+      storageAllowed(override),
+      false,
+      `${override}: this test assumes a pinned session touches no storage`,
+    );
+    // The three things it has to say, each checked on its own: what is pinned,
+    // that the profile is not written, and that **the run** is not saved.
+    assert.match(said!, new RegExp(`\\?unlocks=${override}`), `${override}: the sentence does not name the parameter`);
+    assert.match(said!, /profile/i, `${override}: the sentence does not mention the profile`);
+    assert.match(
+      said!,
+      /the run itself is not saved|the run is not saved/i,
+      `${override}: the sentence does not say the run itself is not saved, which is what a ` +
+        `player loses by reloading`,
+    );
+    assert.match(
+      said!,
+      /reload/i,
+      `${override}: the sentence does not say what costs them the run`,
+    );
+  }
+
+  // And it says which way the pool is pinned, so the collection screen and the
+  // address bar cannot disagree.
+  assert.match(pinnedNotice('all')!, /everything is draftable/);
+  assert.match(pinnedNotice('none')!, /nothing unlockable is draftable/);
+});
+
 test('a pinned pool touches no stored run and no stored profile', () => {
   // `?unlocks=all` is *no unlock layer*, so a pinned run's log carries no
   // `unlocked` field and is indistinguishable from one written before unlocks
@@ -1069,12 +1252,17 @@ test('a pinned pool touches no stored run and no stored profile', () => {
     assert.equal(stub.store.size, 1);
     assert.equal(stub.store.has(`${SAVE_PREFIX}7`), true);
     const back = loadSavedRun(7, true);
-    assert.deepEqual(back?.nodes.length, 3);
-    assert.deepEqual(back?.unlocked, FRESH_UNLOCKS);
+    assert.equal(back.problem, null, `a readable save reported "${String(back.problem)}"`);
+    assert.deepEqual(back.log?.nodes.length, 3);
+    assert.deepEqual(back.log?.unlocked, FRESH_UNLOCKS);
 
     // A pinned session cannot see it, so it can never finish someone else's run
     // against the pinned pool.
-    assert.equal(loadSavedRun(7, false), null, 'a pinned session read a stored run');
+    assert.deepEqual(
+      loadSavedRun(7, false),
+      { log: null, problem: null },
+      'a pinned session read a stored run',
+    );
 
     // And cannot delete it. Opening `?seed=7&unlocks=all` must not throw away
     // the real run in progress on seed 7.

@@ -6,6 +6,78 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-11 — a second review of the unlock layer: the storage gate was aimed at an idiom this repo never writes
+
+Taken on branch `worktree-agent-ac7c36708d963e2ab`, cut from `d59a8cb` with `main` at `308d91c` merged in; the suite is **276 tests** here, 248 at `d59a8cb` and 273 at the merge. Fifteen mutations, each applied to the shipped tree, run against the shipped command, reverted, and the file's sha256 compared before and after. All fifteen came back red on a line their reporter marked failed, and none was already failing in a measured green baseline.
+
+### The one that matters: a detector, its self-check and its recorded proof all agreeing, and none of them touching real code
+
+`tools/gates/boundaries.ts` put the DOM and storage checks behind `!isNameSlot(node)`, and `isNameSlot` returns true for the `.name` of a `PropertyAccessExpression`. So **`globalThis.localStorage` was skipped entirely** — and that is how every storage access in this codebase is written: `src/ui/profile.ts:199,225`, `src/ui/runapp.ts:128,137,146`, `tools/ui-probe/run.ts:152,200,278`. There is not one bare `localStorage` under `src/`.
+
+Reproduced at the base revision: `export const BONUS: number = Number(globalThis.localStorage?.getItem(\`b\`) ?? 0);` added to `src/run/run.ts` passed `gate:boundaries`, `tsc` **and** `gate:banned-apis`, while the gate printed that the file referenced *none* of `localStorage, sessionStorage, indexedDB`. Controls on the same line were live — bare `localStorage` exited 1, `document.title` exited 1 — which is exactly why the hole survived: everything anyone thought to test was written in the one spelling the code does not use.
+
+The blindness was **self-confirming**. The gate's own probe emitted `export const probeStore0: unknown = localStorage;` — bare identifiers — so the instrument check passed on a shape the code never writes, and recorded proof N13 used the bare form too. Detector, self-check and evidence all agreed with each other.
+
+Fixed in three places, because fixing only the detector would have left the probe able to bless the next narrowing:
+
+1. **The detector.** A global is read bare, through the global object (`globalThis.x`, `window.x`, `self.x`, and chains of those) or through a string index on it (`globalThis['x']`) — the checker resolves all three to the same symbol, and for the index form it is the *argument* that carries it, the element access as a whole resolving to nothing. The storage half additionally matches by **name** wherever the name is read, whatever the base, so aliasing (`const g = globalThis; g.localStorage`) does not get past it. The DOM half cannot do that and does not try: it asks the checker, and the checker resolves `someElement.title` into `lib.dom` just as readily, so it tests the base and misses an aliased DOM global. Both bounds are in the file's header.
+2. **The probe.** Fifteen global spellings, written the way real code writes them, each on **its own line**, each required to fire *on that line*. The old probe asked "did something fire for `localStorage`?", and one bare line answered yes for every spelling at once.
+3. **The record.** M1–M4 below are the idiom the codebase actually writes. N13's bare-identifier proof stands as history and is no longer the only evidence.
+
+M5 is the proof that the second fix is the load-bearing one: reintroducing the exemption makes the gate exit **2** and name the seven shapes it went silent on. The old probe passed that same mutation.
+
+### The runner: two self-probes that were both negative controls
+
+The previous runner carried `SELF` (a mutation that cannot compile) and `ATTRIB` (a real mutation under the name of a test it does not break). Both assert the runner *refuses* to credit something; neither asserts it can ever say RED. Replacing `failingLines(out)` with `return []` — blinding attribution completely — left both reporting "came back unconfirmed, as they must", every mutation unconfirmed, the summary reading `0 of 2 came back red`, and the process **exiting 0**.
+
+`.probe/mutate.mjs` now carries a third, `POSITIVE`: the **same mutation as `ATTRIB`** under the name of a test it *does* break, required to come back RED before any summary prints. The pair proves the runner reads the name rather than the exit status, which is the defect both exist for. Re-blinded after the fix, `POSITIVE` is the only probe that fails and the runner exits 2:
+
+```
+  ok   SELF      wanted not RED  got CRASHED      a mutation that cannot compile
+  ok   ATTRIB    wanted not RED  got CRASHED      a real mutation paired with the name of a test it does NOT break
+  FAIL POSITIVE  wanted RED      got CRASHED      the SAME mutation paired with the name of a test it DOES break
+
+  --- the blinded runner exited 2 ---
+```
+
+One repair to the runner came out of its own output: the crash guard fired whenever a *failing* run's output held a word like `TypeError`, which an assertion diff is full of. A run whose reporter marked tests failed did not crash — it ran, and failed checks — so `CRASHED` now also requires that nothing was marked failed. Before that, `ATTRIB` was reported as a crash rather than as an unattributed red, which is the right verdict for the wrong reason.
+
+### The bound of the gates these mutations exercise
+
+`test/unlocks.test.ts` is the shipped `RUN_CONTENT` and `GATED_IDS`, over 12 seeds × 2 route styles, 12 seeds × the five-rung `LADDER`, all three classes, and the two golden format 1 logs. Its `localStorage` is a stub installed by the test, so what is gated there is this code's decisions about storage, not the browser's.
+
+`test/ui-markup.test.ts` reads `src/ui/index.html` as markup and every file under `src/ui/` holding a `dom` map as an AST — **discovered**, not restated, which is what it was: the previous version named `src/ui/runapp.ts` in the test body while the escaper half of the same file walked the filesystem, breaking the rule that landed in `local-rules.md` in one half of one file. `src/ui/app.ts` is excused **by name, with the reason**, in `NOT_ANALYSED`, and a file with a `dom` map in neither list goes red.
+
+Why app.ts is excused rather than covered, recorded because the obvious widening is a trap: it reaches its controls through `wireInput(document.body, …)`. Treating "a click listener on `document.body`" as covering everything would bring it in — and `runapp.ts` **also** attaches one, a narrow filter for the theme and hatch buttons that is not a delegation root, so that rule would make this gate pass an app whose every panel was dead.
+
+The panel detector is loose in the safe direction on purpose: a panel handed to a helper is counted as drawn into, even if the helper only reads it. A false alarm costs an argument; the other direction ships a dead button.
+
+Two things none of them can see, named so the gap is not mistaken for coverage: the browser's own `localStorage` round trip, and what a `[data-run]` click does. Findings F and G were checked in a browser against a server whose own log named this worktree, in both themes and at 375px.
+
+Digests after the last revert: `src/run/run.ts` `6cfd82c1…`, `src/ui/runapp.ts` `44821523…`, `tools/gates/boundaries.ts` `99879dc9…`, `test/unlocks.test.ts` `51f6235b…`, `test/ui-markup.test.ts` `08d3ffbb…`, `src/render/escape.ts` `b318f8b9…`.
+
+| # | mutation | site | the failure |
+|---|---|---|---|
+| M1 | reads a bonus out of `globalThis.localStorage` — **the idiom this repo writes** | `src/run/run.ts` | `gate:boundaries`: `src/run/run.ts:82:44  references \`localStorage\`, which is browser storage and so a hidden input the replay does not carry` |
+| M2 | reads `globalThis['localStorage']` | `src/run/run.ts` | same, at the string index |
+| M3 | reads `localStorage` through an alias of the global object | `src/run/run.ts` | same; the base test cannot see this one, the name match can |
+| M4 | touches the DOM through `globalThis.document` | `src/run/run.ts` | `gate:boundaries`: `references the DOM global \`document\`` |
+| M5 | the detector goes blind again: the member of a property access is exempt | `tools/gates/boundaries.ts` | `GATE BROKEN: src/engine/'s probe breaks this gate's rule 19 time(s) and the detector reported 12 of them.` — then names all seven silent shapes. Exit 2. |
+| M6 | a fresh profile rests harder: `content.restHealFraction + 0.25` while anything is locked | `src/run/run.ts` | `an unlock moves nothing in the run but the pool it drafts from` |
+| M7 | a fresh profile shops free and fights longer: `shopBasePrice: 0`, `maxRounds + 5` | `src/run/run.ts` | same |
+| M8 | the HUD's draw goes through a local helper and its listener goes away | `src/ui/runapp.ts` | `every panel the run app draws into is inside something that hears a click` |
+| M9 | the HUD's draw goes through a local alias and its listener goes away | `src/ui/runapp.ts` | same |
+| M10 | a second escaper written with **double-quoted** entities | `src/ui/run.ts` | `text becomes markup through one escaper, and there is no second copy of it` |
+| M11 | a partial second escaper that never handles `&` at all | `src/ui/run.ts` | same |
+| M12 | a refused save drops its sentence and vanishes into the console again | `src/ui/runapp.ts` | `a refused save says why on screen, instead of vanishing into the console` |
+| M13 | the pinned-session warning goes back to mentioning only the profile | `src/ui/runapp.ts` | `a pinned session says on screen that the run itself is not saved` |
+| M14 | the unknown-format refusal runs after `parseUnlockSet` again | `src/run/run.ts` | `a refused save says why on screen…` — the format-99 log is refused for its unlock set and never names the format |
+| M15 | a storage call hard-codes the `persist` flag | `src/ui/runapp.ts` | `every storage call in the run app is routed through the persist flag` |
+
+M6 and M7 are the reviewer's R7 and R8, and both were **273/273 green** before this round. A first draft of M6 here was a no-op — the condition it was written with could never be true — and passed 273/273 for that reason instead; it is recorded because a no-op reproduction and a real one are indistinguishable in a summary line, and only the runner's own "replacement changed nothing" guard tells them apart.
+
+M10 and M11 were both invisible to `.includes("'&amp;'")`, which is a single-quoted substring search in a repo with no formatter to make quote style mean anything. The replacement reads string literals off the AST and counts a file writing **any** HTML entity as an escaper — exactly one file under `src/` writes one at all, so a partial escaper handling `<` and `>` and not `&` is caught too.
+
 ## 2026-09-11 — closing a review of the unlock layer: sixteen mutations, and a runner that could credit itself with a passing test
 
 Taken on branch `worktree-agent-a6980105037cf39af`, cut from `cf2092f`; the suite is **248 tests** here, 237 at the base. Sixteen mutations, each applied to the shipped tree, run, reverted, and the file's sha256 compared before and after. All sixteen came back red on a line their reporter marked failed, and none of them was already failing in a measured green baseline.

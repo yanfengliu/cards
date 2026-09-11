@@ -37,23 +37,46 @@
  *           through the TypeScript checker rather than a hand-written word
  *           list. `console` and `fetch` are not DOM-only -- Node declares them
  *           too -- so they do not trip it; `document`, `window`, `indexedDB`
- *           and `requestAnimationFrame` are, and do.
- *   Catches a reference to `localStorage` or `sessionStorage` by name, because
- *           `@types/node` declares both and the checker rule above therefore
- *           cannot see them. See `STORAGE_GLOBALS`.
+ *           and `requestAnimationFrame` are, and do. It reads the global
+ *           **bare** (`document`), through the global object
+ *           (`globalThis.document`, `window.x`, `self.x`) and through a string
+ *           index on it (`globalThis['document']`) -- the checker resolves all
+ *           three to the same symbol. See `GLOBAL_OBJECTS`.
+ *   Catches a reference to `localStorage`, `sessionStorage` or `indexedDB` by
+ *           name, because `@types/node` declares the first two and the checker
+ *           rule above therefore cannot see them. The name is matched wherever
+ *           it is **read** - bare, as any property member, or as a string index
+ *           - and not only through the global object, so aliasing
+ *           (`const g = globalThis; g.localStorage`) does not get past it. A
+ *           declaration is not a read: `type X = { localStorage: string }` is a
+ *           shape and does not trip it. See `STORAGE_GLOBALS`.
  *   Misses  a specifier built at runtime (`import(base + name)`), a boundary
  *           crossed through a third module that is itself allowed, and a DOM
- *           object handed in as an argument typed `unknown`. It does not
- *           police `node:` builtins, which ARCHITECTURE.md's rule does not
- *           name -- `engine` imports none today. It says nothing about
- *           `src/sim/` or `src/render/`.
+ *           object handed in as an argument typed `unknown`. For the **DOM**
+ *           half specifically, a global reached through an alias of the global
+ *           object (`const g = globalThis; g.document`) is missed, because that
+ *           half must test the base to keep `someElement.title` out of it; the
+ *           storage half has no such gap. An index built at runtime
+ *           (`globalThis[k]`) is missed by both. It does not police `node:`
+ *           builtins, which ARCHITECTURE.md's rule does not name -- `engine`
+ *           imports none today. It says nothing about `src/sim/` or
+ *           `src/render/`.
  *   Depends on `lib.dom` being loadable. If it is not, the DOM half of this
  *           gate would pass vacuously, so the gate refuses to run instead.
  *
- * Every forbidden prefix and the DOM half are proved live on every run, per
- * scanned directory, against a probe file that violates each of them, so a
- * green result means the detector fired for each one and not merely that it
- * found nothing.
+ * Every forbidden prefix and every spelling above are proved live on every run,
+ * per scanned directory, against a probe file that breaks the rule once per
+ * line -- and each expectation is bound to **its own line**, so a green result
+ * means the detector fired for that spelling and not that some other line
+ * covered for it.
+ *
+ * That binding is the repair for what this gate got wrong. Its first probe was
+ * written in bare identifiers (`export const p: unknown = localStorage;`) while
+ * every storage access in the repo is written `globalThis.localStorage`, and the
+ * member name of a property access was exempt -- so the detector, its own
+ * self-check and its recorded red-proof agreed with each other, and not one of
+ * them touched a shape the code actually uses. `globalThis.localStorage` in
+ * `src/run/run.ts` passed this gate, `tsc` and `gate:banned-apis` together.
  *
  * Exit 0 clean, 1 on a violation, 2 if the gate could not run.
  */
@@ -107,11 +130,73 @@ const STORAGE_GLOBALS: readonly string[] = ['localStorage', 'sessionStorage', 'i
  * `src/run/content.ts` is the binding that does - and what it may not do is
  * read a hidden input.
  */
+/**
+ * One line of a probe file and what the detector owes on it.
+ *
+ * The **line number is the binding**, and that is the whole point. The probe
+ * this replaced asked only "did something fire for `localStorage`?", and one
+ * bare-identifier line answered yes for every spelling at once - so the gate
+ * could be blind to `globalThis.localStorage`, which is the only spelling this
+ * repo uses, and still report that its detector had been proved. Each idiom now
+ * stands on its own line and must be caught *there*.
+ */
+type ProbeLine = {
+  readonly code: string;
+  /** The prefix an import must land under, or the global a reference must name. */
+  readonly under: string;
+  readonly kind: 'import' | 'global';
+  /** Named in the failure, so a silent shape says which spelling stopped working. */
+  readonly shape: string;
+};
+
+/**
+ * The spellings a reference to a global can take, written the way real code
+ * writes them. `globalThis.x` comes first because it is the *only* spelling
+ * `src/ui/` and `tools/ui-probe/` use: there is not one bare `localStorage`
+ * under `src/`.
+ */
+function globalProbeLines(): ProbeLine[] {
+  const lines: ProbeLine[] = [];
+  const push = (code: string, under: string, shape: string): void => {
+    lines.push({
+      code: code.replace(/\$/g, `probe${lines.length}`),
+      under,
+      kind: 'global',
+      shape,
+    });
+  };
+  push('export const $: string = globalThis.document.title;', 'document', 'globalThis.document');
+  push('export const $: string = document.title;', 'document', 'a bare document');
+  push(
+    "export const $: unknown = globalThis['document'];",
+    'document',
+    "globalThis['document']",
+  );
+  for (const g of STORAGE_GLOBALS) {
+    push(`export const $: unknown = globalThis.${g};`, g, `globalThis.${g}`);
+    push(`export const $: unknown = ${g};`, g, `a bare ${g}`);
+    push(`export const $: unknown = globalThis[${JSON.stringify(g)}];`, g, `globalThis['${g}']`);
+    push(`export const $: unknown = aliased.${g};`, g, `an aliased global object .${g}`);
+  }
+  return lines;
+}
+
+/**
+ * Declared once at the top of every probe, so the aliasing shape above has a
+ * base to read through. A base test alone cannot see this one, which is why the
+ * storage half matches by name instead.
+ */
+const PROBE_PREAMBLE: readonly string[] = [
+  "const aliased: typeof globalThis = globalThis;",
+];
+
 type Scanned = {
   readonly dir: string;
   readonly forbidden: readonly { readonly prefix: string; readonly probe: string }[];
   readonly probeFile: string;
   readonly probeSource: string;
+  /** Indexed by 0-based line, so an expectation names the line it must fire on. */
+  readonly probeLines: readonly (ProbeLine | null)[];
   readonly what: string;
 };
 
@@ -120,16 +205,28 @@ function scanned(
   forbidden: readonly { readonly prefix: string; readonly probe: string }[],
   what: string,
 ): Scanned {
+  const probeLines: (ProbeLine | null)[] = [
+    ...forbidden.map((f) => ({
+      code: `import ${JSON.stringify(f.probe)};`,
+      under: f.prefix,
+      kind: 'import' as const,
+      shape: `an import landing under ${f.prefix}`,
+    })),
+    ...PROBE_PREAMBLE.map(() => null),
+    ...globalProbeLines(),
+  ];
+  const code = [
+    ...forbidden.map((f) => `import ${JSON.stringify(f.probe)};`),
+    ...PROBE_PREAMBLE,
+    ...globalProbeLines().map((l) => l.code),
+    '',
+  ];
   return {
     dir,
     forbidden,
     probeFile: path.join(ROOT, ...dir.split('/'), '__gate_probe__.ts'),
-    probeSource: [
-      ...forbidden.map((f) => `import ${JSON.stringify(f.probe)};`),
-      'export const probeTitle: string = document.title;',
-      ...STORAGE_GLOBALS.map((g, i) => `export const probeStore${i}: unknown = ${g};`),
-      '',
-    ].join('\n'),
+    probeSource: code.join('\n'),
+    probeLines,
     what,
   };
 }
@@ -203,6 +300,75 @@ function isNameSlot(node: ts.Identifier): boolean {
   return false;
 }
 
+/**
+ * Expressions that denote the global object itself, so that `<base>.<name>` is
+ * a reference to the global `<name>` and not to some object’s own property.
+ *
+ * This list is why the member half of `isNameSlot` is not the last word.
+ * `globalThis.localStorage` is how **every** storage access in this repo is
+ * written - `src/ui/profile.ts`, `src/ui/runapp.ts` and `tools/ui-probe/run.ts`,
+ * with not one bare `localStorage` under `src/` - and the member name of a
+ * property access was exempt, so the storage half of this gate could not see a
+ * single real one. It was not merely narrow: its own probe was written in bare
+ * identifiers, so the instrument check passed on a shape the code never uses,
+ * and detector, self-check and recorded red-proof all agreed with each other
+ * while none of them touched real code.
+ */
+const GLOBAL_OBJECTS: readonly string[] = ['globalThis', 'window', 'self'];
+
+/**
+ * True when the identifier is the member of a property access being *read*, as
+ * opposed to a name being introduced. `g.localStorage` is a read whatever `g`
+ * is; `type X = { localStorage: string }` introduces a field and reads nothing.
+ */
+function isMemberRead(node: ts.Identifier): boolean {
+  const parent: ts.Node | undefined = node.parent;
+  if (parent === undefined) return false;
+  return ts.isPropertyAccessExpression(parent) && parent.name === node;
+}
+
+/** True when `node` is an expression denoting the global object. */
+function isGlobalObject(node: ts.Expression): boolean {
+  if (ts.isIdentifier(node)) return GLOBAL_OBJECTS.includes(node.text);
+  if (ts.isParenthesizedExpression(node)) return isGlobalObject(node.expression);
+  if (ts.isNonNullExpression(node)) return isGlobalObject(node.expression);
+  if (ts.isAsExpression(node)) return isGlobalObject(node.expression);
+  if (ts.isPropertyAccessExpression(node)) {
+    return isGlobalObject(node.expression) && GLOBAL_OBJECTS.includes(node.name.text);
+  }
+  return false;
+}
+
+/**
+ * True when `node` is the member name in `globalThis.x`, `window.x` or `self.x`
+ * - a global reached through the global object, which the checker resolves to
+ * the very same symbol as the bare identifier.
+ */
+function isGlobalMember(node: ts.Identifier): boolean {
+  const parent: ts.Node | undefined = node.parent;
+  if (parent === undefined) return false;
+  return (
+    ts.isPropertyAccessExpression(parent) &&
+    parent.name === node &&
+    isGlobalObject(parent.expression)
+  );
+}
+
+/**
+ * The string literal in `<something>[‘name’]`, which is the other spelling of a
+ * member access and the one an identifier walk never sees. The checker resolves
+ * the **argument** of `globalThis[‘document’]` to the global’s own symbol - the
+ * element access as a whole resolves to nothing - so this is the node to ask.
+ */
+function indexedName(node: ts.Node): ts.StringLiteralLike | undefined {
+  if (!ts.isStringLiteralLike(node)) return undefined;
+  const parent: ts.Node | undefined = node.parent;
+  if (parent === undefined) return undefined;
+  return ts.isElementAccessExpression(parent) && parent.argumentExpression === node
+    ? node
+    : undefined;
+}
+
 function at(source: ts.SourceFile, node: ts.Node): { line: number; column: number } {
   const pos = source.getLineAndCharacterOfPosition(node.getStart(source));
   return { line: pos.line + 1, column: pos.character + 1 };
@@ -234,33 +400,54 @@ function analyse(
       }
     }
 
-    if (ts.isIdentifier(node) && !isNameSlot(node)) {
-      const symbol = checker.getSymbolAtLocation(node);
+    // One decision for every spelling of a named reference.
+    //
+    // `globalRead` gates the **DOM** half alone, because that half asks the
+    // checker and the checker will resolve `someElement.title` into lib.dom just
+    // as happily as `globalThis.document`. Only a bare identifier or a member of
+    // the global object is a global.
+    //
+    // The **storage** half asks nothing of the base: it matches by name wherever
+    // the name is read, which is what makes it proof against aliasing the global
+    // object (`const g = globalThis; g.localStorage`). Neither scanned directory
+    // has a legitimate member called `localStorage`, and being told to rename one
+    // is a better failure than missing the real thing - the same trade the
+    // STORAGE_GLOBALS comment already makes for a local variable.
+    const flag = (name: string, atNode: ts.Node, globalRead: boolean): void => {
+      const symbol = checker.getSymbolAtLocation(atNode);
       const declarations = symbol?.declarations;
-      if (
+      const domOnly =
         declarations !== undefined &&
         declarations.length > 0 &&
-        declarations.every((d) => LIB_DOM.test(d.getSourceFile().fileName))
-      ) {
+        declarations.every((d) => LIB_DOM.test(d.getSourceFile().fileName));
+      if (globalRead && domOnly) {
         found.push({
           kind: 'dom',
-          under: node.text,
+          under: name,
           file: displayName,
-          ...at(source, node),
-          detail: `references the DOM global \`${node.text}\``,
+          ...at(source, atNode),
+          detail: `references the DOM global \`${name}\``,
         });
-      } else if (STORAGE_GLOBALS.includes(node.text)) {
+      } else if (STORAGE_GLOBALS.includes(name)) {
         found.push({
           kind: 'storage',
-          under: node.text,
+          under: name,
           file: displayName,
-          ...at(source, node),
+          ...at(source, atNode),
           detail:
-            `references \`${node.text}\`, which is browser storage and so a hidden input the ` +
+            `references \`${name}\`, which is browser storage and so a hidden input the ` +
             `replay does not carry`,
         });
       }
+    };
+
+    if (ts.isIdentifier(node)) {
+      const bare = !isNameSlot(node);
+      if (bare || isMemberRead(node)) flag(node.text, node, bare || isGlobalMember(node));
     }
+
+    const indexed = indexedName(node);
+    if (indexed !== undefined) flag(indexed.text, indexed, true);
 
     ts.forEachChild(node, visit);
   };
@@ -328,32 +515,33 @@ function main(): void {
       process.exit(2);
     }
     const probeHits = analyse(probeSource, checker, `${s.dir}/__gate_probe__.ts`, prefixes);
-    const probeImports = probeHits.filter((v) => v.kind === 'import');
-    const firedFor = new Set(probeImports.map((v) => v.under));
-    const silentPrefixes = prefixes.filter((p) => !firedFor.has(p));
-    const sawDocument = probeHits.some((v) => v.kind === 'dom' && v.under === 'document');
-    // Either half may be the one that catches a storage global, and which it is
-    // is a fact about the type declarations rather than about the rule:
-    // `indexedDB` is DOM-only and is caught by the checker, `localStorage` is
-    // declared by `@types/node` as well and is caught by name. Both count.
-    const firedStorage = new Set(
-      probeHits.filter((v) => v.kind === 'storage' || v.kind === 'dom').map((v) => v.under),
-    );
-    const silentStorage = STORAGE_GLOBALS.filter((g) => !firedStorage.has(g));
-    if (
-      probeImports.length !== s.forbidden.length ||
-      silentPrefixes.length > 0 ||
-      !sawDocument ||
-      silentStorage.length > 0
-    ) {
+
+    // Every probe line is checked on its own line. Either half may be the one
+    // that catches a storage global, and which it is is a fact about the type
+    // declarations rather than about the rule: `indexedDB` is DOM-only and the
+    // checker catches it, `localStorage` is declared by `@types/node` too and is
+    // caught by name. Both count.
+    const silent = s.probeLines.flatMap((line, i) => {
+      if (line === null) return [];
+      const wanted =
+        line.kind === 'import' ? ['import'] : ['dom', 'storage'];
+      const hit = probeHits.some(
+        (v) => v.line === i + 1 && v.under === line.under && wanted.includes(v.kind),
+      );
+      return hit ? [] : [`line ${i + 1}, ${line.shape}`];
+    });
+    if (silent.length > 0) {
+      const expected = s.probeLines.filter((l) => l !== null).length;
       console.error(
-        `GATE BROKEN: ${s.dir}/'s probe should trip one import violation per forbidden prefix ` +
-          `(${s.forbidden.length}), one DOM violation on \`document\`, and one on each of ` +
-          `${STORAGE_GLOBALS.join(', ')}. It tripped ${probeImports.length} import(s), ` +
-          `${sawDocument ? 'saw' : 'did not see'} \`document\`` +
-          `${silentPrefixes.length > 0 ? `, stayed silent on ${silentPrefixes.join(', ')}` : ''}` +
-          `${silentStorage.length > 0 ? `, and stayed silent on ${silentStorage.join(', ')}` : ''}. ` +
-          `The detector cannot be trusted to report an absence.`,
+        `GATE BROKEN: ${s.dir}/'s probe breaks this gate's rule ${expected} time(s) and the ` +
+          `detector reported ${expected - silent.length} of them. It stayed silent on:`,
+      );
+      for (const s2 of silent) console.error(`  ${s2}`);
+      console.error(
+        'The detector cannot be trusted to report an absence. A probe is only evidence for ' +
+          'the spellings it actually contains: every storage access in this repo is written ' +
+          '`globalThis.localStorage`, and an earlier probe made of bare identifiers passed ' +
+          'while the gate could not see one of them.',
       );
       process.exit(2);
     }
@@ -391,12 +579,15 @@ function main(): void {
     process.exit(1);
   }
 
+  const shapes = globalProbeLines().length;
   console.log(
     `Import boundary gate OK: ${files.get('src/engine')!.length} file(s) under src/engine/ ` +
       `import nothing from ${PREFIXES.join(', ')}, and they and the ` +
       `${files.get('src/run')!.length} file(s) under src/run/ reference no DOM-only global and ` +
-      `none of ${STORAGE_GLOBALS.join(', ')}. Probe check: the detector fired for every prefix, ` +
-      `for \`document\`, and for each storage global, in each scanned directory.`,
+      `none of ${STORAGE_GLOBALS.join(', ')} - bare, through globalThis, through a string ` +
+      `index, or through an alias of the global object. Probe check: ${shapes} global ` +
+      `spellings plus one import per forbidden prefix, each caught on its own probe line, ` +
+      `in each scanned directory.`,
   );
 }
 

@@ -583,6 +583,20 @@ export function migrateRunLog(raw: unknown): RunLog {
   }
   const nodes = log.nodes as NodeRecord[];
   const named = typeof log.classId === 'string' ? { classId: log.classId } : {};
+  // The format is read **first**, and that order is the fix for a refusal that
+  // named the wrong thing. A log written in a format this code has never seen
+  // is unreadable whatever else is in it, so its own fields are not worth
+  // complaining about: with `parseUnlockSet` running first, a format 99 log
+  // carrying a malformed `unlocked` was refused for the unlock set and never
+  // named the format, which is the one fact the player needs.
+  const format = log.format ?? 1;
+  if (format !== 1 && format !== RUN_LOG_FORMAT) {
+    throw new Error(
+      `run log: written in format ${String(format)}, and this code reads formats 1 and ` +
+        `${RUN_LOG_FORMAT}. Its choices index shelves that are drawn some other way, so it cannot ` +
+        `be replayed; start a new run on seed ${log.seed}.`,
+    );
+  }
   // Carried through untouched, like the class, and read strictly: a set that
   // cannot be parsed is refused by name rather than dropped, because dropping
   // it would replay the log against a wider pool and reach a different run.
@@ -591,16 +605,8 @@ export function migrateRunLog(raw: unknown): RunLog {
     `the log for seed ${log.seed}`,
   );
   const drafted = set === null ? {} : { unlocked: set };
-  const format = log.format ?? 1;
   if (format === RUN_LOG_FORMAT) {
     return { seed: log.seed, ...named, ...drafted, format: RUN_LOG_FORMAT, nodes };
-  }
-  if (format !== 1) {
-    throw new Error(
-      `run log: written in format ${String(format)}, and this code reads formats 1 and ` +
-        `${RUN_LOG_FORMAT}. Its choices index shelves that are drawn some other way, so it cannot ` +
-        `be replayed; start a new run on seed ${log.seed}.`,
-    );
   }
   // A format 1 log naming an unlock set is a log no version of this code ever
   // wrote: format 1 is units 5, 8 and 10, and unlocks landed in unit 12 with

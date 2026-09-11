@@ -99,21 +99,73 @@ export const SAVE_PREFIX = 'cards.run.';
  * string rather than a `localStorage`, so the shape checks, the migration and
  * the refusal are all testable without a browser.
  */
-export function parseSavedRun(raw: string | null | undefined, seed: number): RunLog | null {
-  if (raw === null || raw === undefined) return null;
+/**
+ * What storage held for a seed: a run to resume, or the reason there is not
+ * one.
+ *
+ * The two are different facts and the caller has to tell them apart. A `null`
+ * log used to mean both "nothing was stored" and "something was stored and this
+ * code refused it", so `opened` stayed `'fresh'` and the notice bar said
+ * nothing - `migrateRunLog`'s carefully worded refusals reached the console and
+ * never the player, whose run had just disappeared.
+ */
+export type SavedRunRead = {
+  readonly log: RunLog | null;
+  /** A sentence for the screen. Null when there was simply nothing stored. */
+  readonly problem: string | null;
+};
+
+/** `parseSavedRun`, with the refusal kept instead of dropped. */
+export function readSavedRun(raw: string | null | undefined, seed: number): SavedRunRead {
+  if (raw === null || raw === undefined) return { log: null, problem: null };
+  let parsed: RunLog;
   try {
-    const parsed = JSON.parse(raw) as RunLog;
-    if (typeof parsed !== 'object' || parsed === null || parsed.seed !== seed || !Array.isArray(parsed.nodes)) {
-      return null;
-    }
-    return migrateRunLog(parsed);
+    parsed = JSON.parse(raw) as RunLog;
   } catch (e) {
-    // A stored run this code cannot read is not resumed, and the reason is said
-    // rather than swallowed: `migrateRunLog` refuses by name, and its sentence
-    // is the only account of why a run vanished.
-    console.error(`cards: the saved run on seed ${seed} could not be read`, e);
-    return null;
+    console.error(`cards: the saved run on seed ${seed} is not readable JSON`, e);
+    return {
+      log: null,
+      problem:
+        `The saved run on seed ${seed} was stored in a form this build cannot read, and has ` +
+          `been discarded. Start a new run.`,
+    };
   }
+  if (typeof parsed !== 'object' || parsed === null || !Array.isArray(parsed.nodes)) {
+    return {
+      log: null,
+      problem: `What was stored on seed ${seed} is not a run log, and has been discarded.`,
+    };
+  }
+  if (parsed.seed !== seed) {
+    return {
+      log: null,
+      problem:
+        `The run stored under seed ${seed} says it is seed ${String(parsed.seed)}, so it was ` +
+          `not resumed and has been discarded.`,
+    };
+  }
+  try {
+    return { log: migrateRunLog(parsed), problem: null };
+  } catch (e) {
+    // `migrateRunLog` refuses by name and its sentence is the only account of
+    // why a run vanished, so it is what the player is shown.
+    console.error(`cards: the saved run on seed ${seed} could not be read`, e);
+    const said = e instanceof Error ? e.message : String(e);
+    // The refusal is quoted rather than spliced into a sentence of ours. Its
+    // three shapes begin 'written in', 'not a run log' and 'the format 1 log',
+    // and no one connective fits all three - so it gets a clause of its own.
+    return {
+      log: null,
+      problem:
+        `The saved run on seed ${seed} could not be read and has been discarded. Reason: ` +
+          `${said.replace(/^run log: /, '')}`,
+    };
+  }
+}
+
+/** The log alone, for callers that do not report. */
+export function parseSavedRun(raw: string | null | undefined, seed: number): RunLog | null {
+  return readSavedRun(raw, seed).log;
 }
 
 /**
@@ -122,12 +174,14 @@ export function parseSavedRun(raw: string | null | undefined, seed: number): Run
  * read a stored run either, or it resumes a run played against the player's own
  * pool and then finishes it against the pinned one. See `storageAllowed`.
  */
-export function loadSavedRun(seed: number, persist: boolean): RunLog | null {
-  if (!persist) return null;
+export function loadSavedRun(seed: number, persist: boolean): SavedRunRead {
+  if (!persist) return { log: null, problem: null };
   try {
-    return parseSavedRun(globalThis.localStorage?.getItem(`${SAVE_PREFIX}${seed}`), seed);
+    return readSavedRun(globalThis.localStorage?.getItem(`${SAVE_PREFIX}${seed}`), seed);
   } catch {
-    return null;
+    // Storage itself threw - a blocked cookie jar, a full quota. Nothing was
+    // read, so there is nothing to report and nothing to discard.
+    return { log: null, problem: null };
   }
 }
 
@@ -173,6 +227,29 @@ const FORGE_WORDS: Readonly<Record<ForgeMode, string>> = {
  * the app is refused unless it is one of the three".
  */
 export const PICKABLE_CLASSES: readonly ClassDef[] = CLASSES;
+
+/**
+ * What a pinned session owes the player, in one sentence, or null when nothing
+ * is pinned.
+ *
+ * Pure and exported for the same reason as `PICKABLE_CLASSES`: `startRunApp`
+ * needs a document, so a sentence written inside it is a sentence `node --test`
+ * cannot read, and an ungated sentence can quietly stop being true. This one
+ * did. It said "nothing this run earns is saved to your profile" while
+ * `storageAllowed` was refusing the **run** as well - so a player who opened
+ * `?unlocks=all`, played for twenty minutes and reloaded lost the run, having
+ * been warned only about the unlocks.
+ */
+export function pinnedNotice(override: string | null): string | null {
+  if (override === null) return null;
+  const draftable =
+    override === 'all' ? 'everything is draftable' : 'nothing unlockable is draftable';
+  return (
+    `Unlocks are pinned by ?unlocks=${override}: ${draftable}, and this session touches no ` +
+    `stored state - nothing this run earns is saved to your profile, and the run itself is ` +
+    `not saved either, so a reload starts over.`
+  );
+}
 
 /**
  * The class-pick screen as the app builds it, with the classes the app offers.
@@ -307,6 +384,13 @@ export function startRunApp(): void {
   /** A word for the notice bar about how this run came to be on screen. */
   let opened: 'fresh' | 'resumed' | 'refused' = 'fresh';
   /**
+   * Why a stored run is not the run on screen, in the words the refusal chose.
+   * Null when nothing was refused. The notice bar says it: a run that vanishes
+   * with only a console line is a run the player watched disappear for no
+   * stated reason.
+   */
+  let refusal: string | null = null;
+  /**
    * A run starts by choosing a class. `?class=ranger` names one and skips the
    * screen, the way `?seed=` and `?encounter=` make a run addressable; a saved
    * run carries its own class and never asks. Otherwise the class-pick screen
@@ -352,7 +436,19 @@ export function startRunApp(): void {
   // meantime, which is the ordinary case and not an error. The guard stays a
   // contract for a caller that insists on a set; `test/unlocks.test.ts` holds
   // both halves, the refusal and this resume.
-  const saved = params.get('fresh') === '1' ? null : loadSavedRun(startSeed, persist);
+  const read =
+    params.get('fresh') === '1'
+      ? { log: null, problem: null }
+      : loadSavedRun(startSeed, persist);
+  const saved = read.log;
+  if (read.problem !== null) {
+    // Stored, and refused. The player is told, in the words the refusal chose,
+    // and the unreadable blob goes rather than sitting there to be refused
+    // again on every reload until a new run overwrites it.
+    opened = 'refused';
+    refusal = read.problem;
+    forgetRun(startSeed, persist);
+  }
   if (saved !== null && saved.nodes.length > 0) {
     try {
       ctl = createRunController(RUN_CONTENT, startSeed, { resume: saved });
@@ -362,6 +458,9 @@ export function startRunApp(): void {
       console.error('cards: the saved run did not replay and was discarded', e);
       forgetRun(startSeed, persist);
       opened = 'refused';
+      refusal =
+        `The saved run on seed ${startSeed} did not replay against this build and has been ` +
+          `discarded.`;
     }
   }
   /** A reachable node the pointer or the focus ring is on. */
@@ -650,6 +749,25 @@ export function startRunApp(): void {
       `<p class="run__muted">${beyond}</p>`;
   }
 
+  /**
+   * The pinned-session sentence as markup: escaped, with the parameter in a
+   * `<code>`. The sentence itself is `pinnedNotice`, which is pure and gated;
+   * this is only the wrapping, and the substitution runs on already-escaped
+   * text so it cannot introduce markup of its own.
+   */
+  function pinnedHtml(): string {
+    const said = pinnedNotice(override);
+    if (said === null) return '';
+    const param = esc(`?unlocks=${override ?? ''}`);
+    return esc(said).replace(param, `<code>${param}</code>`);
+  }
+
+  /** The same sentence on the notice bar, which is the screen a run opens on. */
+  function pinnedWords(): string {
+    const said = pinnedHtml();
+    return said === '' ? '' : ` ${said}`;
+  }
+
   function renderNotice(): void {
     const o = ctl.last;
     if (o === null) {
@@ -658,8 +776,9 @@ export function startRunApp(): void {
         opened === 'resumed'
           ? `Run resumed on seed ${ctl.seed}, ${s.nodesVisited} node${s.nodesVisited === 1 ? '' : 's'} in, replayed from its choice list. ` +
             `A node in progress is not saved, so a reload returns you here, to the map.`
-          : (opened === 'refused' ? 'The saved run on this seed did not replay and was discarded. ' : '') +
-            `A new run on seed ${ctl.seed} as the ${className()}. Your hero has ${s.hero.health} ${STAT_TERMS.health.name} for the whole run, ${s.deck.length} cards, and no gold.`;
+          : (refusal === null ? '' : `${esc(refusal)} `) +
+            `A new run on seed ${ctl.seed} as the ${className()}. Your hero has ${s.hero.health} ${STAT_TERMS.health.name} for the whole run, ${s.deck.length} cards, and no gold.` +
+            pinnedWords();
       dom.notice.className = 'run__notice';
       return;
     }
@@ -870,17 +989,19 @@ export function startRunApp(): void {
    * when `?unlocks=` is pinning the pool. Both change what a run can draft, and
    * a collection that quietly disagrees with the address bar is worse than a
    * sentence saying which is in force.
+   *
+   * The pinned sentence says **the run is not saved either**, which it did not.
+   * `storageAllowed` is false for the whole session, so a player who opens
+   * `?unlocks=all`, plays for twenty minutes and reloads loses the run - and the
+   * only warning said that nothing *earned* would be kept. `pinnedWords` says it
+   * on the notice bar as well, which is the screen they see first.
    */
   function profileNotice(): string {
     if (openedProfile.problem !== null) {
       return `<p class="run__warn">${esc(openedProfile.problem)}</p>`;
     }
-    if (override === null) return '';
-    return (
-      `<p class="run__warn run__warn--pin">Unlocks are pinned by <code>?unlocks=${esc(override)}</code>: ` +
-      `${override === 'all' ? 'everything is draftable' : 'nothing unlockable is draftable'}, and ` +
-      `nothing this run earns is saved to your profile.</p>`
-    );
+    const said = pinnedHtml();
+    return said === '' ? '' : `<p class="run__warn run__warn--pin">${said}</p>`;
   }
 
   /** The collection over whatever screen is up. The HUD's button closes it again. */
