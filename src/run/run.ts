@@ -74,7 +74,7 @@ import {
   type UnlockSet,
   RUN_LOG_FORMAT,
 } from './types.ts';
-import { parseUnlockSet, unlockedContent } from './unlocks.ts';
+import { canonicalUnlockSet, parseUnlockSet, unlockedContent } from './unlocks.ts';
 
 /** The stream name the run's own generator is derived on. */
 export const RUN_STREAM = 'run';
@@ -211,13 +211,23 @@ function requirePick(value: number, count: number, what: string, allowSkip: bool
  * The set is fixed here and never moves again. A run cannot widen its own
  * pool mid-run, which is what lets the log record one set for the whole run
  * and lets `replayRun` redraw every shelf from it.
+ *
+ * It is also **canonicalised** here, and that is the keystone rather than
+ * tidiness. `UnlockSet` is a structural type, so a caller may hand over an
+ * unsorted or duplicated pair of lists; the digest quotes both lists, and
+ * `replayRun` reads its set through `parseUnlockSet`, which sorts and dedupes.
+ * A run started from a list in some other order would therefore hash
+ * differently from its own replay while being, draw for draw, the same run.
+ * This is the one place both paths pass through, so it is where the shape is
+ * fixed.
  */
 export function startRun(
   content: RunContent,
   seed: number,
   classId: string = defaultClassId(content),
-  unlocked: UnlockSet | null = null,
+  raw: UnlockSet | null = null,
 ): RunState {
+  const unlocked = canonicalUnlockSet(raw);
   const pooled = unlockedContent(content, unlocked);
   const cls = classOf(pooled, classId);
   const active = contentForClass(pooled, classId);
@@ -549,6 +559,12 @@ export function runRun(
  * names no class replays as the content's default class either way; a format 1
  * log may therefore name a class or not, and both upgrade the same.
  *
+ * `unlocked` is the opposite and is **refused on a format 1 log**. Unlocks
+ * landed in unit 12, with the format already at 2, so a format 1 log naming a
+ * set is one no version of this code wrote. The class could be absent
+ * harmlessly; a set cannot be present harmlessly, because it narrows the
+ * shelves the log's picks index into.
+ *
  * A log in the current format comes back as it is. A log in a format this
  * code has never written is refused with both numbers named, because its
  * choices would index shelves drawn some other way and a "successful" replay
@@ -584,6 +600,21 @@ export function migrateRunLog(raw: unknown): RunLog {
       `run log: written in format ${String(format)}, and this code reads formats 1 and ` +
         `${RUN_LOG_FORMAT}. Its choices index shelves that are drawn some other way, so it cannot ` +
         `be replayed; start a new run on seed ${log.seed}.`,
+    );
+  }
+  // A format 1 log naming an unlock set is a log no version of this code ever
+  // wrote: format 1 is units 5, 8 and 10, and unlocks landed in unit 12 with
+  // the format already at 2. Refused rather than upgraded, because the one
+  // thing such a field can be is a hand-edited or forged set, and honouring it
+  // would narrow shelves the recorded picks were never taken from.
+  if (set !== null) {
+    throw new Error(
+      `run log: the format 1 log for seed ${log.seed} names an unlock set ` +
+        `(gated ${set.gated.length}, owned ${set.owned.length}), and no version of this code ` +
+        `ever wrote one - format 1 predates unlocks, and every log written since is format ` +
+        `${RUN_LOG_FORMAT}. Its picks index shelves drawn with nothing gated, so honouring the ` +
+        `set would replay a different run. Drop the \`unlocked\` field, or mark the log format ` +
+        `${RUN_LOG_FORMAT} if that is what wrote it.`,
     );
   }
   const decline: RunChoice = { kind: 'sigil', pick: -1 };

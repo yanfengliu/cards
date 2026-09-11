@@ -26,6 +26,8 @@
  * interior detail to be told apart.
  */
 
+import { escapeHtml as esc } from './escape.ts';
+
 export type IconName =
   // The numbers on every card.
   | 'power'
@@ -394,12 +396,6 @@ export function iconShape(name: IconName): string {
 }
 
 export const ICON_NAMES: readonly IconName[] = Object.keys(ICONS) as IconName[];
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;',
-  );
-}
 
 export interface IconOptions {
   /** Edge length in CSS px. The box is square. */

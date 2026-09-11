@@ -49,7 +49,11 @@ src/
 
 **Make this a lint rule, not a good intention.** An architecture that is only written down erodes; one that is a gate does not. Both rules exist now, and both read the TypeScript AST rather than grepping, because `rng.ts` and `measure.ts` name the banned APIs in comments in order to say they are never called and a grep gate is red on a clean tree.
 
-`npm run gate:boundaries` fails when anything under `src/engine/` imports from `src/content/`, `src/render/`, `src/ui/` or `tools/`, or references a global that only `lib.dom` declares.
+`npm run gate:boundaries` fails when anything under `src/engine/` imports from `src/content/`, `src/render/`, `src/ui/` or `tools/`, or when anything under `src/engine/` **or `src/run/`** references a global that only `lib.dom` declares or names `localStorage`, `sessionStorage` or `indexedDB`.
+
+The `src/run/` half is the one-way rule's sibling rather than the rule itself. The run layer is bound to content by design — `src/run/content.ts` is that binding — so its direction is not policed. What is policed is the same thing the engine's DOM half polices: a hidden input. A run is a pure function of its seed, its class and its unlock set, and browser storage is the one way a number could reach it from outside those, which is also how the design's "no persistent power" would be broken without any narrowing rule noticing. Storage lives in `src/ui/profile.ts` and `src/ui/runapp.ts`, above the run layer, and is handed down as a value.
+
+Two globals are banned by name rather than through the checker, and the gate's own probe is what established that they had to be: `@types/node` declares `localStorage` and `sessionStorage` as well as `lib.dom` does, so the "declared only in `lib.dom`" rule — the rule that correctly leaves `console` and `fetch` alone — can never see them. `indexedDB` is DOM-only and the checker does catch it.
 
 `npm run gate:banned-apis` bans the hidden inputs a replay does not carry, and it covers **four** of them rather than the three this document first named:
 

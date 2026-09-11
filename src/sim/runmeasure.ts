@@ -45,7 +45,7 @@ import { hashMaps, hashRun } from '../run/hash.ts';
 import { branchingTypes, mapProblems } from '../run/map.ts';
 import { drawDistinctCards, fightSeedFor } from '../run/nodes.ts';
 import { contentForClass, replayRun, runRun, startRun } from '../run/run.ts';
-import { FRESH_UNLOCKS } from '../content/unlocks.ts';
+import { ALL_UNLOCKS, FRESH_UNLOCKS, unlocksFor } from '../content/unlocks.ts';
 import { stillLocked, unlockProblems, unlockedContent } from '../run/unlocks.ts';
 import { fightSigilProblems, sigilProblems } from '../run/sigils.ts';
 import type {
@@ -442,6 +442,98 @@ export function checkRuns(
     fightSigilProblems: fightTrouble,
     detail,
   };
+}
+
+/** What `checkUnlockReplay` found. Empty `problems` is the claim. */
+export type UnlockReplayCheck = {
+  /** Whole runs played and replayed. Zero means the check did not run. */
+  readonly runs: number;
+  /** Seeds where two of the sets reached different runs. Zero means it proved nothing. */
+  readonly seedsSeparated: number;
+  readonly problems: string[];
+};
+
+/**
+ * The unlock set as an input to a whole run, checked the way the class is: a
+ * run played at a set records that set and replays from it.
+ *
+ * `checkRuns` above calls `runRun` with no unlock argument at all, so before
+ * this the whole-run gate had **zero** coverage of the input. An independent
+ * review measured what that hid: `startRun` recording `{gated, owned: []}`
+ * while still narrowing by the real set left all 237 tests green, and stopped
+ * 48 of 72 runs replaying across six sets and twelve seeds without a single
+ * check going red. The reason is that every replay assertion the suite made ran
+ * at `owned: []`, where that record is the truth.
+ *
+ * So the sets here are a **ladder**, and the middle of it is the point: a
+ * partly unlocked profile is what an ordinary player has, and it is the only
+ * shape that can tell "recorded the set" from "recorded the gated list".
+ *
+ * `seedsSeparated` is what stops this reporting "did not run" as "passed": if
+ * no two sets ever reached different runs, a `startRun` that ignored its set
+ * entirely would satisfy every equality above.
+ */
+export function checkUnlockReplay(
+  seeds: readonly number[],
+  content: RunContent = RUN_CONTENT,
+): UnlockReplayCheck {
+  const ladder: readonly { readonly name: string; readonly set: UnlockSet }[] = [
+    { name: 'a fresh profile', set: FRESH_UNLOCKS },
+    { name: 'two deeds earned', set: unlocksFor(['a_first_run', 'a_act_one']) },
+    { name: 'every deed earned', set: ALL_UNLOCKS },
+  ];
+  const problems: string[] = [];
+  const key = (set: UnlockSet): string => `g[${set.gated.join(',')}]/o[${set.owned.join(',')}]`;
+  let runs = 0;
+  let seedsSeparated = 0;
+
+  for (const { name, set } of ladder) {
+    for (const p of unlockProblems(content, set)) {
+      problems.push(`${name}: the content is not playable at this set - ${p}`);
+    }
+  }
+  if (problems.length > 0) return { runs, seedsSeparated, problems };
+
+  for (const seed of seeds) {
+    const hashes = new Set<string>();
+    for (const { name, set } of ladder) {
+      const { run, log } = runRun(
+        content,
+        seed,
+        makeRunAgent({ route: 'greedy', placement: 'lookahead', seed }),
+        undefined,
+        set,
+      );
+      runs++;
+      const live = hashRun(run);
+      hashes.add(live);
+      if (log.unlocked === undefined || key(log.unlocked) !== key(set)) {
+        problems.push(
+          `seed ${seed}, ${name}: the log recorded ` +
+            `${log.unlocked === undefined ? 'no unlock set' : key(log.unlocked)} and the run was ` +
+            `played with ${key(set)}. A reward pick is an index into a shelf, so a replay would ` +
+            `redraw the shelves from the wrong pool.`,
+        );
+        continue;
+      }
+      let replayed: string;
+      try {
+        replayed = hashRun(replayRun(content, log));
+      } catch (e) {
+        problems.push(
+          `seed ${seed}, ${name}: replaying the log threw - ${e instanceof Error ? e.message : String(e)}`,
+        );
+        continue;
+      }
+      if (replayed !== live) {
+        problems.push(
+          `seed ${seed}, ${name}: the replay reached ${replayed} and the live run ${live}`,
+        );
+      }
+    }
+    if (hashes.size > 1) seedsSeparated++;
+  }
+  return { runs, seedsSeparated, problems };
 }
 
 /**
@@ -904,6 +996,7 @@ function main(): void {
   const checkSeeds = seeds.slice(0, Math.min(Number.parseInt(arg('check-seeds', '30'), 10), n));
   const inst = checkRuns(checkSeeds, 3, 'greedy', 'lookahead', content);
   const agree = checkRouteAgreement(checkSeeds, content);
+  const unlockReplay = checkUnlockReplay(checkSeeds, content);
 
   console.log('## Instrument checks');
   console.log('');
@@ -940,6 +1033,15 @@ function main(): void {
       `engine. A run that granted none did not exercise the path, and a path that did not run ` +
       `cannot be reported as passing.`,
   );
+  const unlockOk = unlockReplay.problems.length === 0 && unlockReplay.seedsSeparated > 0;
+  console.log(
+    `- The unlock set is an input the log carries: ${unlockOk ? 'PASS' : 'FAIL'}; ` +
+      `${unlockReplay.runs} run(s) across ${checkSeeds.length} seeds x 3 sets - a fresh profile, ` +
+      `a half-unlocked one and everything owned - each recorded its own set and replayed to its ` +
+      `own hash, and ${unlockReplay.seedsSeparated}/${checkSeeds.length} seed(s) reached a ` +
+      `different run at a different set. A window where every set played the same run would ` +
+      `pass while the set was ignored entirely.`,
+  );
   const degen = degeneracy(armGL);
   console.log(
     `- The instrument can see a difference: ${degen.length === 0 ? 'PASS' : 'FAIL'}; the ` +
@@ -952,6 +1054,7 @@ function main(): void {
   for (const p of inst.streamSeparation.slice(0, 5)) console.log(`  - ${p}`);
   for (const p of inst.sigilProblems.slice(0, 5)) console.log(`  - ${p}`);
   for (const p of inst.fightSigilProblems.slice(0, 5)) console.log(`  - ${p}`);
+  for (const p of unlockReplay.problems.slice(0, 5)) console.log(`  - ${p}`);
 
   const elapsed = Number(process.hrtime.bigint() / 1000000n) - started;
   console.log('');
@@ -990,6 +1093,16 @@ function main(): void {
     //           appeared from nowhere is a failure and not a silent pass.
     //   Bound   to the setup, not to a resolved fight: it says the fight was
     //           handed the sigil, not that the card carrying it was drawn.
+    //   Proves  that the unlock set is an input the log carries: three sets -
+    //           a fresh profile, a half-unlocked one, everything owned - over
+    //           the check seeds, each run recording its own set and replaying
+    //           to its own hash, with at least one seed reaching a different
+    //           run at a different set. The half-unlocked one is what makes it
+    //           a check: at `owned: []` a run that recorded the gated list with
+    //           an empty owned half is indistinguishable from a correct one.
+    //   Misses  whether a fresh profile's pool is strong enough to win with.
+    //           That is `npm run measure:run -- --unlocks none`, an instrument
+    //           and not a gate, for the reason every win rate here is.
     //   Misses  a balance drift that keeps the run winnable and losable. This
     //           gate catches a run that has become a fixed point, not one that
     //           has quietly got harder; the printed tables are for that.
@@ -1042,6 +1155,18 @@ function main(): void {
       failures.push(
         `${inst.fightSigilProblems.length} sigil grant(s) did not reach the fight the run hands ` +
           `the engine: ${inst.fightSigilProblems[0]}`,
+      );
+    }
+    if (unlockReplay.problems.length > 0) {
+      failures.push(
+        `${unlockReplay.problems.length} run(s) did not record or replay the unlock set they ` +
+          `were played with: ${unlockReplay.problems[0]}`,
+      );
+    }
+    if (unlockReplay.seedsSeparated === 0) {
+      failures.push(
+        `no seed reached a different run at a different unlock set across ${unlockReplay.runs} ` +
+          `run(s), so the unlock-replay check was vacuous and cannot be reported as a pass`,
       );
     }
     for (const d of degen) failures.push(d);

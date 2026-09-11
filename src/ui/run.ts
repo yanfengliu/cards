@@ -93,7 +93,7 @@ import {
   type SigilGrant,
   type UnlockSet,
 } from '../run/types.ts';
-import { parseUnlockSet, stillLocked } from '../run/unlocks.ts';
+import { canonicalUnlockSet, parseUnlockSet, stillLocked } from '../run/unlocks.ts';
 
 /** A fight the screen finished: the engine's final state and its action list. */
 export type FightOutcome = {
@@ -333,7 +333,11 @@ export function createRunController(
   const nodes: NodeRecord[] = [];
   const resume = options.resume;
   let classId = options.classId ?? defaultClassId(content);
-  let unlocked = options.unlocked ?? null;
+  // Canonical from here on, for the reason `startRun` gives: the set is
+  // compared with the log's below by `unlockKey`, which reads both lists in
+  // order, and it is handed back to the caller as `ctl.unlocked`. A set that
+  // arrived unsorted would refuse a resume it should have allowed.
+  let unlocked = canonicalUnlockSet(options.unlocked ?? null);
   let format = RUN_LOG_FORMAT;
   if (resume !== undefined) {
     if (resume.seed !== seed) {
@@ -354,9 +358,13 @@ export function createRunController(
     // shelves drawn from *its* pool, so resuming it against a wider one would
     // hand the player cards the run never offered.
     const saved = parseUnlockSet(resume.unlocked, `the saved run on seed ${seed}`);
-    if (options.unlocked !== undefined && unlockKey(options.unlocked ?? null) !== unlockKey(saved)) {
+    // `unlocked` here is the caller's set already canonicalised; `unlockKey`
+    // reads both lists in order, so comparing the raw option would refuse a
+    // resume on list order alone. `options.unlocked !== undefined` is still
+    // what tells "not passed" from "passed as null".
+    if (options.unlocked !== undefined && unlockKey(unlocked) !== unlockKey(saved)) {
       throw new Error(
-        `run: cannot resume a run played with ${unlockWords(saved)} while ${unlockWords(options.unlocked ?? null)} ` +
+        `run: cannot resume a run played with ${unlockWords(saved)} while ${unlockWords(unlocked)} ` +
           'is unlocked now. A log replays only against the pool it was played with; finish or ' +
           'abandon this run before the new unlocks apply.',
       );

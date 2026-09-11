@@ -21,6 +21,7 @@ import { CLASS_TERMS } from '../render/class-terms.ts';
 import { STAT_TERMS, TRAIT_TERMS } from '../render/glossary.ts';
 import { iconSvg } from '../render/icons.ts';
 import { cardEntityView } from '../render/view.ts';
+import { escapeHtml as esc } from '../render/escape.ts';
 
 export type ClassPickOptions = {
   readonly seed: number;
@@ -30,12 +31,6 @@ export type ClassPickOptions = {
   readonly mount: boolean;
   readonly hatch: boolean;
 };
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;',
-  );
-}
 
 /** The deck as distinct cards with a count, in the order they first appear. */
 function grouped(deck: readonly string[]): { id: string; count: number }[] {

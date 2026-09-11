@@ -26,12 +26,7 @@ import { TRAIT_TERMS } from '../render/glossary.ts';
 import { iconSvg } from '../render/icons.ts';
 import { SIGIL_TERM } from '../render/sigil-terms.ts';
 import type { Profile, RunUnlocks } from './profile.ts';
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;',
-  );
-}
+import { escapeHtml as esc } from '../render/escape.ts';
 
 /** One unlockable thing, as the collection lists it. */
 export type UnlockEntry = {

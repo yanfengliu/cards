@@ -23,15 +23,41 @@
 //   fresh profile replaying to its own hash while the same seed played with no
 //   unlock layer reaches a different one.
 //
+// An independent review of the first version of this file found five holes in
+// it, each a defect-shaped mutation that survived all 237 tests, and the second
+// half of the file closes them. What they had in common is worth stating,
+// because it is what the next round should look for:
+//
+//   **Every assertion about a recorded set ran at `owned: []`.** A `startRun`
+//   that recorded the gated list with an empty owned half is *correct* at a
+//   fresh profile, so nothing could see it - 48 of 72 runs stopped replaying
+//   with the suite still green. The ladder below is the fix: a half-unlocked
+//   profile is the ordinary case and the only one that can tell the two apart.
+//
+//   **The claims stopped at a function's boundary.** "No persistent power" was
+//   gated over `unlockedContent`'s output, so a starting-gold bonus scaled by
+//   how much is locked - one frame up, in `startRun` - was outside it. It is
+//   now a claim about the whole starting `RunState`.
+//
+//   **Only one direction was gated.** Every check asked whether the filter was
+//   too *wide*. Dropping an ungated card, which is the direction "every run is
+//   winnable from the first one" actually cares about, was green.
+//
 // Bound of this file - what a green run does and does not prove:
 //
 //   Content: the shipped `RUN_CONTENT` and `GATED_IDS`, plus a two-card
 //   fixture content for the cases the shipped one cannot reach (an empty
 //   pool, a set that gates everything).
 //   Windows: 12 shipped seeds x 2 route styles for the whole-run checks, all
-//   three classes for the starting-deck and pick-screen checks, and the two
+//   three classes for the starting-deck and pick-screen checks, the five-rung
+//   `LADDER` of unlock sets for the replay and narrowing checks, and the two
 //   golden format 1 logs for the "an old log still replays" half. Windows, not
 //   spaces.
+//   Storage: `localStorage` is a stub installed by the test, so what is gated
+//   is this code's own decisions about storage - what a pinned pool may touch,
+//   and that a saved run is migrated before it is replayed - and not the
+//   browser's. The browser's own round trip is
+//   `node tools/ui-probe/run.ts <seed> <theme> <class> fresh`.
 //   The population is asserted in each whole-run test, so a window that
 //   exercised no gated card or earned no achievement fails rather than passes.
 //   Proves nothing about pixels, the DOM, or how *hard* a fresh profile's pool
@@ -68,7 +94,8 @@ import {
   runRun,
   startRun,
 } from '../src/run/run.ts';
-import type { RunContent, RunLog, RunState, UnlockSet } from '../src/run/types.ts';
+import type { RunClass, RunContent, RunLog, RunState, UnlockSet } from '../src/run/types.ts';
+import { RUN_LOG_FORMAT } from '../src/run/types.ts';
 import {
   achievementEarned,
   actsCleared,
@@ -90,7 +117,17 @@ import {
   unlockSetFor,
   PROFILE_VERSION,
 } from '../src/ui/profile.ts';
-import { classPickHtml, unlockOverride, unlockSetFrom } from '../src/ui/runapp.ts';
+import {
+  SAVE_PREFIX,
+  classPickHtml,
+  forgetRun,
+  loadSavedRun,
+  parseSavedRun,
+  saveRun,
+  storageAllowed,
+  unlockOverride,
+  unlockSetFrom,
+} from '../src/ui/runapp.ts';
 import { collectionEntries, collectionHtml, runUnlocksHtml } from '../src/ui/unlocks.ts';
 import { createRunController } from '../src/ui/run.ts';
 
@@ -129,19 +166,31 @@ test('narrowing a content touches the reward tables and the sigils and nothing e
         `narrowing moved "${key}" - an unlock may only add rows to a draw table`,
       );
     }
-    // Each class keeps everything but its pool, by reference.
+    // Each class keeps everything but its pool, by reference - and the walk is
+    // off the class object rather than a list written here, for the same
+    // reason the `RunContent` walk above is. A hand-written five-field list
+    // was the one narrowing left in this gate: a field added to `RunClass`
+    // tomorrow would have fallen outside it on the day it was added.
     const before = RUN_CONTENT.classes ?? [];
     const after = narrowed.classes ?? [];
     assert.equal(after.length, before.length);
     for (let i = 0; i < before.length; i++) {
-      assert.equal(after[i]!.id, before[i]!.id);
-      assert.equal(after[i]!.name, before[i]!.name);
-      assert.equal(after[i]!.hero, before[i]!.hero, 'narrowing moved a class hero');
-      assert.equal(
-        after[i]!.startingDeck,
-        before[i]!.startingDeck,
-        'narrowing moved a class starting deck',
+      const classKeys = Object.keys(before[i]!) as (keyof RunClass)[];
+      assert.ok(classKeys.length >= 5, `RunClass has ${classKeys.length} fields; the walk looks wrong`);
+      assert.deepEqual(
+        Object.keys(after[i]!).sort(),
+        classKeys.slice().sort(),
+        'narrowing added or dropped a class field',
       );
+      for (const key of classKeys) {
+        if (key === 'rewards') continue;
+        assert.equal(
+          after[i]![key],
+          before[i]![key],
+          `narrowing moved the ${before[i]!.name}'s "${key}" - an unlock may only add rows to a ` +
+            `draw table`,
+        );
+      }
     }
   }
 });
@@ -705,4 +754,358 @@ test('the narrowing predicate has one implementation, and the screen uses it', (
   assert.equal(unlockedRewards(null, RUN_CONTENT.rewards), RUN_CONTENT.rewards);
   assert.deepEqual(stillLocked(FRESH_UNLOCKS), GATED_IDS.slice().sort());
   assert.deepEqual(stillLocked(ALL_UNLOCKS), []);
+});
+
+// ---------------------------------------------------------------------------
+// Closing an independent review: the holes sixteen mutations left open
+// ---------------------------------------------------------------------------
+
+/**
+ * A ladder of sets a real player passes through. `FRESH_UNLOCKS` and
+ * `ALL_UNLOCKS` are the two ends and were the only two the first round of gates
+ * used; the three in the middle are what a partly-unlocked profile is, which is
+ * the ordinary case and was the one case nothing covered.
+ */
+const LADDER: readonly { readonly name: string; readonly set: UnlockSet }[] = [
+  { name: 'a fresh profile', set: FRESH_UNLOCKS },
+  { name: 'one deed earned', set: unlocksFor(['a_first_run']) },
+  { name: 'two deeds earned', set: unlocksFor(['a_first_run', 'a_act_one']) },
+  { name: 'four deeds earned', set: unlocksFor(['a_first_run', 'a_act_one', 'a_act_two', 'a_cascade']) },
+  { name: 'everything owned', set: ALL_UNLOCKS },
+];
+
+test('a set arrives in any order and the run is still the run its own log replays', () => {
+  // `UnlockSet` is a structural type: nothing forces a caller through
+  // `makeUnlockSet`, and the digest quotes both lists in order. `replayRun`
+  // reads its set through `parseUnlockSet`, which sorts and dedupes - so a run
+  // started from an unsorted or duplicated list used to hash differently from
+  // its own replay while being, draw for draw, the same run. That is the
+  // keystone breaking on an input nothing rejected.
+  const owned = ['u_captain', 'u_sentinel', 'si_guard'];
+  const canonical = makeUnlockSet(GATED_IDS, owned);
+  const shapes: readonly { readonly what: string; readonly set: UnlockSet }[] = [
+    { what: 'reversed gated', set: { gated: [...GATED_IDS].reverse(), owned: [...owned].sort() } },
+    { what: 'reversed owned', set: { gated: [...GATED_IDS].sort(), owned: [...owned].reverse() } },
+    { what: 'a duplicate in owned', set: { gated: [...GATED_IDS].sort(), owned: [...owned, 'u_captain'] } },
+    { what: 'a duplicate in gated', set: { gated: [...GATED_IDS, 'u_captain'], owned: [...owned].sort() } },
+  ];
+  for (const seed of [3, 7, 11]) {
+    const straight = play(seed, 'greedy', canonical);
+    const wanted = hashRun(straight.run);
+    for (const { what, set } of shapes) {
+      const run = startRun(RUN_CONTENT, seed, 'knight', set);
+      assert.deepEqual(run.unlocked, canonical, `${what}: the run kept a non-canonical set`);
+
+      const played = play(seed, 'greedy', set);
+      assert.equal(
+        hashRun(played.run),
+        wanted,
+        `seed ${seed}, ${what}: the run hashed differently from the same set written in order`,
+      );
+      assert.equal(
+        hashRun(replayRun(RUN_CONTENT, played.log)),
+        hashRun(played.run),
+        `seed ${seed}, ${what}: the live run and its own replay disagree`,
+      );
+      assert.deepEqual(played.log.unlocked, canonical, `${what}: the log recorded the caller's order`);
+    }
+    // The window can tell "passed" from "did not run": a set that owns
+    // *different* ids does reach a different run, so the equalities above are
+    // not holding because the unlock set changes nothing.
+    assert.notEqual(
+      hashRun(play(seed, 'greedy', FRESH_UNLOCKS).run),
+      wanted,
+      `seed ${seed}: owning three things reached the same run as owning none`,
+    );
+  }
+  // The same rule on the controller, which compares its set with the log's.
+  const { log } = play(5, 'greedy', canonical);
+  const resumed = createRunController(RUN_CONTENT, 5, {
+    resume: { ...log, nodes: log.nodes.slice(0, 4) },
+    unlocked: { gated: [...GATED_IDS].reverse(), owned: [...owned].reverse() },
+  });
+  assert.deepEqual(resumed.unlocked, canonical, 'the controller refused a resume on list order alone');
+});
+
+test('a run at a half-unlocked profile replays from its log, not from its gated list', () => {
+  // The window the first round of gates did not have. Every replay assertion
+  // it made ran at `owned: []`, so a `startRun` that recorded the *gated* list
+  // with an empty `owned` - while still narrowing by the real set - was
+  // invisible: at a fresh profile that record is the truth. A partly unlocked
+  // profile is the ordinary case and is the one that catches it.
+  let reached = 0;
+  let distinct = new Set<string>();
+  for (const { name, set } of LADDER) {
+    for (const seed of SEEDS) {
+      const played = play(seed, 'greedy', set);
+      assert.deepEqual(
+        played.log.unlocked,
+        set,
+        `seed ${seed}, ${name}: the log did not record the set the run was played with`,
+      );
+      assert.equal(
+        hashRun(replayRun(RUN_CONTENT, played.log)),
+        hashRun(played.run),
+        `seed ${seed}, ${name}: the run did not replay from its own log`,
+      );
+      distinct.add(hashRun(played.run));
+      reached++;
+    }
+  }
+  assert.equal(reached, LADDER.length * SEEDS.length);
+  // And the ladder is a ladder: the sets reach different runs, so the replays
+  // above are not all the same run five times.
+  assert.ok(
+    distinct.size > SEEDS.length,
+    `the ${LADDER.length} sets produced only ${distinct.size} distinct run(s) across ` +
+      `${SEEDS.length} seeds, so nothing above distinguished them`,
+  );
+});
+
+test('an unlock moves nothing in the run but the pool it drafts from', () => {
+  // The "no persistent power" rule, past `unlockedContent`'s boundary. That
+  // function's own gate walks `RunContent` and stops where the function stops:
+  // a starting-gold bonus scaled by how much is still locked, written into
+  // `startRun`, is outside it and survived every check. So this walks the
+  // *state* a run begins in, key by key off the object, and every key but the
+  // two that are the pool itself must be identical whatever is owned.
+  const MAY_DIFFER = new Set(['content', 'unlocked']);
+  for (const cls of CLASSES) {
+    for (const seed of [1, 4, 9]) {
+      const base = startRun(RUN_CONTENT, seed, cls.id, ALL_UNLOCKS);
+      const keys = Object.keys(base) as (keyof RunState)[];
+      assert.ok(keys.length >= 20, `RunState has ${keys.length} fields; the walk looks wrong`);
+      for (const { name, set } of LADDER) {
+        const other = startRun(RUN_CONTENT, seed, cls.id, set);
+        assert.deepEqual(Object.keys(other).sort(), keys.slice().sort(), 'a field appeared or vanished');
+        for (const key of keys) {
+          if (MAY_DIFFER.has(key)) continue;
+          assert.deepEqual(
+            other[key],
+            base[key],
+            `${cls.name} seed ${seed}, ${name}: the unlock set moved "${key}". An unlock adds ` +
+              `rows to a draw table; it may not move a number, a card or a map.`,
+          );
+        }
+      }
+      // And with no unlock layer at all, which is what every measurement plays.
+      const open = startRun(RUN_CONTENT, seed, cls.id, null);
+      for (const key of keys) {
+        if (MAY_DIFFER.has(key)) continue;
+        assert.deepEqual(open[key], base[key], `${cls.name} seed ${seed}: null and ALL differ in "${key}"`);
+      }
+    }
+  }
+});
+
+test('narrowing drops exactly what is still locked, and never an ungated row', () => {
+  // The other direction, and the one the design actually cares about: "every
+  // run is winnable from the first one" is broken by a filter that is too
+  // *narrow*, not by one that is too wide. The subsequence check above cannot
+  // see that - dropping an extra card leaves a subsequence - so this pins the
+  // result exactly, against a list built from `stillLocked` rather than from
+  // the predicate under test.
+  const sets: readonly UnlockSet[] = [
+    ...LADDER.map((l) => l.set),
+    ...ACHIEVEMENTS.map((a) => unlocksFor([a.id])),
+  ];
+  let dropped = 0;
+  let kept = 0;
+  for (const set of sets) {
+    const locked = new Set(stillLocked(set));
+    const narrowed = unlockedContent(RUN_CONTENT, set);
+
+    const wantRewards = RUN_CONTENT.rewards.filter((r) => !locked.has(r.cardId));
+    assert.deepEqual(narrowed.rewards, wantRewards, 'the content pool is not what is still unlocked');
+    const wantSigils = RUN_CONTENT.sigils.filter((s) => !locked.has(s.id));
+    assert.deepEqual(narrowed.sigils, wantSigils, 'the sigil list is not what is still unlocked');
+    for (let c = 0; c < (RUN_CONTENT.classes ?? []).length; c++) {
+      const before = RUN_CONTENT.classes![c]!;
+      assert.deepEqual(
+        narrowed.classes![c]!.rewards,
+        before.rewards.filter((r) => !locked.has(r.cardId)),
+        `the ${before.name}'s pool is not what is still unlocked`,
+      );
+      // `unlockedRewards` is the one filter, so the screen is held to the same
+      // claim as the run - too narrow there is a promise the run does not keep.
+      assert.deepEqual(
+        unlockedRewards(set, before.rewards),
+        before.rewards.filter((r) => !locked.has(r.cardId)),
+        `the ${before.name}'s pick-screen pool is not what is still unlocked`,
+      );
+      dropped += before.rewards.length - narrowed.classes![c]!.rewards.length;
+      kept += narrowed.classes![c]!.rewards.length;
+    }
+  }
+  assert.ok(dropped > 0, 'no set in the ladder dropped a single row, so nothing above was tested');
+  assert.ok(kept > 0, 'every row was dropped, so "never an ungated row" proves nothing');
+});
+
+test('the digest names both halves of the set, so two pools cannot hash the same', () => {
+  // `hashRun` exists to tell two runs apart that coincided in state, and the
+  // pool they drafted from is one of the ways they differ. Two sets with the
+  // same gated list and different owned lists start identical runs - that is
+  // the test above - so the digest is the only thing between them, and it has
+  // to carry the owned half as well as the gated one.
+  const seen = new Map<string, string>();
+  for (const { name, set } of LADDER) {
+    const run = startRun(RUN_CONTENT, 7, 'knight', set);
+    const canonical = runToCanonical(run);
+    assert.match(
+      canonical,
+      new RegExp(`;unlocked=g\\[${set.gated.join(',')}\\]/o\\[${set.owned.join(',')}\\]`),
+      `${name}: the canonical run does not quote both halves of the set`,
+    );
+    const digest = hashRun(run);
+    const clash = seen.get(digest);
+    assert.equal(
+      clash,
+      undefined,
+      `${name} and ${String(clash)} start the same run and hash the same; the digest does not ` +
+        `record which pool the run drafted from`,
+    );
+    seen.set(digest, name);
+  }
+  assert.equal(seen.size, LADDER.length);
+  // Every set in the ladder gates the same ids, so it is the owned half alone
+  // that is doing the work above.
+  assert.equal(new Set(LADDER.map((l) => l.set.gated.join(','))).size, 1);
+});
+
+test('a format 1 log naming an unlock set is refused, because no version wrote one', () => {
+  // Unlocks landed with the format already at 2, so `unlocked` on a format 1
+  // log is a field no build ever produced. Accepting it would narrow shelves
+  // the recorded picks were taken from with nothing gated.
+  const fixture = JSON.parse(
+    readFileSync('test/golden/run-log-format-1-seed-7-greedy.json', 'utf8'),
+  ) as { log: RunLog };
+  assert.equal(fixture.log.unlocked, undefined, 'the golden already names a set');
+  assert.equal(migrateRunLog(fixture.log).unlocked, undefined, 'the upgrade invented a set');
+  assert.throws(
+    () => migrateRunLog({ ...fixture.log, unlocked: FRESH_UNLOCKS }),
+    /format 1 log for seed 7 names an unlock set/,
+    'a format 1 log naming a set was upgraded rather than refused',
+  );
+  // The same field on a current-format log is carried through, which is what
+  // says the refusal is about the format and not about the field.
+  const current = play(7, 'greedy', FRESH_UNLOCKS).log;
+  assert.deepEqual(migrateRunLog(current).unlocked, FRESH_UNLOCKS);
+});
+
+// ---------------------------------------------------------------------------
+// Stored state: what a pinned pool may touch, and what an old save still loads
+// ---------------------------------------------------------------------------
+
+/** A `localStorage` that lives in the test, so the storage path is reachable at all. */
+function stubStorage(): { readonly store: Map<string, string>; restore: () => void } {
+  const store = new Map<string, string>();
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    },
+  });
+  return {
+    store,
+    restore: () => {
+      if (had === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+      else Object.defineProperty(globalThis, 'localStorage', had);
+    },
+  };
+}
+
+test('a run saved by an older build still loads, instead of being read then thrown away', () => {
+  // `loadSaved` parsed the stored JSON and handed it straight to the
+  // controller, which replays only the current format - so a run in progress
+  // from a build before sigils was refused, caught, and `forget()`-ed. The
+  // player lost the run and got a line in the console. `migrateRunLog` is the
+  // upgrade path that exists for exactly this, and this was its missing caller.
+  const fixture = JSON.parse(
+    readFileSync('test/golden/run-log-format-1-seed-7-greedy.json', 'utf8'),
+  ) as { log: RunLog };
+  assert.equal((fixture.log as { format?: number }).format, undefined, 'the golden is not format 1');
+
+  const loaded = parseSavedRun(JSON.stringify(fixture.log), 7);
+  assert.notEqual(loaded, null, 'a format 1 save did not load');
+  assert.equal(loaded!.format, RUN_LOG_FORMAT, 'the save was loaded without being upgraded');
+  assert.ok(loaded!.nodes.length > 0);
+
+  // Not silently lenient: the shape checks and the format refusal still bite.
+  assert.equal(parseSavedRun(null, 7), null);
+  assert.equal(parseSavedRun('{not json', 7), null);
+  assert.equal(parseSavedRun(JSON.stringify({ ...fixture.log, seed: 8 }), 7), null, 'another seed loaded');
+  assert.equal(
+    parseSavedRun(JSON.stringify({ ...fixture.log, format: 99 }), 7),
+    null,
+    'a log from an unknown format was loaded',
+  );
+});
+
+test('a pinned pool touches no stored run and no stored profile', () => {
+  // `?unlocks=all` is *no unlock layer*, so a pinned run's log carries no
+  // `unlocked` field and is indistinguishable from one written before unlocks
+  // existed. Reloading without the parameter resumed it - the log decides, and
+  // that is right - so the run carried on fully unlocked, and with no override
+  // in the address that time, it wrote its deeds into the player's collection.
+  // The rule is not "does not write the profile" but "touches no stored state".
+  assert.equal(storageAllowed(null), true);
+  assert.equal(storageAllowed('all'), false, '?unlocks=all may not reach storage');
+  assert.equal(storageAllowed('none'), false, '?unlocks=none may not reach storage');
+
+  const stub = stubStorage();
+  try {
+    const { log } = play(7, 'greedy', FRESH_UNLOCKS);
+    const persisted = { ...log, nodes: log.nodes.slice(0, 3) };
+
+    // A pinned session writes nothing.
+    saveRun(persisted, false);
+    assert.equal(stub.store.size, 0, 'a pinned session wrote a run to storage');
+
+    // A real session writes, and reads back the same run.
+    saveRun(persisted, true);
+    assert.equal(stub.store.size, 1);
+    assert.equal(stub.store.has(`${SAVE_PREFIX}7`), true);
+    const back = loadSavedRun(7, true);
+    assert.deepEqual(back?.nodes.length, 3);
+    assert.deepEqual(back?.unlocked, FRESH_UNLOCKS);
+
+    // A pinned session cannot see it, so it can never finish someone else's run
+    // against the pinned pool.
+    assert.equal(loadSavedRun(7, false), null, 'a pinned session read a stored run');
+
+    // And cannot delete it. Opening `?seed=7&unlocks=all` must not throw away
+    // the real run in progress on seed 7.
+    forgetRun(7, false);
+    assert.equal(stub.store.has(`${SAVE_PREFIX}7`), true, 'a pinned session deleted a stored run');
+    forgetRun(7, true);
+    assert.equal(stub.store.has(`${SAVE_PREFIX}7`), false, 'a real session could not delete');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('a saved run resumes on its own set even when the profile has widened since', () => {
+  // Why `runapp.ts` passes no `unlocked` when it resumes, and so why
+  // `createRunController`'s refusal guard is not on the app's own path. A
+  // player who unlocks something on another seed and comes back to this one is
+  // the ordinary case, not an error: the log's set wins and the run continues.
+  // Handing the guard today's profile would refuse, and the app's catch would
+  // delete the run.
+  const { log } = play(9, 'greedy', FRESH_UNLOCKS);
+  const partial = { ...log, nodes: log.nodes.slice(0, 5) };
+  const widened = unlocksFor(['a_first_run', 'a_act_one']);
+  assert.notDeepEqual(widened, FRESH_UNLOCKS, 'the profile did not widen, so nothing is tested');
+
+  const resumed = createRunController(RUN_CONTENT, 9, { resume: partial });
+  assert.deepEqual(resumed.unlocked, FRESH_UNLOCKS, 'the resumed run did not keep the log\'s set');
+  assert.equal(hashRun(resumed.state), hashRun(replayRun(RUN_CONTENT, partial)));
+
+  // The guard is still a contract for a caller that insists on a set.
+  assert.throws(
+    () => createRunController(RUN_CONTENT, 9, { resume: partial, unlocked: widened }),
+    /cannot resume a run played with/,
+  );
 });

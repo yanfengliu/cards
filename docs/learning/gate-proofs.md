@@ -6,6 +6,80 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-11 — closing a review of the unlock layer: sixteen mutations, and a runner that could credit itself with a passing test
+
+Taken on branch `worktree-agent-a6980105037cf39af`, cut from `cf2092f`; the suite is **248 tests** here, 237 at the base. Sixteen mutations, each applied to the shipped tree, run, reverted, and the file's sha256 compared before and after. All sixteen came back red on a line their reporter marked failed, and none of them was already failing in a measured green baseline.
+
+### The runner, and why the previous one's reds were claims about the command
+
+Unit 12's `.probe/mutate-unlocks.mjs` decided a red was the gate's with `const named = out.includes(m.expect)`. `node --test` prints a test's name on a **passing** line as well as a failing one, so a passing test satisfied that check — and the evidence line the runner then printed quoted the passing line. An independent review demonstrated it with a mutation whose named gate passed while a different test failed: reported RED, quoting the pass. It also never checked that the command was green before the mutation, so a red that was already red could not be told from one the mutation caused.
+
+Unit 12's sixteen entries above survive this: the reviewer independently re-ran all sixteen against a green baseline with strict attribution and got 16/16. The instrument was still wrong, and this is the second flawed mutation runner in three units, so `.probe/mutate.mjs` fixes it in a form the next unit can copy:
+
+```js
+// 1. Attribution. Run with --test-reporter=tap and require the expected text on
+//    a line the reporter marked failed, never anywhere in the output.
+function failingLines(out) {
+  return out.split(/\r?\n/).filter((l) => /^\s*(not ok \d+ - |✖ )/.test(l));
+}
+const named = mode === 'node-test'
+  ? failingLines(out).some((l) => l.includes(m.expect))
+  : out.includes(m.expect);
+
+// 2. The baseline is measured, not assumed. Every distinct command runs once on
+//    the unmutated tree; it must exit 0, and its output is kept.
+const novel = mode === 'node-test'
+  ? !failingLines(baseline).some((l) => l.includes(m.expect))   // in TAP every name
+  : !baseline.includes(m.expect);                                // is printed, pass or fail
+
+// 3. ...which also fixes the crash guard. A crash string the GREEN run printed
+//    too is not evidence of a crash.
+const already = new Set(baseline.split(/\r?\n/).map((l) => l.trim()));
+const crashed = out.split(/\r?\n/).filter((l) => !already.has(l.trim())).some((l) => CRASH.test(l));
+```
+
+Point 3 was not theoretical. `test/unlocks.test.ts` logs an expected `SyntaxError` from a deliberately unreadable saved run, so the first draft of this runner called **every** mutation `the mutated tree crashed rather than failing a check`.
+
+And because a guard nobody exercises is a guard nobody is checking, the runner carries **two** self-probes, both required to come back `NON-ZERO, REASON UNCONFIRMED` before any summary is printed:
+
+- `SELF` — a mutation that cannot compile (`return NOT_A_REAL_SYMBOL`). Unit 9 recorded one of those as a gate going red.
+- `ATTRIB` — a real, compiling mutation (delete the HUD's click listener) paired with the name of a test it does **not** break (the escaper test). This is the old runner's exact failure, kept live. It reports: `"text becomes markup through one escaper…" is not on any failing line - it may only have been printed as a pass`.
+
+### The bound of the gates these mutations exercise
+
+`test/unlocks.test.ts` is the shipped `RUN_CONTENT` and `GATED_IDS`, over 12 seeds × 2 route styles for the older whole-run checks, 12 seeds × the five-rung `LADDER` of unlock sets for the new replay check, all three classes for the starting-deck, state and pick-screen checks, and the two golden format 1 logs. Its `localStorage` is a stub installed by the test, so what is gated there is this code's own decisions about storage, not the browser's.
+
+`test/ui-markup.test.ts` reads `src/ui/runapp.ts` as a TypeScript AST and `src/ui/index.html` as markup. It runs no DOM and clicks nothing: it proves every element the app assigns `innerHTML` to is, or is inside, an element it attaches a click listener to. It does not prove the listener's switch handles the action a button names.
+
+`npm run verify:run`'s new check is 20 seeds × 3 unlock sets, greedy route and search placement, on the shipped content as the Knight.
+
+Two things none of them can see, named so the gap is not mistaken for coverage: the browser's own `localStorage` round trip, which `node tools/ui-probe/run.ts <seed> <theme> <class> fresh` exercises through the app's own controls, and what a `[data-run]` click actually does, which the scratch probes under `.probe/` clicked for real this round.
+
+Digests after the last revert: `src/run/run.ts` `dd271639…`, `src/run/unlocks.ts` `434023bf…`, `src/run/hash.ts` `77eceb66…`, `src/ui/runapp.ts` `19e0eb14…`, `src/ui/run.ts` `05d190da…`, `src/render/escape.ts` `1ebe563a…`, `tools/gates/boundaries.ts` `ecc76141…`, `test/unlocks.test.ts` `b6ce6ec7…`, `test/ui-markup.test.ts` `2baf0794…`.
+
+| # | mutation | site | the failure |
+|---|---|---|---|
+| N1 | `startRun` stores the caller's set verbatim again | `src/run/run.ts` | *a set arrives in any order and the run is still the run its own log replays* |
+| N2 | `startRun` records `{gated, owned: []}` while still narrowing by the real set | `src/run/run.ts` | *a run at a half-unlocked profile replays from its log, not from its gated list*. This is the mutation that was **green on all 237 tests** at `cf2092f` |
+| N2b | the same, against the whole-run gate | `src/run/run.ts` | `npm run verify:run`: `16 run(s) did not record or replay the unlock set they were played with`. Before this round `checkRuns` passed no unlock argument at all, so the keystone gate had zero coverage of the input |
+| N3 | starting gold gains a catch-up bonus scaled by how much is still locked | `startRun`, `src/run/run.ts` | *an unlock moves nothing in the run but the pool it drafts from*. This is the **no persistent power** claim reaching past `unlockedContent`'s boundary |
+| N3b | narrowing also edits each class's `name` | `unlockedContent`, `src/run/unlocks.ts` | *narrowing a content touches the reward tables and the sigils and nothing else*. The per-class half of that walk used to be a hand-written five-field list and now walks `Object.keys` |
+| N4 | `unlockedRewards` drops the first **ungated** row whenever anything is locked | `src/run/unlocks.ts` | *narrowing drops exactly what is still locked, and never an ungated row*. A subsequence check cannot see this: dropping an extra row still leaves a subsequence |
+| N5 | `unlockedContent` drops an ungated sigil | `src/run/unlocks.ts` | the same gate, on the sigil half |
+| N6 | the digest emits `unlocked=g[…]` and drops `/o[…]` | `unlockedToCanonical`, `src/run/hash.ts` | *the digest names both halves of the set, so two pools cannot hash the same*. No earlier test hashed two different non-null sets |
+| N7 | `migrateRunLog` accepts an unlock set on a format 1 log | `src/run/run.ts` | *a format 1 log naming an unlock set is refused, because no version wrote one* |
+| N8 | `parseSavedRun` returns the stored log without migrating it | `src/ui/runapp.ts` | *a run saved by an older build still loads, instead of being read then thrown away*. In a browser the same mutation prints `cards: the saved run did not replay and was discarded` and the player's run is gone |
+| N9 | `storageAllowed` answers true for every override | `src/ui/runapp.ts` | *a pinned pool touches no stored run and no stored profile* |
+| N9b | `saveRun` ignores the flag it is handed | `src/ui/runapp.ts` | the same gate. The decision and the write are separate mutations on purpose: one of them being right does not make the other one right |
+| N10 | `escapeHtml` maps `>` to `&quot;` — the defect as it stood in `runapp.ts` | `src/render/escape.ts` | *text becomes markup through one escaper, and there is no second copy of it* |
+| N11 | a second escaper added to `src/ui/runapp.ts` | `src/ui/runapp.ts` | the same gate, on the "no second copy" half. Eight hand-copied escapers is how the first one went wrong |
+| N12 | the HUD's click listener removed | `src/ui/runapp.ts` | *every panel the run app draws into is inside something that hears a click* — `dom.status draws into #run-status, and neither it nor any of its ancestors has a click listener`. This is the state Restart shipped in from unit 8 to unit 12 |
+| N13 | `src/run/run.ts` reads a bonus out of `localStorage` | `src/run/run.ts` | `npm run gate:boundaries`: `src/run/run.ts:81:47  references \`localStorage\`, which is browser storage and so a hidden input the replay does not carry` |
+
+N2 and N3 are the pair worth reading together, because they are the same lesson from two sides. N2 is a gate whose *window* could not distinguish the defect from the truth: at `owned: []` a run that records the gated list with an empty owned half is correct, so twelve seeds and two routes of evidence proved nothing about it. N3 is a gate whose *scope* stopped at a function call: `unlockedContent` may not move a number, and `startRun`, one frame up, could.
+
+N13's rule was **false when first written**, and the gate's own probe is what said so. `localStorage` looked like a `lib.dom` global, and `gate:boundaries` already flags identifiers whose declarations all live in `lib.dom`. The probe came back `it tripped 0 and 0`: `@types/node/web-globals/storage.d.ts` declares `localStorage` too, so it is not DOM-only and the checker rule can never see it — the same property that deliberately keeps `console` and `fetch` out of that rule. `localStorage` and `sessionStorage` are banned by name now; `indexedDB` is DOM-only and the checker does catch it. The probe counts either half as having fired, because which one catches a given global is a fact about the type declarations rather than about the rule.
+
 ## 2026-09-11 — unlocks: sixteen mutations, and a runner asked to fail before it was believed
 
 Taken on branch `worktree-agent-a1d38fd64b9b07e60`, cut from `dcf2cdf`; the suite is **237 tests** here, 218 at the base. Sixteen mutations, each applied to the shipped tree, run against `node --test test/unlocks.test.ts`, reverted, and the file's sha256 compared before and after. All sixteen came back red for their own reason. No anchor was broken — the runner refuses to report a result when an anchor matches zero times or more than once, which is the CRLF trap this repo has now hit three times.

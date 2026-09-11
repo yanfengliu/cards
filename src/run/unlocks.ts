@@ -53,6 +53,28 @@ export function makeUnlockSet(
 }
 
 /**
+ * `set` in the one form the digest may see: sorted and deduped, `null`
+ * untouched.
+ *
+ * `UnlockSet` is a bare structural type, so *any* object with two string lists
+ * satisfies it - one a caller built by hand, one read out of JSON, one whose
+ * lists came back from a `Set` in insertion order. `makeUnlockSet` produces the
+ * canonical form, but nothing forced a caller through it, and the run digest
+ * quotes both lists verbatim. Two runs that own exactly the same ids in a
+ * different order would then hash apart, and `replayRun` - which reads the
+ * log's set through `parseUnlockSet`, and so always canonicalises - would
+ * disagree with the live run it is replaying. That is the keystone breaking on
+ * an input nothing rejected.
+ *
+ * So `startRun` funnels every set through here, and the property is the one
+ * `src/run/types.ts` already claims: the set a run holds is canonical, whatever
+ * shape it arrived in.
+ */
+export function canonicalUnlockSet(set: UnlockSet | null): UnlockSet | null {
+  return set === null ? null : makeUnlockSet(set.gated, set.owned);
+}
+
+/**
  * May a run with this set draft `id`?
  *
  * Anything the set does not gate is always draftable. That is what makes a

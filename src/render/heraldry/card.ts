@@ -15,6 +15,7 @@
 import { type Blazon, parseBlazon } from './blazon.ts';
 import { getCharge } from './charges.ts';
 import { type Tincture, hatchOf, hexOf, luminance } from './tinctures.ts';
+import { escapeHtml as esc } from '../escape.ts';
 
 export type Tier = 'compressed' | 'expanded';
 
@@ -75,12 +76,6 @@ const INK = '#0d0d12'; // card outline and numeral-disc fill
 const DISC_RING = '#efece4'; // hairline around the numeral discs
 const NUMERAL = '#ffffff';
 const MOUNT = '#9aa0ad'; // pale halo, mid-value so it shows on light and dark alike
-
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) =>
-    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;',
-  );
-}
 
 const r2 = (n: number): string => String(Math.round(n * 100) / 100);
 
