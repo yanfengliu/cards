@@ -50,6 +50,7 @@ import {
   BANNER_POWER,
   CHORUS_POWER,
   KINDLE_POWER,
+  VOLLEY_SWINGS,
   type GameEvent,
   drain,
   resolvePhase,
@@ -71,9 +72,14 @@ import {
   power,
   unitCount,
 } from '../src/engine/state.ts';
+import {
+  ENEMY_CARDS,
+  PLAYER_CARDS,
+  PLAYER_CARDS_NO_CASCADE,
+} from '../src/content/cards.ts';
 import { TRAIT_TERMS } from '../src/render/glossary.ts';
 import { projectOwnPhase } from '../src/render/odds.ts';
-import { ROOT, parse } from '../tools/gates/scan.ts';
+import { parse, rel, tsFilesUnder } from '../tools/gates/scan.ts';
 
 // --------------------------------------------------------------- the fixture
 
@@ -311,9 +317,33 @@ test('Chorus, walked by hand: both neighbours of its own race, and the left one�
     'the same line among humans',
     /the wall takes (\d+) instead of (\d+)/,
   ) as [number, number];
+  // The two intermediate running totals. They were transcribed rather than read
+  // until a review pointed out that changing 199 to 198 left the suite green and
+  // the document disagreeing with itself - the walk's *card* numbers came
+  // through `stated`, its step-by-step totals did not. Every number the walk
+  // prints is now one of these.
+  const [firstSwing, afterFirst] = stated(
+    WALK,
+    'the first elf’s swing and the running total after it',
+    /The first elf acts and swings for \*\*(\d+)\*\*\. The wall is on (\d+)\./,
+  ) as [number, number];
+  const [singerSwing, afterSinger] = stated(
+    WALK,
+    'the Songkeeper’s swing and the running total after it',
+    /The Songkeeper acts and swings for \*\*(\d+)\*\*[\s\S]*?The wall is on (\d+)\./,
+  ) as [number, number];
 
   assert.equal(sung, CHORUS_POWER, 'the document and CHORUS_POWER disagree');
   assert.equal(base + bonus, thirdAt, 'the document’s own arithmetic does not add up');
+  // The walk's own arithmetic, before the engine is asked anything: each step's
+  // running total is the one above it less that step's swing.
+  assert.deepEqual(
+    [WALL_HEALTH - firstSwing, afterFirst - singerSwing, afterSinger - thirdAt],
+    [afterFirst, afterSinger, wallLeft],
+    'the walk’s running totals do not follow from its own swings. The three steps say ' +
+      `${WALL_HEALTH} − ${firstSwing} → ${afterFirst} − ${singerSwing} → ${afterSinger} − ` +
+      `${thirdAt} → ${wallLeft}.`,
+  );
 
   const f = fixture();
   const left = f.add('player', card({ id: 'test:elfL', power: elfPower, health: STOUT, tribe: 'elf' }));
@@ -325,6 +355,28 @@ test('Chorus, walked by hand: both neighbours of its own race, and the left one�
   const wall = f.add('enemy', WALL);
 
   const events = playerPhase(f.state);
+
+  // The engine walks the same three steps, in the same order, and the wall is
+  // on the number the document prints after each. Asserted first, because it is
+  // the walk's own narrative and the assertions below are its consequences. The
+  // hero's blow is left out because the document leaves it out: "your hero
+  // swings for 0 and adds nothing".
+  const steps = new Set([left.uid, singer.uid, right.uid]);
+  const running: number[] = [];
+  let health = WALL_HEALTH;
+  for (const e of events) {
+    if (e.kind !== 'attacked' && e.kind !== 'damaged') continue;
+    if (e.targetUid !== wall.uid) continue;
+    health -= e.dealt;
+    if (steps.has(e.uid)) running.push(health);
+  }
+  assert.deepEqual(
+    running,
+    [afterFirst, afterSinger, wallLeft],
+    'the running total the walk prints after each step is not the wall’s Health after that step ' +
+      `in the engine. The document says ${afterFirst}, ${afterSinger}, ${wallLeft}; the engine ` +
+      `reached ${running.join(', ')}.`,
+  );
 
   assert.equal(left.bonusPower, sung, 'the elf on the left is sung to');
   assert.equal(right.bonusPower, sung, 'and so is the elf on the right');
@@ -440,6 +492,57 @@ test('a hero is not a race, so no tribal trait ever counts one', () => {
   g.add('enemy', WALL);
   playerPhase(g.state);
   assert.equal(kindler.bonusPower, 0);
+});
+
+test('a Chorus beside the hero sings to nobody, which is the other direction of the same rule', () => {
+  // The test above and the `MOST_ADJACENT` test below both fight the *count*:
+  // what a tribal trait sees when it looks at a hero. Nothing watched what a
+  // hero *receives* when a trait fires beside it, and the two are different
+  // functions - the count is `adjacentKinOf`'s hero guard, the grant is
+  // `adjacentAllies`' `isHero` skip. Making Chorus grant to an adjacent living
+  // hero left the whole suite green.
+  //
+  // It is also the most ordinary board there is rather than a corner case: the
+  // rightmost unit's right-hand neighbour is always the hero, so every line
+  // ending in a Chorus body is this board.
+  //
+  // Mutation watched going red: the Chorus block in `triggersFor` given a
+  // second target list of adjacent living heroes.
+  const f = fixture();
+  const neighbour = f.add(
+    'player',
+    card({ id: 'test:elf', power: 1, health: STOUT, tribe: 'elf' }),
+  );
+  const singer = f.add(
+    'player',
+    card({ id: 'test:singer', power: 1, health: STOUT, tribe: 'elf', traits: ['chorus'] }),
+  );
+  const hero = f.state.board.player[f.state.board.player.length - 1]!;
+  const wall = f.add('enemy', WALL);
+
+  const line = f.state.board.player;
+  assert.equal(hero.isHero, true);
+  assert.equal(
+    line[line.indexOf(singer) + 1],
+    hero,
+    'the hero is the singer’s right-hand neighbour, which is what makes this the ordinary board',
+  );
+  const heroPower = power(hero);
+
+  const events = playerPhase(f.state);
+
+  assert.equal(hero.bonusPower, 0, 'a hero has no race, so a Chorus beside it sings to nobody');
+  assert.equal(power(hero), heroPower, 'and its swing is the swing it printed');
+  assert.equal(neighbour.bonusPower, CHORUS_POWER, 'the elf on the other side is sung to');
+  assert.deepEqual(
+    buffsOf(events),
+    [{ uid: neighbour.uid, amount: CHORUS_POWER }],
+    'one grant, not two: nothing was announced for the hero either',
+  );
+  // The wall's health says the same thing from the board's side: two units
+  // swinging for 1 each, the left one buffed after it had already swung, and a
+  // hero swinging for 0.
+  assert.equal(wall.health, WALL_HEALTH - 2);
 });
 
 // --------------------------------------------------------- the adjacency bound
@@ -564,6 +667,121 @@ test('Chorus does not compound down a line of its own race: everyone receives th
     [CHORUS_POWER, CHORUS_POWER * 2, CHORUS_POWER * 2, CHORUS_POWER * 2, CHORUS_POWER],
     'each unit is sung to by whichever of its two neighbours it has, once each, and never more',
   );
+});
+
+// ------------------------------------------- when the trait fires, not only what
+
+test('a tribal count is spawned once per act, however many swings the act is', () => {
+  // `act` spawns the `tribePower` and then the swings, and `swingsOf` decides
+  // how many swings there are. Moving the `tribalOnAct` loop inside the swing
+  // loop gives a Volley body one count per swing - +1 before the first, another
+  // +1 before the second - and left the whole suite green, because no fixture
+  // anywhere put a tribal trait on a Volley body.
+  //
+  // Not reachable from shipped content today: the six tribal cards print no
+  // Volley and the two Volley cards print no tribal trait. It becomes reachable
+  // the day a Volley sigil or a Volley tribal card lands, which is why the
+  // fixture is here rather than the rule left to the card list.
+  //
+  // Mutation watched going red: `for (const t of tribalOnAct(state, e))` moved
+  // inside the `swingsOf(e)` loop in `act`.
+  const f = fixture();
+  f.add('player', card({ id: 'test:kin', power: 0, health: STOUT, tribe: 'dwarf' }));
+  const archer = f.add(
+    'player',
+    card({
+      id: 'test:volley-kindler',
+      power: 1,
+      health: STOUT,
+      tribe: 'dwarf',
+      traits: ['kindle', 'volley'],
+    }),
+  );
+  const wall = f.add('enemy', WALL);
+
+  const events = playerPhase(f.state);
+
+  assert.equal(
+    archer.bonusPower,
+    KINDLE_POWER,
+    'one dwarf beside it and one act, so one count - not one per swing',
+  );
+  assert.deepEqual(
+    buffsOf(events),
+    [{ uid: archer.uid, amount: KINDLE_POWER }],
+    'the count is announced once per act, however many swings the act spawns',
+  );
+
+  const swings = events.filter((e) => e.kind === 'attacked' && e.uid === archer.uid);
+  assert.equal(swings.length, VOLLEY_SWINGS, 'Volley still spawns its own number of swings');
+  assert.deepEqual(
+    swings.map((e) => (e.kind === 'attacked' ? e.raw : -1)),
+    swings.map(() => 1 + KINDLE_POWER),
+    'both swings are struck at the same Power: the count landed once, before the first of them',
+  );
+  assert.equal(wall.health, WALL_HEALTH - VOLLEY_SWINGS * (1 + KINDLE_POWER));
+});
+
+test('a Chorus that died to its own swing’s retaliation sings to nobody', () => {
+  // Chorus is keyed to `afterActed` rather than `acted`, and death is the only
+  // board that can tell the two apart: a body that dies to the retaliation its
+  // own attack drew never reaches `afterAct`, because `apply` skips an effect
+  // naming an entity that has left the board. A trigger on `acted` fires before
+  // the swing is even applied, so the grant survives the body and lands on a
+  // neighbour that watched it die.
+  //
+  // Firing Chorus on `acted` left the whole suite green, because every Chorus
+  // fixture before this one was fought into a Guard with 0 Power - deliberately,
+  // so nothing in the line dies and the walk is arithmetic - and nothing in the
+  // line dying is exactly what hides this.
+  //
+  // Mutation watched going red: a second Chorus block keyed to `acted`.
+  const f = fixture();
+  const neighbour = f.add(
+    'player',
+    card({ id: 'test:elf', power: 1, health: STOUT, tribe: 'elf' }),
+  );
+  const singer = f.add(
+    'player',
+    card({ id: 'test:fragile-singer', power: 1, health: 1, tribe: 'elf', traits: ['chorus'] }),
+  );
+  // A Guard that hits back hard enough to kill the singer with one retaliation,
+  // and cannot die itself. Guard also makes it the only legal target, so the
+  // trade is arithmetic rather than a draw.
+  const biter = f.add(
+    'enemy',
+    card({ id: 'test:biter', power: 3, health: WALL_HEALTH, tribe: 'orc', traits: ['guard'] }),
+  );
+
+  const events = playerPhase(f.state);
+
+  assert.equal(singer.alive, false, 'the singer died to the retaliation its own swing drew');
+  assert.equal(
+    neighbour.bonusPower,
+    0,
+    'it acted but never finished acting, so Chorus never fired. A trigger on `acted` would have ' +
+      'granted here, from a body that is no longer on the board.',
+  );
+  assert.deepEqual(buffsOf(events), [], 'and nothing was announced');
+  assert.equal(biter.health, WALL_HEALTH - 2, 'both elves did swing: this is not a board that ran');
+
+  // The control, on the same board with one Health more on the singer: it
+  // survives its own swing, reaches `afterAct`, and Chorus grants. Without this
+  // the test above passes just as well on an engine where Chorus never fires.
+  const g = fixture();
+  const other = g.add('player', card({ id: 'test:elf', power: 1, health: STOUT, tribe: 'elf' }));
+  const survivor = g.add(
+    'player',
+    card({ id: 'test:singer', power: 1, health: 4, tribe: 'elf', traits: ['chorus'] }),
+  );
+  g.add(
+    'enemy',
+    card({ id: 'test:biter', power: 3, health: WALL_HEALTH, tribe: 'orc', traits: ['guard'] }),
+  );
+  playerPhase(g.state);
+
+  assert.equal(survivor.alive, true);
+  assert.equal(other.bonusPower, CHORUS_POWER, 'a singer that lived does sing');
 });
 
 // ------------------------------------------------- which traits read a race
@@ -698,16 +916,34 @@ test('the engine compares two races in exactly one place', () => {
   // comparison site, in a function that is not `adjacentKinOf`.
   //
   // Bound: `===`, `!==`, `==` and `!=` against a property named `tribe`, under
-  // `src/engine/` only. A comparison written some other way - a `switch`, a
-  // `Map` lookup, an equality helper - is not seen, and the behavioural checks
-  // above are what cover that.
+  // `src/engine/` only, in every `.ts` file the directory holds *today* - the
+  // list is read off the filesystem, not typed here. A comparison written some
+  // other way - a `switch`, a `Map` lookup, an equality helper - is not seen,
+  // and the behavioural checks above are what cover that. Nor does it see a
+  // comparison outside `src/engine/`: `src/render/odds.ts` projects the same
+  // arithmetic for the pre-commit forecast and is held to it by a behavioural
+  // gate below rather than by this one.
+  //
+  // The file list used to be six names written out here. It was complete on the
+  // day it was written and silently incomplete the moment `src/engine/` grew a
+  // seventh file: a new engine file containing the whole-board count this gate
+  // exists to forbid left `npm run gates` at exit 0. `tsFilesUnder` is the same
+  // recursive walk both determinism gates use, and the assertion under it is
+  // what stops an empty walk from reporting as agreement.
   const ALLOWED = 'adjacentKinOf';
-  const files = ['state.ts', 'resolver.ts', 'fight.ts', 'cast.ts', 'hash.ts', 'rng.ts'];
+  const files = tsFilesUnder('src/engine');
+  assert.ok(
+    files.length >= 6,
+    `found ${files.length} TypeScript files under src/engine/, which is fewer than the six that ` +
+      'were there when this check was written. Either the engine was gutted or the walk stopped ' +
+      'working - and a walk that returns nothing reports as an engine that compares no races.',
+  );
   const found: string[] = [];
   const offending: string[] = [];
 
-  for (const name of files) {
-    const sf = parse(path.join(ROOT, 'src', 'engine', name));
+  for (const file of files) {
+    const name = rel(file).replace(/^src\/engine\//, '');
+    const sf = parse(file);
     const enclosing: string[] = [];
     const touchesTribe = (node: ts.Node): boolean =>
       (ts.isPropertyAccessExpression(node) && node.name.text === 'tribe') ||
@@ -919,7 +1155,11 @@ test('a tribal count is bounded at MOST_ADJACENT on any board the accessor can b
         `counted ${same} + ${different}`,
     );
   }
-  // Both directions of "a hero is not a race", which are two rules and not one.
+  // Both polarities of the *count* when a hero is the one asking, which are two
+  // rules and not one. This is not "both directions of the hero rule" - it used
+  // to say that, and overstated itself. A hero being *granted* to is the other
+  // direction, it lives in `adjacentAllies` rather than here, and it is gated by
+  // "a Chorus beside the hero sings to nobody" below.
   assert.equal(adjacentKin(f.state, hero, 'same'), 0, 'a hero has no kin');
   assert.equal(
     adjacentKin(f.state, hero, 'different'),
@@ -928,6 +1168,122 @@ test('a tribal count is bounded at MOST_ADJACENT on any board the accessor can b
       'its left, every turn, for standing at the right end of the line - which is a bonus for ' +
       'position and not for race. Found by this assertion rather than by review.',
   );
+});
+
+// ------------------------------------------------ a race is identity, not a dial
+
+/**
+ * Every shipped unit card's race, written out. Pinned, not derived.
+ *
+ * `hashFight`'s canonical form does not carry a race, and `ARCHITECTURE.md`
+ * says why: a race is a function of `cardId`, which the form already carries,
+ * and unlike a piece of equipment's two numbers it is *identity* rather than a
+ * tuned value - "a rebalanced card keeps its id and a redesigned one gets a new
+ * one, so changing a card's race mints a new id". Every hash recorded before
+ * tribes existed still reproduces because of that rule.
+ *
+ * The rule had no gate. Changing `u_songkeeper` from elf to human with the id
+ * kept passed `npm run gates`, `npm run verify` and `npm run verify:run` - while
+ * changing what Chorus does in every fight that card appears in, and while
+ * leaving every recorded hash claiming to describe a fight it no longer
+ * describes. This table is the gate: an id whose race moves has to move this
+ * line too, which is the moment the "mint a new id" rule is meant to be read.
+ *
+ * Derived from the pool it would be a tautology - the same class of check as
+ * `verify:run`'s sigil ledger, whose first draft derived its expected traits
+ * from the helpers the code under test was built from and could only prove the
+ * code agreed with itself.
+ */
+const RACE_OF: Readonly<Record<string, Tribe>> = {
+  u_squire: 'human',
+  u_shieldbearer: 'dwarf',
+  u_pikeman: 'dwarf',
+  u_hornblower: 'human',
+  u_ironguard: 'dwarf',
+  u_avenger: 'dwarf',
+  u_berserker: 'human',
+  u_captain: 'human',
+  u_sentinel: 'elf',
+  u_champion: 'human',
+  u_archer: 'elf',
+  u_wayfinder: 'elf',
+  u_treewarden: 'elf',
+  u_longbow: 'elf',
+  u_herald: 'human',
+  u_manatarms: 'human',
+  u_paladin: 'human',
+  u_veteran: 'dwarf',
+  u_thane: 'dwarf',
+  u_bulwark: 'dwarf',
+  u_kindler: 'dwarf',
+  u_runesmith: 'dwarf',
+  u_songkeeper: 'elf',
+  u_elflord: 'elf',
+  u_bannerman: 'human',
+  u_marshal: 'human',
+  e_goblin: 'orc',
+  e_shieldwall: 'orc',
+  e_ogre: 'orc',
+  e_troll: 'beast',
+};
+
+test('a card id names a race, and a card that changes race gets a new id', () => {
+  // Mutations watched going red: `u_songkeeper` changed from elf to human with
+  // its id kept; a new card added to the pool without a line here.
+  //
+  // Bound: the shipped unit pools and the `_nc` control derived from the player
+  // half. It says nothing about a card whose *numbers* move - those are in the
+  // canonical form already - and nothing about spells or equipment, which carry
+  // no race.
+  const shipped = [...PLAYER_CARDS, ...ENEMY_CARDS];
+  assert.ok(shipped.length > 0, 'no shipped unit cards found, so this check did not run');
+
+  const drifted: string[] = [];
+  for (const c of shipped) {
+    const pinned = RACE_OF[c.id];
+    if (pinned === undefined) {
+      drifted.push(`${c.id} is ${c.tribe} in the pool and is not pinned here`);
+    } else if (pinned !== c.tribe) {
+      drifted.push(`${c.id} is pinned ${pinned} and is ${c.tribe} in the pool`);
+    }
+  }
+  for (const id of Object.keys(RACE_OF)) {
+    if (!shipped.some((c) => c.id === id)) drifted.push(`${id} is pinned here and is not shipped`);
+  }
+
+  assert.deepEqual(
+    drifted,
+    [],
+    `a shipped card's race and this table disagree:\n\n  ${drifted.join('\n  ')}\n\n` +
+      'A race is not in the fight hash, because it is recoverable from the card id - so a card ' +
+      'that changes race has to get a NEW id, or every hash recorded against the old one now ' +
+      'describes a different fight. Keep the id and change this line only when the card is new.',
+  );
+
+  // The negative control that stops "recoverable from the id" from being a
+  // sentence: the canonical form carries the id and not the race, so two
+  // entities of different races built from the same id would serialise the
+  // same - which is exactly why the id has to move.
+  const f = fixture();
+  const elf = f.add('player', card({ id: 'u_songkeeper', power: 1, health: 4, tribe: 'elf' }));
+  const rendered = stateToCanonical({ board: { player: [elf], enemy: [] }, nextUid: 0 });
+  assert.ok(rendered.includes('u_songkeeper'), 'the canonical form carries the card id');
+  for (const t of ['elf', 'dwarf', 'human', 'orc', 'beast'] as const) {
+    assert.equal(
+      rendered.includes(`${t}`),
+      false,
+      `the canonical form names the race "${t}". It is meant to carry the id only, and the ` +
+        'race is meant to follow from it.',
+    );
+  }
+
+  // And the `_nc` control inherits its race rather than restating it, so a
+  // pinned race covers both halves of the measurement.
+  for (const c of PLAYER_CARDS_NO_CASCADE) {
+    const source = PLAYER_CARDS.find((p) => `${p.id}_nc` === c.id);
+    assert.notEqual(source, undefined, `${c.id} has no card it was derived from`);
+    assert.equal(c.tribe, source!.tribe, `${c.id} and ${source!.id} disagree about race`);
+  }
 });
 
 test('a tribal effect naming an entity that has left the board is skipped, like every other effect', () => {

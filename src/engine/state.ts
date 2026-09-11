@@ -458,9 +458,19 @@ export function adjacentAllies(state: GameState, e: Entity): Entity[] {
  * check reads off the source. A second site is how a counting trait gets
  * written by accident.
  *
- * **A hero counts nothing, both ways round.** `adjacentAllies` already refuses
- * to return one, so a hero is never somebody else's kin; this refuses to
- * answer for one at all, so a hero is never anybody's counter either. Without
+ * **A hero counts nothing, at either polarity of the count.** "Both ways
+ * round" used to stand here and overstated what is covered: it names `'same'`
+ * and `'different'`, which are two answers to the same question, and says
+ * nothing about the *other* direction - a hero standing next to a trait that
+ * grants. That direction is `adjacentAllies`' `isHero` skip, it is the common
+ * case rather than a corner one (the rightmost unit's right-hand neighbour is
+ * always the hero), and until "a Chorus beside the hero sings to nobody" was
+ * written in `test/tribes.test.ts` nothing observed a hero's `bonusPower`
+ * after a tribal trait fired beside it.
+ *
+ * `adjacentAllies` already refuses to return one, so a hero is never somebody
+ * else's kin and never anybody's grant; this refuses to answer for one at all,
+ * so a hero is never anybody's counter either. Without
  * the second half the two halves disagree: `'same'` would be 0 for a hero
  * because no unit is of race `'hero'`, while `'different'` would be every unit
  * beside it - a free +1 or +2 to any hero carrying Banner, earned by standing

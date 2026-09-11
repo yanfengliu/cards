@@ -703,10 +703,25 @@ function checkStateBased(state: GameState): GameEvent[] {
  * below, and this is the only place it is written down. A unit carrying two
  * traits that answer one event fires them in the order their blocks are
  * written. There is no priority number on a trait; moving a block moves the
- * rule. No shipped card carries two triggering traits, so today this decides
- * nothing - it decides everything the day one does. With Ward removed the only
- * two shipped triggers key on different events, so this tie-break is now
- * reachable only through the `extra` seam.
+ * rule.
+ *
+ * **Two shipped traits answer `afterActed`: Relay, then Chorus.** That
+ * sentence used to say the opposite - that the shipped triggers all keyed on
+ * different events, so the tie-break was unobservable - and it was made false
+ * by Chorus landing in this very branch without anything going red. It is
+ * reachable with shipped content, not hypothetically: `si_relay` grants Relay
+ * to a card that does not print it, and `u_songkeeper` and `u_elflord` print
+ * Chorus, so a run hands the resolver a body carrying both. Swapping the two
+ * blocks below changes what such a body emits, in this order:
+ * `[right +2 Relay, left +2 Chorus, right +2 Chorus]`.
+ *
+ * Both halves are gated in `test/resolver-order.test.ts`: "a body carrying
+ * Relay and Chorus fires Relay first" pins that stream, and "every trait
+ * keying on afterActed is pinned, in the order its block is written" reads
+ * this branch off the AST so a *third* `afterActed` trait goes red the moment
+ * it is written rather than the moment somebody remembers to add it to a
+ * fixture. The second is the replacement for a tripwire that did not fire; the
+ * first is the behaviour the tripwire only claimed to protect.
  *
  * `extra` is a seam for tests, and the reason it is here is worth stating.
  * Every shipped trigger is keyed to a single uid - `event.uid === e.uid`, or

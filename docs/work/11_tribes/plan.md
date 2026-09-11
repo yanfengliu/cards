@@ -5,6 +5,8 @@ Owner: coordinator
 Created: 2026-09-11
 Updated: 2026-09-11
 
+Review round 1 is closed: six findings, six gates, eleven mutations. See "Review round 1" below.
+
 ## Problem and outcome
 
 Race was decoration. `UnitCard` carried a `tribe`, the heraldry drew it as a field colour, the hover panel named it — and `makeUnit` dropped the field on the way to the board, so no `Entity` had one and nothing in a fight could read one. `src/render/glossary.ts` said so out loud in `RACE_HAS_NO_RULE` ("nothing in the card pool reads it"), and `test/explain.test.ts` held `src/engine/resolver.ts` to it by failing if the file ever mentioned `tribe`.
@@ -57,7 +59,8 @@ Banner is Kindle with the race test inverted, and that is the design content rat
 - [x] **`npm run gates` green.** 230 tests, from 218.
 - [x] **Every new gate watched going red**, recorded in `docs/learning/gate-proofs.md` with the revision.
 - [x] **Before and after measurements captured and explained**, not suppressed.
-- [ ] **Independent review of the engine changes.** Not run by the worker, per the assignment. Every resolver change is listed in the handoff for the coordinator to commission.
+- [x] **Independent review of the engine changes.** Commissioned by the coordinator and run. It passed the resolver work — one mutation site, nothing announced by hand, board-index order gated, a queue and not a stack, no recursion, the act-case ordering right and gated, and the hash omission correct — and returned six findings about what was *not* gated. All six are closed below.
+- [x] **Every review finding closed with a gate watched going red.** Six findings, six gates, eleven mutations, in `docs/learning/gate-proofs.md`.
 - [ ] **Merged to main.** The worker was told to commit on its branch and not merge.
 
 ## Implementation steps
@@ -73,11 +76,35 @@ Banner is Kindle with the race test inverted, and that is the design content rat
 - [x] Verify visually: the icon sheet at 11/15/64px light and dark, the hover panel geometry through `npm run probe:ui hover`, a whole run through the DOM with `tools/ui-probe/run.ts`, and each tribal card's panel.
 - [x] Mutation-test every new gate; record in `docs/learning/gate-proofs.md`.
 - [x] `ARCHITECTURE.md`'s verb list; `docs/design/game.md`'s trait list and walked example; devlog.
-- [ ] Independent review, then merge. Coordinator's.
+- [x] Independent review, commissioned by the coordinator.
+- [x] Close all six review findings, each with a gate watched going red; re-run `npm run gates` and diff `npm run verify` against the base.
+- [ ] Merge. Coordinator's.
+
+## Review round 1
+
+An independent review of `8efbbb2` **passed the tribal work's core** — Chorus obeys the resolver contract (one mutation site, nothing announced by hand, board-index order gated, a queue and not a stack, no recursion), the act-case ordering is right and gated, and the hash omission survived a serious attack. It returned six findings, every one of them about a property that is *true in the shipped code and untested*. All six are closed on branch `worktree-agent-aacf45b44fe4cb1d7`, cut from `8efbbb2` with `main` at `5f51827` merged in so that `npm run gate:work-plans` is in the chain.
+
+**F1 — a tripwire designed for exactly this event did not fire.** `src/engine/resolver.ts` said the shipped triggers all keyed on different events, so the inside-one-unit tie-break was unobservable; Chorus was added inside the same `afterActed` branch as Relay and made that sentence false in the same commit. It is reachable with shipped content, not hypothetically: `si_relay` grants Relay to a card that does not print it, and `u_songkeeper` and `u_elflord` print Chorus, so a run hands the engine a body carrying both. Moving the Chorus block above Relay's left all 230 tests green.
+
+The comment is corrected, a fixture now pins the stream a body carrying both emits — `[right +2 Relay, left +2 Chorus, right +2 Chorus]` — and **the tripwire is replaced rather than repaired**, because the reason it failed is structural. It asserted that a hand-built body carrying `['relay', 'wake']` produced one effect per event. A third trait keyed to `afterActed` does not appear on that body, so its block never ran for that fixture and the assertion held. The test was never edited; it never could do what `ARCHITECTURE.md` claimed. A gate built from a hand-written list of the thing it checks can only see what somebody remembered to write into it. The replacement reads the `afterActed` branch off the AST and pins the trait names in order.
+
+**F2 — the hero rule was gated in one direction only.** `src/engine/state.ts` claimed it held "both ways round" and `test/tribes.test.ts` said "both directions", but both meant the two polarities of the *count* — what a tribal trait sees when it looks at a hero. Nothing observed a hero's `bonusPower` after a Chorus fired beside it, which is `adjacentAllies`' `isHero` skip and a different function. Making Chorus grant to an adjacent living hero left all 230 tests green. It is the most ordinary board there is: the rightmost unit's right-hand neighbour is always the hero. Gated, and both overstated claims corrected.
+
+**F3 — the one-comparison-site AST gate read a hardcoded list of six filenames.** Complete when written, silently incomplete on the seventh engine file: adding `src/engine/tribecheck.ts` containing the whole-board count the gate exists to forbid left `npm run gates` at exit 0. It now walks `src/engine/` with `tsFilesUnder`, asserts the walk found at least the six files that were there when it was written, and states this bound in its own header alongside the three it already named.
+
+**F4 — two timing rules with no fixture.** `tribePower` is spawned once per act; moving `tribalOnAct` inside the swing loop gives a Volley body one count per swing and left all 230 tests green, because no fixture gave a tribal trait to a Volley body. Not reachable from shipped content — no tribal card prints Volley and no Volley card prints a tribal trait — so the fixture is written for the day a Volley sigil or a Volley tribal card lands. Its sibling: firing Chorus on `acted` instead of `afterActed` also left all 230 green, because death is the only board that separates them and every Chorus fixture was fought into a 0-Power Guard so that nothing in the line dies. A fragile Chorus body that dies to its own swing's retaliation now gates it, with a one-Health-more control so the fixture cannot pass on an engine where Chorus never fires.
+
+**F5 — the design walk's running totals were unparsed prose.** The walks parse their *card* numbers through `stated()`, so a reworded stat line goes red; the step-by-step totals ("The wall is on 199", "on 198") were transcribed and never read, so changing 199 to 198 left the suite green and the document disagreeing with itself. Both are parsed now and bound twice: against the walk's own subtraction chain, and against the wall's Health after each step in the engine. The two are different bindings and neither covers the other, which is why both mutations are in the evidence.
+
+**F6 — the hash omission rested on an ungated rule.** The review confirmed a race is recoverable from `cardId` on every path it could reach, so leaving `src/engine/hash.ts` alone is correct. That rests on `ARCHITECTURE.md`'s "changing a card's race mints a new id", which had no gate: changing `u_songkeeper` from elf to human with the id kept passed `npm run gates`, `verify` and `verify:run` while changing what Chorus does in every fight that card appears in. `RACE_OF` in `test/tribes.test.ts` writes out every shipped card's race, pinned rather than derived — derived it would be the same tautology `verify:run`'s sigil ledger was caught being in its first draft.
+
+**Checks.** `npm run gates` green at 236 tests, from 230 at `8efbbb2`. Eleven mutations, all red for their own reason, in `docs/learning/gate-proofs.md`. `npm run verify` is byte-identical to `8efbbb2`'s apart from `Elapsed` — the same 66.25% against 56.50%, gap 9.75 pp — which is the evidence that this round is gates and comment text and nothing else. No dependency changed, so `npm run audit` was not re-run.
+
+**Not done, and deliberately.** No balance number moved; new fixtures are not new content. Nothing under `src/run/`, `src/ui/`, `src/content/unlocks.ts` or `src/sim/runmeasure.ts` was touched, because another worker is live there. The corrected engine comments are text and were not re-reviewed independently.
 
 ## Outcome
 
-Pending integration. Implemented and locally verified on branch `worktree-agent-a8d4d25fe3d5ac7c5`, cut from `dcf2cdf`.
+Pending integration. Implemented and locally verified on branch `worktree-agent-a8d4d25fe3d5ac7c5`, cut from `dcf2cdf`; review round 1 closed on branch `worktree-agent-aacf45b44fe4cb1d7`, which carries `8efbbb2` and `main` at `5f51827`.
 
 **Checks.** `npm run gates` green: typecheck, both AST gates, 230 tests (218 at the base), `npm run verify`, `npm run verify:run`. `npm audit --audit-level=high` clean — no dependency changed. Sixteen mutations, each applied to the shipped tree, run against the shipped command, reverted, and the bytes compared; all sixteen red for their own reason, in `docs/learning/gate-proofs.md`.
 
