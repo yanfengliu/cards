@@ -6,10 +6,10 @@
 // commits, so while the hero sigil offer, the reward shelf and the attach
 // screen are up, `state.hero` still holds the Health the hero carried into the
 // fight and the maximum from before any hero sigil. The shelf's opening line
-// read its maximum from there. After the Sigil of the Oak, a hand-played Ranger
-// run on seed 2 read "146 of 180 Health" under a HUD reading 146/210, and it did
-// so at every elite or boss where the Oak was taken. No test read that sentence:
-// it was written inside `startRunApp`, which needs a document.
+// read its maximum from there. After the Sigil of the Oak, the final acceptance
+// review saw "146 of 180 Health" under a HUD reading 146/210, and the same
+// happens at any elite or boss where the Oak is taken. No test read that
+// sentence: it was written inside `startRunApp`, which needs a document.
 //
 // The class, and so the claim: anything a screen in that window says about the
 // hero's Health, maximum Health or gold is what the replay sets. Not what the
@@ -46,7 +46,7 @@
 //   line off the page, holds it to the HUD beside it and to the run, and needs
 //   Chrome.
 //
-// Made to go red: see `docs/learning/gate-proofs.md`, entry of 2026-09-22.
+// Made to go red: see `docs/learning/gate-proofs.md`, entry of 2026-09-23.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

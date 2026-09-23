@@ -36,7 +36,7 @@
 //   parameter read any other way, or under a computed name, is not seen; the
 //   walk asserts it found `seed`, so a walk that finds nothing cannot pass.
 //
-// Made to go red: see `docs/learning/gate-proofs.md`, entry of 2026-09-22.
+// Made to go red: see `docs/learning/gate-proofs.md`, entry of 2026-09-23.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -4,6 +4,18 @@ A defect the user reports is recorded here and gated, never only fixed. One `##`
 
 This file is not a queue. Unlike a lesson in `docs/learning/lessons.md`, an entry stays after it becomes a gate — the register is the standing list of what the gates could not see, which is where the next defect comes from. The gate's own red-proof lives in `docs/learning/gate-proofs.md`; this file says why the gate exists.
 
+## 2026-09-23 — the reward shelf printed the new Health against the old maximum
+
+**Symptom, as reported.** Finding F2 of the final acceptance review of `main` at `9b36329`: after the Sigil of the Oak, the reward shelf read "146 of 180 Health" while the HUD above it read 146/210.
+
+**Investigation.** `src/ui/runapp.ts:832` built the shelf's opening line itself and read the maximum from `s.hero.maxHealth`. The hero sigil offer in `src/ui/sigils.ts:54` built the same line from the phase's `maxHealthAfter` and was right. The HUD read the phase for Health, maximum and gold, but its sigil chips read `heldHeroSigils(state)`, so the Oak was missing from the HUD until the shelf was answered: a second defect of the same kind. Reproduced at the shipped line headlessly as W1, `knight seed 1 greedy, reward screen at node 21: the screen says "192 of 200 Health" and the replay sets 192 of 230`, and through the page as P1, `the reward screen says "140 of 180 Health", the HUD says 140/210` on seed 2 as the Ranger.
+
+**Root cause.** Between a won fight and its commit the canonical run state is stale by design: `src/ui/run.ts` moves it when the node commits, and the phase carries what the replay will set. Two surfaces in that window read the state. No test could see either, because the shelf's sentence was written inside `startRunApp`, which needs a document, and nothing held the HUD's chips to the run.
+
+**How it is checked from now on.** Every surface in the window reads one function, `heroNow(state, phase)` in `src/ui/run.ts`: the shelf and the hero sigil offer through `wonLeadHtml`, and the HUD's numbers and chips. `test/ui-won.test.ts` renders every hero sigil, reward and attach screen that 24 runs reach (three classes, seeds 1..4, two routes) through the functions `runapp.ts` calls. It holds every "<n> of <m> Health" and gold statement on them, and the HUD's numbers and chips, to what a second controller's replay sets, not to `heroNow`. It requires a shelf after a maximum-moving sigil for each class, so the case the defect lived in cannot fall out of the window. W1–W7 in `docs/learning/gate-proofs.md` are its red-proofs.
+
+**What is still not covered.** The unit gate cannot see whether `runapp.ts` calls these functions: cutting the HUD's wiring leaves it green (W8c). `tools/ui-probe/run.ts` reads the line and the HUD off the page at every shelf and hero sigil screen (`checkWonLine`; P1 and P2 red), but it needs Chrome and a server and is outside `npm run gates`, so only the probe rule in `docs/policies/local-rules.md` makes anyone run it. A statement about the hero in any shape other than the two the test parses is not read.
+
 ## 2026-09-10 — the report printed a style word the API refuses: `placement: 'search'`
 
 **Symptom, as reported.** A probe written to count tribal drafts passed `placement: 'search'` to `makeRunAgent` and died inside the fight with `TypeError: policy is not a function`. The error named neither the bad input nor what would have satisfied it. `docs/devlog/detailed/2026-09-10-tribes.md:33` recorded the incident at the time.
