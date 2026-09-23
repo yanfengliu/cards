@@ -142,8 +142,13 @@ function seamSetup(run: RunState): { setup: FightSetup; enemy: HeroSpec } {
 
 /**
  * Every granted sigil is in the fight the run hands the engine, and nothing
- * that was never granted is - read as: the fight is the content, plus what the
- * ledger granted, plus what the forge did, **field by field**, and nothing else.
+ * that was never granted is - read as: each card the fight resolves and the
+ * hero it is handed are the content, plus what the ledger granted, plus what
+ * the forge did, **field by field**, and nothing else. The pool object itself
+ * is not walked: its `handSize` and `energyPerTurn` are held below, and
+ * `runPool` hands over no `castable`, which is harmless while no spell or
+ * piece of equipment can enter a run deck: `runPool` would throw building the
+ * pool first, because the content's `card` refuses a spell or equipment id.
  *
  * `sigilProblems` holds two *run-layer* records of a grant to each other. This
  * holds the run layer to the engine's own inputs, which is what a player

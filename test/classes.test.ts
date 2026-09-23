@@ -187,8 +187,9 @@ test('every class can draft every tribal trait and every player race at every un
   //
   // Mutations watched going red: `u_songkeeper` gated beside the Elf Lord on
   // First Blood (Chorus gone at every set First Blood is not in), and on the
-  // won-run deed (gone before *and* after First Blood fires). See
-  // `docs/learning/gate-proofs.md`, 2026-09-23.
+  // won-run deed (gone at every set holding neither deed, because First
+  // Blood's Elf Lord prints Chorus too). See `docs/learning/gate-proofs.md`,
+  // 2026-09-23.
   //
   // Bound: the shipped pools and deeds, read at every set above. It says a
   // class *can* be offered each trait, not that any seed is.
@@ -408,9 +409,11 @@ test('every class replays from its saved log at every rung of the unlock ladder,
   // compared rather than digests, so a failure says which field moved.
   //
   // Mutations watched going red: `heroSpecFor` dropping the class's traits
-  // (through `fightSigilProblems`), a sigilled card's race set to human, and
+  // (through `fightSigilProblems`), a sigilled card's race set to human,
   // `startRun` recording a partial set with its owned half emptied for every
-  // class but the default one. See `docs/learning/gate-proofs.md`, 2026-09-23.
+  // class but the default one, and `startRun` handing every class the Knight's
+  // hero whenever a set is passed. See `docs/learning/gate-proofs.md`,
+  // 2026-09-23.
   //
   // Bound: seeds 1..6 x both route styles x append-right placement, the rungs
   // `unlockLadder` reads off `ACHIEVEMENTS`, three classes. The population is
@@ -445,6 +448,16 @@ test('every class replays from its saved log at every rung of the unlock ladder,
             `${label}: the saved log did not replay to the run it records`,
           );
           assert.deepEqual(sigilProblems(run), [], `${label}: the ledger and the deck disagree`);
+          // `fightSigilProblems` holds each fight to `run.content.hero`, so the
+          // content hero has to be held to the class here, at this rung: the
+          // real-fight hero test above plays no unlock set, and a hero swapped
+          // only when a set is passed would pass both.
+          assert.deepEqual(
+            run.content.hero,
+            cls.hero,
+            `${label}: the run's content carries a hero that is not the ${cls.name}'s, so every ` +
+              `fight below is held to the wrong hero`,
+          );
           assert.deepEqual(
             fightSigilProblems(run),
             [],

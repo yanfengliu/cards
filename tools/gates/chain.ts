@@ -51,7 +51,11 @@ function fail(status: number, message: string): never {
 
 const names = process.argv.slice(2);
 if (names.length === 0) {
-  fail(2, 'no gate named. Pass the package.json script names to run, in order, e.g. `typecheck test`.');
+  fail(
+    2,
+    'no gate named. Pass the package.json script names to run, in order, as the `gates` script ' +
+      'in package.json does - every `gate:*` script among them, or the chain refuses to run.',
+  );
 }
 
 let scripts: Record<string, unknown>;
