@@ -1,15 +1,17 @@
 // Every number a won fight's screens state about the hero is the number the
-// replay sets, and the HUD says the same.
+// replay sets, and the HUD says the same - over each fight's end banner too,
+// won or lost.
 //
-// The defect this file exists for. Between a won fight and its commit the run
-// state is stale by design: `src/ui/run.ts` moves the state when a node
-// commits, so while the hero sigil offer, the reward shelf and the attach
-// screen are up, `state.hero` still holds the Health the hero carried into the
-// fight and the maximum from before any hero sigil. The shelf's opening line
-// read its maximum from there. After the Sigil of the Oak, the final acceptance
-// review saw "146 of 180 Health" under a HUD reading 146/210, and the same
-// happens at any elite or boss where the Oak is taken. No test read that
-// sentence: it was written inside `startRunApp`, which needs a document.
+// The defect this file exists for. From the moment a fight ends until its node
+// commits the run state is stale by design: `src/ui/run.ts` moves the state
+// when a node commits, so over the end banner and while the hero sigil offer,
+// the reward shelf and the attach screen are up, `state.hero` still holds the
+// Health the hero carried into the fight and the maximum from before any hero
+// sigil. The shelf's opening line read its maximum from there. After the Sigil
+// of the Oak, the final acceptance review saw "146 of 180 Health" under a HUD
+// reading 146/210, and the same happens at any elite or boss where the Oak is
+// taken. No test read that sentence: it was written inside `startRunApp`,
+// which needs a document.
 //
 // The class, and so the claim: anything a screen in that window says about the
 // hero's Health, maximum Health or gold is what the replay sets. Not what the
@@ -18,33 +20,38 @@
 // through `replayRun` and walks away from every choice still open. The HUD
 // reads `heroNow`, so it must say the same thing, and that includes its hero
 // sigil chips: they read `state.sigils` too, so the Oak that had just made the
-// bar 210 had no chip beside it until the shelf was answered. Found by the
-// same screenshot, and the same class.
+// bar 210 had no chip beside it until the shelf was answered. The review of
+// the fix found the third: over the end banner, before `finishFight`, the HUD
+// kept the Health the hero walked in with, 200/200 under "Your hero finished
+// on 194 of 200 Health".
 //
 // Bound of this gate - what a green run does and does not prove:
 //
 //   Shipped `RUN_CONTENT`, every class it lists, seeds 1..4, the greedy and the
 //   random route, append-right placement. The greedy route takes the Oak
 //   whenever it is offered, which is what makes the window's maximum differ
-//   from the state's; the random route declines some offers. Every sigil,
-//   reward and attach screen those runs reach is rendered through the function
-//   `runapp.ts` calls for it - `heroSigilOfferHtml`, `rewardHtml`,
-//   `attachHtml` - with a stand-in card button, because the real one paints
-//   with the document.
+//   from the state's; the random route declines some offers. Every fight's end,
+//   won or lost, is checked as `heroNow(state, phase, outcome)` - what the HUD
+//   reads over the banner. Every sigil, reward and attach screen those runs
+//   reach is rendered through the function `runapp.ts` calls for it -
+//   `heroSigilOfferHtml`, `rewardHtml`, `attachHtml` - with a stand-in card
+//   button, because the real one paints with the document.
 //
 //   It reads statements of two shapes: "<n> of <m> Health", and the gold line
 //   "+<pay> gold ... you now have <gold>". A screen that states the hero's
 //   numbers in another shape is not read. A screen in the window that states
 //   none (attach, today) passes by saying nothing, which is why the population
-//   check requires the sigil and reward screens to have stated Health every
-//   time they were drawn, and requires a reward screen where the maximum really
-//   had moved - per class - so the Oak case cannot quietly fall out of the
-//   window.
+//   check requires the sigil and reward screens to have stated both every time
+//   they were drawn, and requires a reward screen where the maximum really had
+//   moved - per class - so the Oak case cannot quietly fall out of the window.
 //
-//   It proves nothing about the wiring from `renderNode` to these functions,
-//   or about the pixels. That is `tools/ui-probe/run.ts`, which reads the same
-//   line off the page, holds it to the HUD beside it and to the run, and needs
-//   Chrome.
+//   It proves nothing about the wiring in `runapp.ts` - whether `renderNode`
+//   still calls these functions, whether `renderHud` hands the finished fight
+//   to `heroNow` and is redrawn when the banner goes up - or about the pixels.
+//   That is `tools/ui-probe/run.ts`: at every hero sigil and reward screen it
+//   reads the opening line, the HUD's Health and its sigil chips off the page,
+//   and over every fight's end banner the HUD's Health, and holds each to the
+//   run. It needs Chrome and is outside `npm run gates`.
 //
 // Made to go red: see `docs/learning/gate-proofs.md`, entry of 2026-09-23.
 
@@ -62,6 +69,7 @@ import { STAT_TERMS } from '../src/render/glossary.ts';
 import {
   type FightOutcome,
   type RunController,
+  type RunPhase,
   type WonPhase,
   createRunController,
   heroNow,
@@ -122,12 +130,23 @@ type Made = { sigil?: number; reward?: number };
  * answer to "what are the hero's numbers now", and it is `replayRun`'s answer,
  * reached without the phase the screens were built from.
  */
-function walkAway(content: RunContent, ctl: RunController, nodeId: number, outcome: FightOutcome, made: Made): RunState {
+function walkAway(
+  content: RunContent,
+  ctl: RunController,
+  nodeId: number,
+  outcome: FightOutcome,
+  made: Made,
+  where: string,
+): RunState {
   const fork = createRunController(content, ctl.seed, { classId: ctl.classId, resume: ctl.log });
   fork.travel(nodeId);
   fork.finishFight(outcome);
   for (let guard = 0; ; guard++) {
-    assert.ok(guard < 4, 'walking away from a won fight took more than three answers');
+    assert.ok(
+      guard < 4,
+      `${where}: walking away from the fight took more than three answers, and a won node asks at most ` +
+        `three (hero sigil, shelf, attach); the node is still at ${fork.phase.kind}`,
+    );
     const p = fork.phase;
     if (p.kind === 'sigil') fork.pickSigil(made.sigil ?? -1);
     else if (p.kind === 'reward') fork.pickReward(made.reward ?? -1);
@@ -136,7 +155,8 @@ function walkAway(content: RunContent, ctl: RunController, nodeId: number, outco
   }
   assert.ok(
     fork.phase.kind === 'travel' || fork.phase.kind === 'over',
-    `walking away left the node open, at ${fork.phase.kind}`,
+    `${where}: walking away left the node open at ${fork.phase.kind}; declining every open choice ` +
+      'should commit it and leave the run at travel or over',
   );
   return fork.state;
 }
@@ -150,7 +170,49 @@ type Tally = {
   /** Screens where the hero holds a sigil the stale state does not have yet. */
   sigilsMoved: number;
   statements: number;
+  /** Fights whose end banner was checked, by how they ended. */
+  ended: { won: number; lost: number };
+  /** End banners where the Health or the gold the replay sets differs from the stale state's. */
+  endedMoved: number;
 };
+
+/**
+ * Hold the HUD over a fight's end banner - the fight over on screen, the
+ * outcome not yet handed to `finishFight` - to the replay. That is
+ * `heroNow(state, phase, outcome)`, which is what `renderHud` reads there.
+ */
+function checkEnded(
+  content: RunContent,
+  ctl: RunController,
+  p: Extract<RunPhase, { kind: 'fight' }>,
+  nodeId: number,
+  outcome: FightOutcome,
+  tally: Tally,
+  label: string,
+): void {
+  const where = `${label}, the end of the fight at node ${nodeId} (${outcome.fight.result})`;
+  const truth = walkAway(content, ctl, nodeId, outcome, {}, where);
+  const want = { health: truth.hero.health, maxHealth: truth.hero.maxHealth, gold: truth.gold };
+  const wantSigils = heldHeroSigils(truth).map((s) => s.id);
+  const stale = ctl.state;
+  const hud = heroNow(stale, p, outcome);
+  const hudSaid = { health: hud.health, maxHealth: hud.maxHealth, gold: hud.gold };
+  assert.deepEqual(
+    hudSaid,
+    want,
+    `${where}: the HUD over the end banner states ${JSON.stringify(hudSaid)} and the replay sets ` +
+      `${JSON.stringify(want)}. Until the node commits the state holds what the hero walked in with; ` +
+      'hand the finished fight to heroNow.',
+  );
+  assert.deepEqual(
+    hud.heroSigils.map((s) => s.id),
+    wantSigils,
+    `${where}: the HUD's chips over the end banner show hero sigils [${hud.heroSigils.map((s) => s.id).join(', ')}] ` +
+      `and the replay has the hero holding [${wantSigils.join(', ')}]`,
+  );
+  tally.ended[outcome.fight.result === 'playerWin' ? 'won' : 'lost']++;
+  if (want.health !== stale.hero.health || want.gold !== stale.gold) tally.endedMoved++;
+}
 
 /** Hold one won-fight screen, and the HUD above it, to the replay. */
 function check(
@@ -163,11 +225,11 @@ function check(
   tally: Tally,
   label: string,
 ): void {
-  const truth = walkAway(content, ctl, nodeId, outcome, made);
+  const where = `${label}, ${p.kind} screen at node ${nodeId}`;
+  const truth = walkAway(content, ctl, nodeId, outcome, made, where);
   const want = { health: truth.hero.health, maxHealth: truth.hero.maxHealth, gold: truth.gold };
   const wantSigils = heldHeroSigils(truth).map((s) => s.id);
   const stale = ctl.state;
-  const where = `${label}, ${p.kind} screen at node ${nodeId}`;
 
   const hud = heroNow(stale, p);
   const hudSaid = { health: hud.health, maxHealth: hud.maxHealth, gold: hud.gold };
@@ -198,6 +260,13 @@ function check(
     );
   }
   const gold = goldStated(text);
+  if (p.kind !== 'attach') {
+    assert.ok(
+      gold.pays.length > 0 && gold.totals.length > 0,
+      `${where}: the screen no longer states what the fight paid and the gold it leaves, in the shape ` +
+        `"+<pay> gold ... you now have <gold>", so its gold cannot be held to the replay:\n${text}`,
+    );
+  }
   for (const pay of gold.pays) {
     assert.equal(pay, want.gold - stale.gold, `${where}: the screen says the fight paid ${pay} and the replay pays ${want.gold - stale.gold}`);
   }
@@ -235,6 +304,8 @@ function drive(content: RunContent, seed: number, classId: string, route: 'greed
         const { fight, log } = runFight(p.setup, agent.placement);
         outcome = { fight, rounds: log };
         made = {};
+        // The end banner is up and the outcome is not handed over yet.
+        checkEnded(content, ctl, p, nodeId, outcome, tally, label);
         ctl.finishFight(outcome);
         break;
       }
@@ -281,6 +352,8 @@ test("everything a won fight's screens and the HUD state about the hero is what 
     maxMovedAtReward: new Map(),
     sigilsMoved: 0,
     statements: 0,
+    ended: { won: 0, lost: 0 },
+    endedMoved: 0,
   };
   for (const classId of classes) {
     for (let seed = 1; seed <= 4; seed++) {
@@ -291,11 +364,16 @@ test("everything a won fight's screens and the HUD state about the hero is what 
   // The population, so "did not run" cannot come back as "passed", and so the
   // one case the defect lived in cannot fall out of the window unnoticed.
   const summary = JSON.stringify({ ...tally, maxMovedAtReward: Object.fromEntries(tally.maxMovedAtReward) });
-  assert.ok(tally.screens.sigil >= 10, `too few hero sigil screens checked: ${summary}`);
-  assert.ok(tally.screens.reward >= 50, `too few reward screens checked: ${summary}`);
-  assert.ok(tally.screens.attach >= 3, `too few attach screens checked: ${summary}`);
-  assert.ok(tally.healthMoved >= 50, `too few screens where the fight moved the hero's Health: ${summary}`);
-  assert.ok(tally.sigilsMoved >= 10, `too few screens where a hero sigil taken at the node is held: ${summary}`);
+  const atLeast = (count: number, floor: number, what: string): void =>
+    assert.ok(count >= floor, `${what}: ${count}, and the check needs at least ${floor}. ${summary}`);
+  atLeast(tally.screens.sigil, 10, 'hero sigil screens checked');
+  atLeast(tally.screens.reward, 50, 'reward screens checked');
+  atLeast(tally.screens.attach, 3, 'attach screens checked');
+  atLeast(tally.healthMoved, 50, "screens where the fight moved the hero's Health");
+  atLeast(tally.sigilsMoved, 10, 'screens where a hero sigil taken at the node is held');
+  atLeast(tally.ended.won, 50, 'won fights whose end banner was checked');
+  atLeast(tally.ended.lost, 5, 'lost fights whose end banner was checked');
+  atLeast(tally.endedMoved, 50, 'end banners where the fight moved the Health or the gold');
   for (const classId of classes) {
     assert.ok(
       (tally.maxMovedAtReward.get(classId) ?? 0) >= 1,

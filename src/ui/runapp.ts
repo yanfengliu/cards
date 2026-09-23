@@ -480,6 +480,9 @@ export function startRunApp(): void {
         `<button type="button" class="btn--primary" data-run="finish-fight">` +
         `${won ? 'Take your reward' : 'See how the run ended'} →</button>`;
       dom.after.hidden = false;
+      // The banner says what the fight left the hero on; the HUD above it
+      // has to say the same, not the Health the hero walked in with.
+      renderHud();
     },
     resolveCard: (id) => {
       try {
@@ -629,12 +632,13 @@ export function startRunApp(): void {
       dom.subtitle.textContent =
         `${className()} · Act ${act + 1} of ${RUN_CONTENT.acts.length} — ${actName(act)} · ${where}`;
     }
-    // A won fight's screens promise the numbers the replay will set, hero
-    // sigil included, so the HUD reads them off the phase until the commit -
-    // through `heroNow`, the one function every one of those screens reads
-    // too, so the HUD and the screen under it cannot disagree. The sigil chips
-    // as well: a sigil taken at this node is not in the state until it commits.
-    const { health, maxHealth, gold, heroSigils } = heroNow(s, p);
+    // From the moment a fight ends until its node commits, the state still
+    // holds what the hero brought in. So the HUD reads `heroNow`, the one
+    // function every screen in that window reads too: over the end banner it
+    // states what the finished fight settles, and on a won fight's screens the
+    // numbers the replay will set, hero sigil included. The sigil chips as well:
+    // a sigil taken at this node is not in the state until it commits.
+    const { health, maxHealth, gold, heroSigils } = heroNow(s, p, pendingFight);
     const frac = health / Math.max(1, maxHealth);
     dom.status.innerHTML =
       `<span class="hud__stat hud__stat--health" title="${esc(`Your hero's Health. It persists across the whole run and is only healed at a rest, by an event, or by a hero sigil.`)}">` +

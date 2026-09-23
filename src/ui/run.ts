@@ -187,39 +187,86 @@ export type HeroNow = {
 };
 
 /**
+ * What `visit` sets the moment a node's fight ends, before anything else at the
+ * node: the hero's Health to what the fight left, and on a win the gold the
+ * node pays. `finishFight` puts these on its cursor and `heroNow` states them
+ * over the fight's end banner, so the two are one computation. A fight that is
+ * not this node's, or is not over, is refused with the reason.
+ */
+function afterFight(
+  state: RunState,
+  phase: Extract<RunPhase, { kind: 'fight' }>,
+  ended: FightOutcome,
+): { readonly health: number; readonly gold: number } {
+  const { fight } = ended;
+  if (fight.seed !== phase.setup.seed) {
+    throw new Error(
+      `run: the fight handed back was seeded ${fight.seed} and this node's fight is seeded ` +
+        `${phase.setup.seed}. A node completes only with its own fight.`,
+    );
+  }
+  if (fight.result === 'ongoing') {
+    throw new Error(
+      'run: the fight handed back is still ongoing. A node completes only once a hero has ' +
+        'fallen or the round cap has run out.',
+    );
+  }
+  return {
+    health: Math.max(0, heroOf(fight.state, 'player').health),
+    gold: fight.result === 'playerWin' ? state.gold + goldFor(state, phase.node) : state.gold,
+  };
+}
+
+/**
  * The hero's Health, maximum Health, gold and hero sigils as every surface
  * states them while `phase` is up: the HUD, and each won fight's screen.
+ * `ended` is a fight that has finished on screen and not yet been handed to
+ * `finishFight` - the fight's end banner is up - and it counts only while the
+ * phase is that fight.
  *
- * Between a won fight and its commit the canonical state is stale **by
- * design**. The state moves when the node commits, so until then it holds the
- * Health the hero carried into the fight, the maximum from before any hero
- * sigil, and the sigils from before it too, while the phase holds what the
- * replay will set. A screen in that window that reads `state` states something
- * the run is about to stop holding - and two did. The reward shelf printed its
- * maximum from `state.hero.maxHealth`, so after the Sigil of the Oak it read
- * "146 of 180 Health" beside a HUD reading 146/210; and the HUD's sigil chips
- * read `state.sigils`, so the Oak that had just made the bar 210 had no chip
- * beside it until the shelf was answered. Outside the window the state is the
- * truth, and this returns it.
+ * The canonical state is stale **by design** from the moment a fight ends
+ * until its node commits. It moves when the node commits, so until then it
+ * holds the Health the hero carried into the fight, the gold from before the
+ * fight paid, and the maximum and sigils from before any hero sigil taken at
+ * the node. Over the end banner the finished fight says what `visit` will set;
+ * from `finishFight` on, the phase carries it. A surface in that window that
+ * reads `state` states something the run is about to stop holding, and three
+ * did. The reward shelf printed its maximum from `state.hero.maxHealth`, so
+ * after the Sigil of the Oak it read "146 of 180 Health" beside a HUD reading
+ * 146/210. The HUD's sigil chips read `state.sigils`, so the Oak that had just
+ * made the bar 210 had no chip beside it until the shelf was answered. And over
+ * the end banner the HUD kept the Health the hero brought in: 200/200 under
+ * "Your hero finished on 194 of 200 Health". Before a fight ends and after a
+ * node commits the state is the truth, and this returns it.
  *
  * One function, so the HUD and the screens cannot disagree about which to
  * read. Gated by "everything a won fight's screens and the HUD state about the
  * hero is what the replay sets" in `test/ui-won.test.ts`.
  */
-export function heroNow(state: RunState, phase: RunPhase): HeroNow {
-  return 'maxHealthAfter' in phase
-    ? {
-        health: phase.healthAfter,
-        maxHealth: phase.maxHealthAfter,
-        gold: phase.goldAfter,
-        heroSigils: phase.heroSigilsAfter,
-      }
-    : {
-        health: state.hero.health,
-        maxHealth: state.hero.maxHealth,
-        gold: state.gold,
-        heroSigils: heldHeroSigils(state),
-      };
+export function heroNow(state: RunState, phase: RunPhase, ended: FightOutcome | null = null): HeroNow {
+  if ('maxHealthAfter' in phase) {
+    return {
+      health: phase.healthAfter,
+      maxHealth: phase.maxHealthAfter,
+      gold: phase.goldAfter,
+      heroSigils: phase.heroSigilsAfter,
+    };
+  }
+  if (phase.kind === 'fight' && ended !== null) {
+    const after = afterFight(state, phase, ended);
+    return {
+      health: after.health,
+      maxHealth: state.hero.maxHealth,
+      gold: after.gold,
+      heroSigils: heldHeroSigils(state),
+    };
+  }
+  return {
+    health: state.hero.health,
+    maxHealth: state.hero.maxHealth,
+    gold: state.gold,
+    heroSigils: heldHeroSigils(state),
+  };
 }
 
 /** Everything the last completed node did, for the screen that reports it. */
@@ -592,19 +639,9 @@ export function createRunController(
 
   function finishFight(outcome: FightOutcome): void {
     const p = requirePhase('fight', 'finish a fight');
+    // Refuses a fight that is not this node's or is not over, before anything moves.
+    const after = afterFight(state, p, outcome);
     const { fight, rounds } = outcome;
-    if (fight.seed !== p.setup.seed) {
-      throw new Error(
-        `run: the fight handed back was seeded ${fight.seed} and this node's fight is seeded ` +
-          `${p.setup.seed}. A node completes only with its own fight.`,
-      );
-    }
-    if (fight.result === 'ongoing') {
-      throw new Error(
-        'run: the fight handed back is still ongoing. A node completes only once a hero has ' +
-          'fallen or the round cap has run out.',
-      );
-    }
     const travelChoice: RunChoice = { kind: 'travel', nodeId: p.node.id };
     const detail = { ...noDetail, fight: { encounter: p.encounter, outcome } };
 
@@ -629,8 +666,8 @@ export function createRunController(
     // stream, so the clone at the node's start is at the first offer's
     // position; it is kept as the cursor for the offers after it.
     const cursor = cloneRunState(state);
-    cursor.hero.health = Math.max(0, heroOf(fight.state, 'player').health);
-    cursor.gold = state.gold + goldFor(state, p.node);
+    cursor.hero.health = after.health;
+    cursor.gold = after.gold;
     const w: WonNode = {
       node: p.node,
       encounter: p.encounter,

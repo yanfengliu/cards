@@ -42,7 +42,7 @@ npm install
 npm start        # then open http://127.0.0.1:5175/src/ui/index.html
 ```
 
-The page opens on the class pick, and picking a class starts the run; `?class=ranger` names the class in the address and skips the pick. `?seed=42` picks the run's seed, and the same seed, class and choices replay the same run - the end screen prints the run's hash and its replay log. A run in progress is saved in the browser between page loads, so a reload picks it up where it stood between nodes, as the class it was started as, instead of opening on the pick; `?fresh=1` ignores the saved one, and the HUD's Restart button abandons it. What you have unlocked is saved beside it and survives every run. `?unlocks=all` plays with everything unlocked and `?unlocks=none` with nothing, and neither saves anything - not what the run earns and not the run itself, so a reload starts over.
+The page opens on the class pick, and picking a class starts the run; `?class=ranger` names the class in the address and skips the pick. `?seed=42` picks the run's seed, and the same seed, class and choices, with the same things unlocked, replay the same run - the end screen prints the run's hash and its replay log. A run in progress is saved in the browser between page loads, so a reload picks it up where it stood between nodes, as the class it was started as, instead of opening on the pick; `?fresh=1` ignores the saved one, and the HUD's Restart button abandons it. What you have unlocked is saved beside it and survives every run. `?unlocks=all` plays with everything unlocked and `?unlocks=none` with nothing, and neither saves anything - not what the run earns and not the run itself, so a reload starts over.
 
 `?theme=dark` or `?theme=light` sets the colours, and `?hatch=1` rules each card's field with its heraldic hatching, so race reads without colour. Both are also buttons in the header.
 
@@ -54,7 +54,7 @@ A single fight, on its own, is still addressable: `?encounter=hard&seed=42&theme
 npm test            # rules, the design's worked example, determinism
 npm run measure     # the A/B: does optimal placement beat random placement?
 npm run measure:run # whole runs: win rate per act, where runs end, run length
-npm run gates       # every gate, cheapest first; AGENTS.md says what each one proves
+npm run gates       # the gates every commit passes, cheapest first; AGENTS.md says what each one proves
 ```
 
 `npm run gates` is what passes before any commit that touches code.

@@ -176,14 +176,15 @@ export function attachHtml(
  * The hero's sigils as HUD chips, each with its effect on hover. Empty when
  * none. Handed the list rather than the state, because inside a won fight the
  * state does not hold a sigil taken there yet - `heroNow` says which list is
- * the true one.
+ * the true one. Each chip carries its sigil's id, which is what
+ * `tools/ui-probe/run.ts` holds to the run.
  */
 export function heroSigilChips(held: readonly HeroSigilDef[]): string {
   if (held.length === 0) return '';
   return held
     .map(
       (s) =>
-        `<span class="hud__stat hud__stat--sigil" title="${esc(`${s.name}. ${heroEffectWords(s.effect)}`)}">` +
+        `<span class="hud__stat hud__stat--sigil" data-sigil-id="${esc(s.id)}" title="${esc(`${s.name}. ${heroEffectWords(s.effect)}`)}">` +
         iconSvg('sigil', { size: 13, label: `hero ${SIGIL_TERM.name.toLowerCase()}` }) +
         `<b>${esc(s.name.replace(/^Sigil of (the )?/, ''))}</b></span>`,
     )
