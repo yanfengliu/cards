@@ -23,7 +23,11 @@
  * inspected. Sigils add five: the hero sigil offer after an elite, a shelf
  * holding a card sigil, the attach screen, the fight with a sigilled card in
  * the line hovered so its panel is open, and the hero hovered once the run
- * holds a hero sigil, which is the only screen that names them in full.
+ * holds a hero sigil, which is the only screen that names them in full. A
+ * sixth is the shelf after a hero sigil that moved the maximum, which is the
+ * screen whose opening line once printed the old maximum; and every hero sigil
+ * offer and every shelf has that line read off the page and held to the HUD
+ * and to the run (`checkWonLine`), every time, not only when it is shot.
  *
  * **The class is a parameter, and `all` is the default.** It was the Knight,
  * hardcoded, for the whole unit that added the other two - so the Ranger and
@@ -62,6 +66,7 @@ import { runRun, travelOptions } from '../../src/run/run.ts';
 import type { RunState } from '../../src/run/types.ts';
 import { earnedBy, unlockedRewards } from '../../src/run/unlocks.ts';
 import { makeRunAgent } from '../../src/sim/runbots.ts';
+import { STAT_TERMS } from '../../src/render/glossary.ts';
 import { createRunController } from '../../src/ui/run.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -104,6 +109,45 @@ async function look(page: Page): Promise<{ subtitle: string; screen: string; rea
       over: title.startsWith('The run is'),
     };
   });
+}
+
+/**
+ * The line a won fight's screen opens with, held to the HUD above it and to
+ * the run.
+ *
+ * The reward shelf once built this line itself and read its maximum off the
+ * run state, which does not move until the node commits. After the Sigil of
+ * the Oak it said "146 of 180 Health" under a HUD reading 146/210, and
+ * `test/ui-won.test.ts` now holds the function that draws it. What that test
+ * cannot see is the page: whether `renderNode` still calls that function, and
+ * what the HUD beside it says. This reads both off the screen.
+ */
+async function checkWonLine(
+  page: Page,
+  seed: number,
+  classId: string,
+  want: { readonly healthAfter: number; readonly maxHealthAfter: number },
+  where: string,
+): Promise<void> {
+  const seen = await page.evaluate(() => ({
+    lead: document.querySelector('#run-node .run__lead')?.textContent ?? '',
+    hud: document.querySelector('.hud__stat--health')?.textContent ?? '',
+  }));
+  const said = new RegExp(`(\\d+) of (\\d+) ${STAT_TERMS.health.name}`).exec(seen.lead);
+  const hud = /(\d+)\s*\/\s*(\d+)/.exec(seen.hud);
+  if (said === null || hud === null) {
+    throw new Error(
+      `seed ${seed} as the ${classId}: the ${where} screen or the HUD states no ${STAT_TERMS.health.name}. ` +
+        `Screen: "${seen.lead}". HUD: "${seen.hud}".`,
+    );
+  }
+  const truth = `${want.healthAfter} of ${want.maxHealthAfter}`;
+  if (`${said[1]} of ${said[2]}` !== truth || `${hud[1]} of ${hud[2]}` !== truth) {
+    throw new Error(
+      `seed ${seed} as the ${classId}: the ${where} screen says "${said[1]} of ${said[2]} ` +
+        `${STAT_TERMS.health.name}", the HUD says ${hud[1]}/${hud[2]}, and the run holds ${truth}.`,
+    );
+  }
 }
 
 /**
@@ -418,6 +462,7 @@ async function playRun(
       }
       case 'sigil': {
         await page.waitForSelector('[data-run="sigil"]');
+        await checkWonLine(page, seed, classId, phase, 'hero sigil');
         await shoot(page, dir, 'sigil-offer', taken);
         const shownIds: string[] = await page.evaluate(() =>
           Array.from(document.querySelectorAll('[data-run="sigil"][data-sigil-id]')).map(
@@ -435,8 +480,14 @@ async function playRun(
       }
       case 'reward': {
         await page.waitForSelector('[data-run="reward"]');
+        await checkWonLine(page, seed, classId, phase, 'reward');
         const hasSigil = phase.offer.some((o) => o.kind === 'sigil');
         await shoot(page, dir, hasSigil ? 'reward-sigil' : 'reward', taken);
+        // The screen the maximum was once wrong on: a shelf after a hero sigil
+        // that moved it. Shot the first time, beside the ordinary one.
+        if (phase.maxHealthAfter !== mirror.state.hero.maxHealth) {
+          await shoot(page, dir, 'reward-max-health-moved', taken);
+        }
         const shownSigils = await page.locator('[data-run="reward"][data-sigil-id]').count();
         if (shownSigils !== phase.offer.filter((o) => o.kind === 'sigil').length) {
           throw new Error(`seed ${seed}: the shelf shows ${shownSigils} sigil(s) and the run offers ${hasSigil ? 1 : 0}`);

@@ -6,6 +6,61 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-22 — final acceptance: a shelf that read the stale state, tooltips that pointed at locked cards, and documents describing code that had moved
+
+Taken on branch `worktree-agent-a4507b0fec3da1c3d`, cut from `9b36329`, at the commit this entry lands in; the suite is **282 tests** here, 276 at the base. Twenty-one mutations through `.probe/mutate.mjs`: twenty came back RED on a line their reporter marked failed, none of them failing in the measured green baseline, and the one control came back GREEN as it had to. Each was applied to the working tree, run against the shipped command, restored from the bytes read before the edit, and its file's sha256 compared before and after. Every anchor was required to match exactly once, with `\n` in the anchor read as the file's own line ending, because these files are CRLF on disk and an anchor written with `\n` against a CRLF file is a mutation that silently does nothing.
+
+### The runner, and its three self-probes
+
+The shape is the one `docs/policies/local-rules.md` prescribes: attribution to a `not ok N - <name>` line under `--test-reporter=tap`, a green baseline measured for every distinct command before any mutation, and a crash guard differenced against that baseline and requiring that nothing was marked failed. The browser probe is the one command attributed by text rather than by a test name, and it has a baseline too: a clean `tools/ui-probe/run.ts 2 light ranger` that exits 0 and never prints the expected failure.
+
+```
+self-probes
+  ok   SELF      wanted not RED  got NON-ZERO, REASON UNCONFIRMED a mutation that cannot compile
+  ok   ATTRIB    wanted not RED  got NON-ZERO, REASON UNCONFIRMED a real mutation (W2) paired with the name of a test it does NOT break
+  ok   POSITIVE  wanted RED      got RED                          the SAME mutation paired with the name of a test it DOES break
+```
+
+`ATTRIB` and `POSITIVE` run the whole suite, so the test `ATTRIB` names really is printed - as a pass - which is the trap a `.includes(name)` runner falls into. The positive control was checked the way the rule says it must be: a copy of the runner with `failingLines` blinded to `return []` reported `FAIL POSITIVE ... got NON-ZERO, REASON UNCONFIRMED` and exited **2** before printing any summary.
+
+### What each gate is bound to
+
+`test/ui-won.test.ts` is shipped `RUN_CONTENT`, every class it lists, seeds 1..4, greedy and random routes, append-right placement: 40 hero sigil screens, 155 reward screens and 17 attach screens, 211 of them where the fight moved the hero's Health, 30 where a hero sigil taken at the node is held, and at least one reward screen per class after a sigil that moved the maximum (7 Knight, 6 Ranger, 4 Mage). The truth it compares against is a second controller that resumes from the log, replays the node and declines what is still open, so neither `heroNow` nor the phase is the reference. It reads statements shaped "<n> of <m> Health" and the gold line, and nothing else. It does not see the wiring from `renderNode` to these functions; the browser probe does, and P1 is that probe going red.
+
+The two gates in `test/explain.test.ts` read "cannot draft" off the content - not in a starting deck, and not in any class pool once `FRESH_UNLOCKS` narrows it - so the list follows gating changes nobody has made yet. The typed-string scan reads literals and template text under `src/render/` and `src/ui/` off the AST, and `index.html` as text; a name built at run time from content is outside it, which is where names belong.
+
+`test/docs.test.ts` holds three documents to their subjects: the source tree in `ARCHITECTURE.md` to every directory under `src/`, the two status paragraphs to every top-level directory, and `README.md` to every parameter read through a `URLSearchParams` under `src/ui/`. Each asserts its walk found its subject before trusting an absence.
+
+Digests after the last restore: `AGENTS.md` `9066cff3…`, `ARCHITECTURE.md` `ec0a15db…`, `README.md` `0c542aa1…`, `src/content/unlocks.ts` `d9510401…`, `src/render/glossary.ts` `28b01f72…`, `src/ui/run.ts` `70d802e1…`, `src/ui/runapp.ts` `c12a0a57…`, `src/ui/sigils.ts` `4948477d…`.
+
+| # | mutation | site | the failure |
+|---|---|---|---|
+| W1 | **the defect as it shipped**: the shelf writes its own opening line and reads the maximum off `state.hero.maxHealth` | `src/ui/sigils.ts` `rewardHtml` | `knight seed 1 greedy, reward screen at node 21: the screen says "192 of 200 Health" and the replay sets 192 of 230. The run state is stale until the node commits; read heroNow, as the HUD does.` |
+| P1 | the same mutation, through the browser | `tools/ui-probe/run.ts 2 light ranger` | `seed 2 as the ranger: the reward screen says "140 of 180 Health", the HUD says 140/210, and the run holds 140 of 210.` - the symptom as the review saw it, on the same seed and class |
+| W2 | the shared opening line reads its maximum off the stale state | `src/ui/sigils.ts` `wonLeadHtml` | same as W1 |
+| W3 | `heroNow` reads the maximum off the stale state, so the HUD does too | `src/ui/run.ts` | `the HUD states {"health":192,"maxHealth":200,"gold":135} and the replay sets {"health":192,"maxHealth":230,"gold":135}` |
+| W4 | `heroNow` reads the hero sigils off the stale state | `src/ui/run.ts` | `the HUD's chips show hero sigils [] and the replay has the hero holding [si_oak]` - the second defect in the class, found in the same screenshot |
+| W5 | the opening line states the Health the hero carried into the fight | `src/ui/sigils.ts` | `reward screen at node 0: the screen says "200 of 200 Health" and the replay sets 188 of 200` |
+| W6 | the opening line states the gold from before the fight paid | `src/ui/sigils.ts` | `the screen says you now have 0 gold and the replay sets 25` |
+| W7 | the opening line stops stating Health at all | `src/ui/sigils.ts` | `the screen no longer states the hero's Health at all` - the gate cannot pass by the sentence going away |
+| R1a | the race tooltips typed back in as they were | `src/render/glossary.ts` | `The Human tooltip names "Captain" (u_captain), which a player on a fresh profile cannot draft` |
+| R1b | the same, seen by the scan of typed strings | `src/render/glossary.ts` | `src/render/glossary.ts types "Captain" (u_captain) into a string the player can read, and a fresh profile cannot draft it` |
+| R2 | the examples drawn from the class pools instead of the starting decks | `src/render/glossary.ts` | as R1a - a derivation from the wrong list, which the typed-string scan cannot see |
+| R3 | `u_kindler` gated, and the tribal example chosen without the unlock narrowing | `src/content/unlocks.ts`, `src/render/glossary.ts` | `The Dwarf tooltip names "Kindler" (u_kindler), which a player on a fresh profile cannot draft` |
+| R3c | **control**: `u_kindler` gated, derivation as shipped | `src/content/unlocks.ts` | GREEN, as wanted: the sentence re-derives to the next tribal dwarf. Gating a card takes it out of the tooltip in the same edit |
+| R4 | the race tooltips drop their tribal card | `src/render/glossary.ts` | `A fresh profile can draft a Human card carrying a tribal trait, and the Human tooltip names none` |
+| R5 | a gated card typed into a tooltip elsewhere in the view | `src/ui/runapp.ts` | `src/ui/runapp.ts types "Human Captain" (u_captain) into a string the player can read` |
+| D1 | `ARCHITECTURE.md`'s tree restored to the plan it was | `ARCHITECTURE.md` | `ARCHITECTURE.md's line for src/content/ leaves out [cards.fixture.json, cards.ts, classes.ts, sigils.ts, tribes.fixture.json, unlocks.ts] and names [...cards.json, encounters.json, enemies.json...]` |
+| D2 | a new file under `src/run/` that the tree does not list | `src/run/extra.ts`, created | `ARCHITECTURE.md's line for src/run/ leaves out [extra.ts]` |
+| D3 | `AGENTS.md`'s "What this is" restored | `AGENTS.md` | `AGENTS.md's "What this is" does not name src/content/, src/run/, src/ui/, which are on disk` |
+| D4 | `ARCHITECTURE.md`'s Status restored | `ARCHITECTURE.md` | `ARCHITECTURE.md's Status paragraph does not name src/run/, src/ui/, which are on disk` |
+| D5 | the README drops `?class=` | `README.md` | `the app reads ?class= from the address and README.md never says so` |
+| D6 | the app reads a parameter the README has never heard of | `src/ui/runapp.ts` | `the app reads ?pool= from the address and README.md never says so` |
+
+W1 and P1 are the same edit under two instruments, and both are needed. W1 proves the function is held to the replay; P1 proves the page is, which is the only one of the two that would see `renderNode` go back to building the sentence itself.
+
+`src/content/unlocks.ts` is the run-layer worker's file this round and appears here only as a mutation site; its digest after the last restore is the base revision's.
+
 ## 2026-09-11 — a second review of the unlock layer: the storage gate was aimed at an idiom this repo never writes
 
 Taken on branch `worktree-agent-ac7c36708d963e2ab`, cut from `d59a8cb` with `main` at `308d91c` merged in; the suite is **276 tests** here, 248 at `d59a8cb` and 273 at the merge. Fifteen mutations, each applied to the shipped tree, run against the shipped command, reverted, and the file's sha256 compared before and after. All fifteen came back red on a line their reporter marked failed, and none was already failing in a measured green baseline.

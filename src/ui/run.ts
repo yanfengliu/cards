@@ -59,6 +59,7 @@ import {
   forgeOffers,
   goldFor,
   grantHeroSigil,
+  heldHeroSigils,
   heroSigilOffer,
   rewardOffer,
   restAmount,
@@ -116,6 +117,8 @@ type WonNumbers = {
   readonly maxHealthAfter: number;
   /** What replay will set gold to: the run's gold plus this node's pay. */
   readonly goldAfter: number;
+  /** The hero sigils the hero will hold: the run's, plus one taken at this node. */
+  readonly heroSigilsAfter: readonly HeroSigilDef[];
 };
 
 /**
@@ -166,6 +169,58 @@ export type RunPhase =
   | { readonly kind: 'event'; readonly node: MapNode; readonly def: RunEventDef }
   /** The run has ended. `state.ending` says how. */
   | { readonly kind: 'over' };
+
+/**
+ * A phase inside a won fight: the fight is over and the node is not yet
+ * committed. Read off `RunPhase` by what the member carries rather than by a
+ * list of kinds, so a fourth decision added to a won fight is one of these the
+ * moment it carries the numbers.
+ */
+export type WonPhase = Extract<RunPhase, WonNumbers>;
+
+/** The hero as the screens state it: its three run numbers and its hero sigils. */
+export type HeroNow = {
+  readonly health: number;
+  readonly maxHealth: number;
+  readonly gold: number;
+  readonly heroSigils: readonly HeroSigilDef[];
+};
+
+/**
+ * The hero's Health, maximum Health, gold and hero sigils as every surface
+ * states them while `phase` is up: the HUD, and each won fight's screen.
+ *
+ * Between a won fight and its commit the canonical state is stale **by
+ * design**. The state moves when the node commits, so until then it holds the
+ * Health the hero carried into the fight, the maximum from before any hero
+ * sigil, and the sigils from before it too, while the phase holds what the
+ * replay will set. A screen in that window that reads `state` states something
+ * the run is about to stop holding - and two did. The reward shelf printed its
+ * maximum from `state.hero.maxHealth`, so after the Sigil of the Oak it read
+ * "146 of 180 Health" beside a HUD reading 146/210; and the HUD's sigil chips
+ * read `state.sigils`, so the Oak that had just made the bar 210 had no chip
+ * beside it until the shelf was answered. Outside the window the state is the
+ * truth, and this returns it.
+ *
+ * One function, so the HUD and the screens cannot disagree about which to
+ * read. Gated by "everything a won fight's screens and the HUD state about the
+ * hero is what the replay sets" in `test/ui-won.test.ts`.
+ */
+export function heroNow(state: RunState, phase: RunPhase): HeroNow {
+  return 'maxHealthAfter' in phase
+    ? {
+        health: phase.healthAfter,
+        maxHealth: phase.maxHealthAfter,
+        gold: phase.goldAfter,
+        heroSigils: phase.heroSigilsAfter,
+      }
+    : {
+        health: state.hero.health,
+        maxHealth: state.hero.maxHealth,
+        gold: state.gold,
+        heroSigils: heldHeroSigils(state),
+      };
+}
 
 /** Everything the last completed node did, for the screen that reports it. */
 export type NodeOutcome = {
@@ -519,6 +574,7 @@ export function createRunController(
       healthAfter: w.cursor.hero.health,
       maxHealthAfter: w.cursor.hero.maxHealth,
       goldAfter: w.cursor.gold,
+      heroSigilsAfter: heldHeroSigils(w.cursor),
     };
   }
 
