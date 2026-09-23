@@ -79,13 +79,16 @@ import {
   ALL_UNLOCKS,
   FRESH_UNLOCKS,
   GATED_IDS,
+  GATE_WEIGHT_CEILING,
+  RULE_EXCEPTIONS,
+  achievementById,
   unlockedBy,
   unlocksFor,
 } from '../src/content/unlocks.ts';
 import type { CardPool } from '../src/engine/state.ts';
 import { hashString } from '../src/engine/hash.ts';
 import { RUN_CONTENT } from '../src/run/content.ts';
-import { hashRun, runToCanonical } from '../src/run/hash.ts';
+import { hashPlayed, hashRun, runToCanonical } from '../src/run/hash.ts';
 import { rewardOffer, shopStock } from '../src/run/nodes.ts';
 import {
   cloneRunState,
@@ -338,6 +341,83 @@ test('the shipped content is playable at every unlock set a player can reach', (
   );
 });
 
+test('GATED_IDS is the rule its header states, and every departure from it is written down with a reason', () => {
+  // `src/content/unlocks.ts` writes its gated list out by hand on purpose - a
+  // list derived from the weights would relock a card someone had earned the
+  // day a weight moved - and states the rule that chose it. Nothing held the
+  // two to each other, and they drifted: units 11 and 12 were built side by
+  // side, unit 11 put six tribal cards in every pool, and after the merge the
+  // rule selected ten cards while the list held seven. This is that comparison,
+  // both ways, and what it asks for when it fails is a decision, not an edit.
+  //
+  // The rule is worked out here from what it reads - each class's pool and
+  // starting deck in `src/content/classes.ts`, and `GATE_WEIGHT_CEILING` - and
+  // compared with the card ids in `GATED_IDS`. Sigil ids are outside the rule:
+  // the header gates one card sigil for a reason of its own.
+  //
+  // Mutations watched going red: a weight moved under the ceiling (the rule
+  // selects a card the list does not gate), a gated card's weight moved above
+  // it (the list gates a card the rule does not select), and an exception
+  // naming a card the two already agree about. See
+  // `docs/learning/gate-proofs.md`, 2026-09-23.
+  //
+  // Bound: the rule as the header states it, over the cards some class lists.
+  // It cannot say the rule is a good one, and a card no class lists is outside
+  // it because nothing can draft that card at all.
+  const sigilIds = new Set(SIGILS.map((s) => s.id));
+  const startsWith = new Map<string, string[]>();
+  const weights = new Map<string, { readonly cls: string; readonly weight: number }[]>();
+  for (const cls of CLASSES) {
+    for (const id of new Set(cls.startingDeck)) startsWith.set(id, [...(startsWith.get(id) ?? []), cls.name]);
+    for (const r of cls.rewards) {
+      weights.set(r.cardId, [...(weights.get(r.cardId) ?? []), { cls: cls.name, weight: r.weight }]);
+    }
+  }
+  const selected = new Set(
+    [...weights].filter(
+      ([id, ws]) => !startsWith.has(id) && ws.every((w) => w.weight <= GATE_WEIGHT_CEILING),
+    ).map(([id]) => id),
+  );
+  const gated = new Set(GATED_IDS.filter((id) => !sigilIds.has(id)));
+  const excepted = new Set(RULE_EXCEPTIONS.map((e) => e.id));
+  const why = (id: string): string =>
+    `weighted ${(weights.get(id) ?? []).map((w) => `${w.weight} by the ${w.cls}`).join(', ') || 'by no class'}` +
+    (startsWith.has(id) ? `, in the starting deck of ${startsWith.get(id)!.join(', ')}` : ', in no starting deck') +
+    `; the ceiling is ${GATE_WEIGHT_CEILING}`;
+
+  const problems: string[] = [];
+  for (const id of selected) {
+    if (gated.has(id) || excepted.has(id)) continue;
+    problems.push(
+      `the rule selects ${id} (${why(id)}) and GATED_IDS does not gate it. Decide: gate it - add it ` +
+        `to GATED_IDS and to one deed's unlocks, which takes it away from every profile that drafts ` +
+        `it today - or keep it draftable and write it into RULE_EXCEPTIONS with the reason.`,
+    );
+  }
+  for (const id of gated) {
+    if (selected.has(id) || excepted.has(id)) continue;
+    problems.push(
+      `GATED_IDS gates ${id} (${why(id)}) and the rule does not select it. Decide: ungate it, which ` +
+        `hands it to every profile, or keep it gated and write it into RULE_EXCEPTIONS with the reason.`,
+    );
+  }
+  for (const id of excepted) {
+    if (selected.has(id) !== gated.has(id)) continue;
+    problems.push(
+      `RULE_EXCEPTIONS keeps ${id} apart from the rule, and the rule and GATED_IDS already agree ` +
+        `about it (${gated.has(id) ? 'both gate it' : 'neither gates it'}). A reason for a departure ` +
+        `that no longer departs is stale; take the row out.`,
+    );
+  }
+  assert.deepEqual(problems, [], `GATED_IDS and the rule in its header disagree about ${problems.length} card(s)`);
+
+  // And there was something to compare, on both sides: the rule selects cards,
+  // the list gates cards, and the pools hold cards the rule keeps out.
+  assert.ok(selected.size > 0, 'the rule selected nothing, so the comparison above compared nothing');
+  assert.ok(gated.size > 0, 'GATED_IDS gates no card, so the comparison above compared nothing');
+  assert.ok(weights.size > selected.size, 'the rule selected every card in every pool');
+});
+
 // ---------------------------------------------------------------------------
 // A recorded run replays against the pool it was played with
 // ---------------------------------------------------------------------------
@@ -371,13 +451,18 @@ test('a run replays from the unlock set in its log, not from what is unlocked no
         freshHash,
         `seed ${seed}/${route}: the replay used the caller's pool instead of the log's`,
       );
-      if (hashRun(open.run) !== freshHash) moved++;
+      // What the run *did*, not its digest. `hashRun` names the set, so a
+      // fresh-profile run and an unnarrowed one always hashed apart, and this
+      // count was 24 of 24 whatever the set did - with the narrowing switched
+      // off entirely it still was. `hashPlayed` leaves the set out.
+      if (hashPlayed(open.run) !== hashPlayed(fresh.run)) moved++;
     }
   }
   assert.equal(
     moved,
     SEEDS.length * ROUTES.length,
-    'the unlock set changed no run at all, so nothing above was tested',
+    'the unlock set did not change what every run did, so the replays above were not tested ' +
+      'against a pool that mattered',
   );
 });
 
@@ -396,6 +481,16 @@ test('owning everything gated plays the same run as no unlock layer, and says wh
       hashRun(open.run),
       `seed ${seed}: the digest does not record which pool the run drafted from`,
     );
+    // And `hashPlayed` is the digest without that record, which is the whole of
+    // what every "did the set change anything" guard in this repo relies on:
+    // a `hashPlayed` that still saw the set would make them all pass whatever
+    // the set did, as they did when they compared `hashRun`.
+    assert.equal(
+      hashPlayed(all.run),
+      hashPlayed(open.run),
+      `seed ${seed}: hashPlayed tells two runs apart that played identically, so it still sees the set`,
+    );
+    assert.equal(hashPlayed(open.run), hashRun(open.run), `seed ${seed}: with no set, hashPlayed is hashRun`);
     assert.match(runToCanonical(all.run), /;unlocked=g\[/);
     assert.doesNotMatch(runToCanonical(open.run), /unlocked=/);
   }
@@ -628,8 +723,23 @@ test('a profile only ever widens, and a finished run moves it by exactly one', (
   assert.ok(after.owned.includes('u_thane'), 'a stored unlock was dropped');
 });
 
+/**
+ * What First Blood hands over, read from the deed rather than written here. A
+ * fixture that pairs `earned: ['a_first_run']` with a hand-written `owned` is
+ * a second copy of that deed's reward list, and two of them stopped describing
+ * First Blood the round it grew from one card to four.
+ */
+function firstBloodOwns(): string[] {
+  const deed = achievementById('a_first_run');
+  assert.ok(deed !== undefined, 'the shipped deeds have no a_first_run');
+  assert.ok(deed.unlocks.length > 0, 'First Blood hands over nothing');
+  return [...deed.unlocks];
+}
+
 test('a stored profile is read strictly, and an unreadable one is refused by name', () => {
-  const good = { ...emptyProfile(), earned: ['a_first_run'], owned: ['u_captain'], runsFinished: 2 };
+  // Sorted, because a profile is read back sorted and the round trip below
+  // compares it whole.
+  const good = { ...emptyProfile(), earned: ['a_first_run'], owned: firstBloodOwns().sort(), runsFinished: 2 };
   assert.deepEqual(parseProfile(JSON.parse(JSON.stringify(good))), good);
   const bad: [unknown, RegExp][] = [
     [null, /holds null where a profile belongs/],
@@ -729,7 +839,7 @@ test('the end screen says what the run unlocked, and only when it unlocked somet
 });
 
 test('?unlocks= pins the pool and is the only thing that can', () => {
-  const profile = { ...emptyProfile(), earned: ['a_first_run'], owned: ['u_captain'] };
+  const profile = { ...emptyProfile(), earned: ['a_first_run'], owned: firstBloodOwns() };
   assert.equal(unlockOverride('all'), 'all');
   assert.equal(unlockOverride('none'), 'none');
   for (const raw of [null, undefined, '', 'ALL', 'everything', '1']) {
@@ -738,7 +848,9 @@ test('?unlocks= pins the pool and is the only thing that can', () => {
   assert.equal(unlockSetFrom('all', profile), null, '?unlocks=all is no unlock layer');
   assert.deepEqual(unlockSetFrom('none', profile), FRESH_UNLOCKS);
   assert.deepEqual(unlockSetFrom(null, profile), unlockSetFor(profile));
-  assert.ok(unlockSetFrom(null, profile)!.owned.includes('u_captain'));
+  for (const id of firstBloodOwns()) {
+    assert.ok(unlockSetFrom(null, profile)!.owned.includes(id), `the profile's own "${id}" was not in its set`);
+  }
 });
 
 test('the narrowing predicate has one implementation, and the screen uses it', () => {
@@ -813,11 +925,13 @@ test('a set arrives in any order and the run is still the run its own log replay
     }
     // The window can tell "passed" from "did not run": a set that owns
     // *different* ids does reach a different run, so the equalities above are
-    // not holding because the unlock set changes nothing.
+    // not holding because the unlock set changes nothing. Compared by what the
+    // run did: `hashRun` names the set, so it told these two apart even with
+    // the narrowing switched off.
     assert.notEqual(
-      hashRun(play(seed, 'greedy', FRESH_UNLOCKS).run),
-      wanted,
-      `seed ${seed}: owning three things reached the same run as owning none`,
+      hashPlayed(play(seed, 'greedy', FRESH_UNLOCKS).run),
+      hashPlayed(straight.run),
+      `seed ${seed}: owning three things played the same run as owning none`,
     );
   }
   // The same rule on the controller, which compares its set with the log's.
@@ -850,16 +964,18 @@ test('a run at a half-unlocked profile replays from its log, not from its gated 
         hashRun(played.run),
         `seed ${seed}, ${name}: the run did not replay from its own log`,
       );
-      distinct.add(hashRun(played.run));
+      distinct.add(hashPlayed(played.run));
       reached++;
     }
   }
   assert.equal(reached, LADDER.length * SEEDS.length);
   // And the ladder is a ladder: the sets reach different runs, so the replays
-  // above are not all the same run five times.
+  // above are not all the same run five times. Counted by what each run did -
+  // counted by `hashRun`, which names the set, this was 60 distinct whatever
+  // the sets did.
   assert.ok(
     distinct.size > SEEDS.length,
-    `the ${LADDER.length} sets produced only ${distinct.size} distinct run(s) across ` +
+    `the ${LADDER.length} sets played only ${distinct.size} distinct run(s) across ` +
       `${SEEDS.length} seeds, so nothing above distinguished them`,
   );
 });

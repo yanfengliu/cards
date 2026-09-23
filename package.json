@@ -23,7 +23,7 @@
     "gate:banned-apis": "node tools/gates/banned-apis.ts",
     "gate:work-plans": "node tools/gates/work-plans.ts",
     "audit": "npm audit --audit-level=high",
-    "gates": "npm run typecheck && npm run gate:boundaries && npm run gate:banned-apis && npm run gate:work-plans && npm test && npm run verify && npm run verify:run"
+    "gates": "node tools/gates/chain.ts typecheck gate:boundaries gate:banned-apis gate:work-plans test verify verify:run"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

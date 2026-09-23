@@ -14,9 +14,11 @@
 // two run-layer records of the same grant, so a grant both records agree on
 // and the *fight* never receives passes it. `fightSigilProblems`, below, is
 // the other half - it reads the pool and the hero spec the run hands the
-// engine and asks whether each granted sigil is in there and each ungranted
-// one is not. Both are called by `npm run verify:run` and by
-// `test/sigils.test.ts`.
+// engine and asks whether each granted sigil is in there, each ungranted one
+// is not, and every other field of each card and of the hero is the content's.
+// Both are called by `npm run verify:run`, which plays the Knight, and by
+// `test/sigils.test.ts` and `test/classes.test.ts`, which play all three
+// classes between them.
 
 import type { FightSetup } from '../engine/fight.ts';
 import type { HeroSpec } from '../engine/state.ts';
@@ -140,7 +142,13 @@ function seamSetup(run: RunState): { setup: FightSetup; enemy: HeroSpec } {
 
 /**
  * Every granted sigil is in the fight the run hands the engine, and nothing
- * that was never granted is.
+ * that was never granted is - read as: each card the fight resolves and the
+ * hero it is handed are the content, plus what the ledger granted, plus what
+ * the forge did, **field by field**, and nothing else. The pool object itself
+ * is not walked: its `handSize` and `energyPerTurn` are held below, and
+ * `runPool` hands over no `castable`, which is harmless while no spell or
+ * piece of equipment can enter a run deck: `runPool` would throw building the
+ * pool first, because the content's `card` refuses a spell or equipment id.
  *
  * `sigilProblems` holds two *run-layer* records of a grant to each other. This
  * holds the run layer to the engine's own inputs, which is what a player
@@ -152,24 +160,50 @@ function seamSetup(run: RunState): { setup: FightSetup; enemy: HeroSpec } {
  *     directions at once: a granted trait missing from the fight is a problem,
  *     and so is a trait in the fight that neither the card prints nor the
  *     ledger granted.
+ *   - Every **other** field of that card is the printed card's, except the
+ *     three the forge moves - cost, Power and Health, by the deck card's own
+ *     record, cost floored at 0 - and the id, which is the instance's. The
+ *     field list is read off the two card objects, never written here, so a
+ *     race, a name, an Armour, or a field `UnitCard` gains tomorrow is held to
+ *     the printed card the day it exists. The race is the reason this is a
+ *     walk: `resolveDeckCard` carries it through `...card`, so the type system
+ *     promised *a* race and nothing promised the right one - setting every
+ *     sigilled card's race to human passed every gate while changing what
+ *     Kindle, Banner and Chorus did in the runs it touched.
  *   - The player's Power and Armour are the content's plus every `heroPower`
  *     and `heroArmour` in the ledger, exactly - so a run holding none fights
- *     at the content's numbers and one holding two gets both.
+ *     at the content's numbers and one holding two gets both - and its Health
+ *     is the run's bar.
+ *   - Every **other** field of the player's hero is the content hero's, walked
+ *     the same way: its name, and its `traits`, which *are* the class - the
+ *     Ranger's `volley`, the Mage's `scorch`. `heroSpecFor` carries them
+ *     through `...hero`, and rebuilding that line field by field without them
+ *     passed every gate while the Ranger swung once and the Mage never burned.
+ *     No sigil moves a hero's traits, so the expected list is the content's
+ *     exactly, with "none" and `[]` read as the same thing because `makeHero`
+ *     reads them the same way.
  *   - The enemy hero is the encounter's, untouched. A hero sigil that reached
  *     the other side would be a rule change wearing a reward's clothes.
  *
- * **Everything expected here is read off `run.sigils` and `content.sigils`,
- * and nothing off `grantedTraits`, `heldHeroSigils` or `heroSpecFor`.** That
- * is deliberate and it is the whole difference between a check and a
- * tautology: the subject side of every comparison below - `runPool`,
- * `resolveDeckCard`, `heroSpecFor` - is built out of those helpers, so a
- * check that also used them would prove only that the code agrees with
- * itself. The first draft of this function did exactly that.
+ * **Everything expected here is read off `run.sigils`, `content.sigils`, the
+ * printed card, the deck card's forge record and `content.hero`, and nothing
+ * off `grantedTraits`, `heldHeroSigils`, `resolveDeckCard` or
+ * `heroSpecFor`.** That is deliberate and it is the whole difference between
+ * a check and a tautology: the subject side of every comparison below -
+ * `runPool`, `resolveDeckCard`, `heroSpecFor` - is built out of those
+ * helpers, so a check that also used them would prove only that the code
+ * agrees with itself. The first draft of this function did exactly that. The
+ * forge's arithmetic is restated here from the design's "+1 Power, +1 Health,
+ * or -1 cost" for the same reason.
  *
  * The bound: this reads the setup, not a resolved fight. It proves the fight
  * is *handed* the sigil, not that a card carrying one was ever drawn - which
  * is a matter of the shuffle, and is what `test/sigils.test.ts`'s comparison
- * of a sigilled Relay against a printed one covers instead.
+ * of a sigilled Relay against a printed one covers instead. And it holds the
+ * fight to `run.content.hero`, not to the class: that the content's hero *is*
+ * the class's is `test/classes.test.ts`'s claim, and that every fight a class
+ * plays is handed its class's hero is a second test there that reads the hero
+ * the engine built inside real fights.
  */
 export function fightSigilProblems(run: RunState): string[] {
   const problems: string[] = [];
@@ -203,10 +237,12 @@ export function fightSigilProblems(run: RunState): string[] {
   }
 
   for (const dc of run.deck) {
-    const printed = base.card(dc.cardId).traits;
+    const card = base.card(dc.cardId);
+    const printed = card.traits;
     const granted = fromLedger.get(dc.instanceId) ?? [];
     const want = [...printed, ...granted];
-    const fought = setup.pool.card(dc.instanceId).traits;
+    const resolved = setup.pool.card(dc.instanceId);
+    const fought = resolved.traits;
     if (fought.join(',') !== want.join(',')) {
       problems.push(
         `the fight resolves ${dc.instanceId} with traits [${fought.join(', ')}] and the ledger ` +
@@ -214,9 +250,55 @@ export function fightSigilProblems(run: RunState): string[] {
           `and the ledger grants it [${granted.join(', ')}]`,
       );
     }
+    // Every other field, walked off both objects. What the forge moves is
+    // restated from the design; everything else must be the printed card's.
+    const forged: Readonly<Record<string, unknown>> = {
+      id: dc.instanceId,
+      cost: Math.max(0, card.cost + dc.costDelta),
+      power: card.power + dc.powerBonus,
+      health: card.health + dc.healthBonus,
+    };
+    for (const key of fieldsOf(card, resolved)) {
+      if (key === 'traits') continue; // Compared above, against the ledger.
+      const got = fieldOf(resolved, key);
+      if (key in forged) {
+        const expected = forged[key];
+        if (!sameValue(got, expected)) {
+          problems.push(
+            `the fight resolves ${dc.instanceId} with ${key} ${shown(got)}, and ${dc.cardId} prints ` +
+              `${shown(fieldOf(card, key))}, which this deck card's forge record makes ${shown(expected)}`,
+          );
+        }
+        continue;
+      }
+      const expected = fieldOf(card, key);
+      if (!sameValue(got, expected)) {
+        problems.push(
+          `the fight resolves ${dc.instanceId} with ${key} ${shown(got)}, and ${dc.cardId} prints ` +
+            `${shown(expected)} - neither a sigil nor the forge moves a card's ${key}, so the fight ` +
+            `must be handed the printed one`,
+        );
+      }
+    }
   }
 
   const hero = run.content.hero;
+  // The hero's other fields, walked the same way: its name and its traits,
+  // which are the class. The three numbers have their own checks below.
+  for (const key of fieldsOf(hero, setup.playerHero)) {
+    if (key === 'power' || key === 'armour' || key === 'health') continue;
+    const got = fieldOf(setup.playerHero, key);
+    const expected = fieldOf(hero, key);
+    const same =
+      key === 'traits' ? sameValue(got ?? [], expected ?? []) : sameValue(got, expected);
+    if (!same) {
+      problems.push(
+        `the fight's hero has ${key} ${shown(got)}, and the hero this run's content hands every ` +
+          `fight - the ${run.classId}'s - has ${shown(expected)}. No sigil moves a hero's ${key}, ` +
+          `so the fight must be handed the content's`,
+      );
+    }
+  }
   if (setup.playerHero.power !== hero.power + power) {
     problems.push(
       `the fight's hero swings for ${setup.playerHero.power}, and the content's ${hero.power} plus ` +
@@ -254,4 +336,38 @@ export function fightSigilProblems(run: RunState): string[] {
   }
 
   return problems;
+}
+
+/**
+ * Every own key of either object, first's order then any the second adds. A
+ * field only one side has is a disagreement, so both sides are walked.
+ */
+function fieldsOf(a: object, b: object): string[] {
+  const out = Object.keys(a);
+  for (const k of Object.keys(b)) if (!out.includes(k)) out.push(k);
+  return out;
+}
+
+function fieldOf(o: object, key: string): unknown {
+  return (o as Readonly<Record<string, unknown>>)[key];
+}
+
+/** Structural equality over the values a card or a hero spec holds. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((x, i) => sameValue(x, b[i]));
+  }
+  if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object') {
+    const ka = Object.keys(a);
+    return (
+      ka.length === Object.keys(b).length && ka.every((k) => sameValue(fieldOf(a, k), fieldOf(b, k)))
+    );
+  }
+  return false;
+}
+
+/** A value as a problem sentence shows it: quoted, and "nothing" for a field that is not there. */
+function shown(v: unknown): string {
+  return v === undefined ? 'nothing' : JSON.stringify(v);
 }

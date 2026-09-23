@@ -33,6 +33,8 @@ The set carries **both** halves — what was gated and what was owned — rather
 
 **What is gated.** Seven cards and one card sigil. The rule that chose them: a card in no class's starting deck, weighted 5 or lower by every class that lists it. So a fresh profile is missing the tail of each pool rather than its middle, and nothing a run is handed on turn one is ever absent. No hero sigil is gated: a hero sigil offer draws 2 distinct from the 3 that exist, so gating one would leave the first offer with no decision in it.
 
+**Later, 2026-09-23:** the final acceptance review found this rule selecting ten cards once the tribal cards existed, while the list still held seven. `u_runesmith`, `u_marshal` and `u_elflord` were gated to match, and First Blood now hands all three over. A test now holds the hand-written list to this rule in both directions. The sentence above describes this unit as it shipped.
+
 **Five deeds**, four reading the run's depth and one reading what the player did, each a pure function of the finished `RunState`.
 
 ## Acceptance criteria

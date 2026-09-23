@@ -11,22 +11,49 @@
 //
 //   - appears in **no class's starting deck**, so nothing a run is handed on
 //     turn one is ever missing, and
-//   - is weighted **5 or lower** by every class that lists it, so what a fresh
-//     profile cannot draft is the tail of each pool rather than its middle.
-//
-// At the pools in `src/content/classes.ts` that is seven cards. It costs the
-// Knight 24 of its 87 pool weight, the Ranger 16 of 85 and the Mage 10 of 78,
-// and leaves every class 9 or 10 cards to draft from against a shelf of three.
-// The Man-at-Arms (Knight 8) and the Veteran (Mage 6) are the two cards the
-// rule keeps out of the gate, and both are common in the class that leans on
-// them.
+//   - is weighted **`GATE_WEIGHT_CEILING` or lower** by every class that
+//     lists it, so what a fresh profile cannot draft is the tail of each pool
+//     rather than its middle.
 //
 // **The list is written out, not derived from those weights**, and that is
 // deliberate. A derived list would relock a card the day someone retunes a
 // weight, taking back something a player had already earned, and ids are
 // stable forever (`AGENTS.md`) exactly so that a record of what someone owns
-// keeps meaning what it meant. The rule above is the reason each id is here,
-// not a check this file runs.
+// keeps meaning what it meant.
+//
+// **But the list and the rule are held to each other.** `test/unlocks.test.ts`
+// - *GATED_IDS is the rule its header states* - reads the pools in
+// `src/content/classes.ts`, works out which cards the rule selects, and goes
+// red naming the card the day a new card or a moved weight makes the rule and
+// this list disagree. Its message offers the two ways out, and both are
+// decisions rather than edits: change the list, or write the card into
+// `RULE_EXCEPTIONS` below with the reason it departs. A written-out list with
+// nothing holding it to its rule is how this one went stale: units 11 and 12
+// were built side by side from `dcf2cdf`, unit 11 added six tribal cards to
+// every pool, and when the two merged the rule selected three of them - the
+// Runesmith, the Marshal and the Elf Lord, each weighted at or under the
+// ceiling by every class that lists it - while the list still held the seven
+// cards it was written with. Nothing noticed until a review counted. They are
+// gated now, and First Blood hands them over.
+//
+// What the rule costs each class - how many cards, and how much pool weight, a
+// fresh profile cannot draft - is printed by `npm run measure:run -- --unlocks
+// none`, one class at a time with `--class <id>`, and is not written here. It
+// used to be, and two of the numbers were wrong on the day they were written:
+// `cf2092f` gave the Knight's pool as 87 and the Mage's as 78, and at that
+// commit they weighed 95 and 82.
+//
+// **The tribal pairs.** Each tribal trait is printed by two cards, a 2-cost
+// carrier and a 3-cost one, and the rule gates only the second: the Kindler,
+// the Bannerman and the Songkeeper are each weighted above the ceiling by at
+// least one class, so they stay draftable, and every tribal trait stays
+// draftable at a fresh profile. Both halves of that are held rather than
+// trusted. A carrier that fell under the ceiling everywhere would be a card
+// the rule selects and the list does not gate, which the test above names.
+// And a trait left with no draftable carrier - both of its cards gated,
+// whatever the weights say - turns *every class can draft every tribal trait
+// and every player race at every unlock set a player can reach* in
+// `test/classes.test.ts` red; it asks at every set the deeds can produce.
 //
 // **Nothing here is a balance change and nothing here is power.** No cost,
 // stat or weight moves; a gated card keeps every number it has and every class
@@ -49,12 +76,46 @@ import { CLASSES } from './classes.ts';
 import { SIGILS } from './sigils.ts';
 
 /**
+ * The rule's one number: a card any class weights above this is never gated.
+ * Data rather than a figure in a sentence, so the header and the gate that
+ * holds this list to the rule read the same number.
+ */
+export const GATE_WEIGHT_CEILING = 5;
+
+/** A card `GATED_IDS` treats differently from the rule on purpose, and why. */
+export type RuleException = {
+  readonly id: string;
+  readonly why: string;
+};
+
+/**
+ * Where `GATED_IDS` departs from the rule, one row per card, each with its
+ * reason. **Empty: at today's pools the list is exactly what the rule
+ * selects.**
+ *
+ * This is where the "no take-backs" half of the header lives. When a new card
+ * or a moved weight makes the rule select a card the list does not gate,
+ * `test/unlocks.test.ts` goes red, and both ways out are decisions: gate it,
+ * which takes it away from every profile that drafts it today, or write it
+ * here with the reason it stays draftable. The same the other way round: a
+ * gated card the rule no longer selects is ungated, or written here with the
+ * reason it stays gated. Which way a row departs is whatever `GATED_IDS` does
+ * with the card. A row naming a card the rule and the list already agree
+ * about is stale, and that is red too.
+ */
+export const RULE_EXCEPTIONS: readonly RuleException[] = [];
+
+/**
  * The ids a fresh profile cannot draft. Card ids from `src/content/cards.ts`
  * and sigil ids from `src/content/sigils.ts`, in one list, because the pool a
- * fight's shelf draws from holds both.
+ * fight's shelf draws from holds both. The collection screen lists them in
+ * this order.
  */
 export const GATED_IDS: readonly string[] = [
   'u_captain',
+  'u_runesmith',
+  'u_marshal',
+  'u_elflord',
   'u_sentinel',
   'u_longbow',
   'u_paladin',
@@ -81,6 +142,14 @@ export const GATED_IDS: readonly string[] = [
  *
  * `unlocks` never overlap, so what a run earned is what it added; the checks
  * at the foot of this file hold that and hold every id to the gated list.
+ *
+ * The three 3-cost tribal cards are the first deed's. Each is the second card
+ * printing a tribal trait whose first stays ungated, so a fresh profile can
+ * still take every tribe as a direction and is missing only the bigger card
+ * that prints it - and only until its first run ends, won or lost. Putting
+ * them here, rather than spreading them over the deeds that read depth, also
+ * leaves every other deed handing over exactly what it did before they were
+ * gated.
  */
 export const ACHIEVEMENTS: readonly AchievementDef[] = [
   {
@@ -88,7 +157,7 @@ export const ACHIEVEMENTS: readonly AchievementDef[] = [
     name: 'First Blood',
     how: 'Finish a run, however it ends.',
     condition: { kind: 'finished' },
-    unlocks: ['u_captain'],
+    unlocks: ['u_captain', 'u_runesmith', 'u_marshal', 'u_elflord'],
   },
   {
     id: 'a_act_one',
@@ -220,6 +289,29 @@ const IN_A_STARTING_DECK = new Set<string>(CLASSES.flatMap((c) => c.startingDeck
       throw new Error(
         `unlocks: "${id}" is gated and no achievement unlocks it, so no player could ever draft ` +
           `it. Add it to an achievement's unlocks, or take it out of GATED_IDS.`,
+      );
+    }
+  }
+
+  // The shape of an exception. Whether each one is still an exception - the
+  // rule and the list really do disagree about it - needs the rule worked out
+  // from the pools, which is `test/unlocks.test.ts`'s job rather than a load's.
+  const excepted = new Set<string>();
+  for (const e of RULE_EXCEPTIONS) {
+    if (excepted.has(e.id)) {
+      throw new Error(`unlocks: "${e.id}" is in RULE_EXCEPTIONS twice; one card, one reason`);
+    }
+    excepted.add(e.id);
+    if (!DRAFTABLE.has(e.id)) {
+      throw new Error(
+        `unlocks: RULE_EXCEPTIONS names "${e.id}", which no class pool lists, so the rule has ` +
+          `nothing to say about it. Take the row out.`,
+      );
+    }
+    if (e.why.trim().length === 0) {
+      throw new Error(
+        `unlocks: RULE_EXCEPTIONS keeps "${e.id}" apart from the rule and gives no reason. An ` +
+          `exception is a decision, and the reason is the decision.`,
       );
     }
   }
