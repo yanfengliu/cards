@@ -12,7 +12,7 @@ Anything new drawn in that window, such as a fourth decision after a won fight o
 
 An independent read-only review of `9f03978` accepted it with fixes, all low severity. It was one lane, an in-harness Claude reviewer. The finding worth a section: from the moment a fight ends until "Take your reward" hands it over, the phase is still `fight`. `heroNow` knew only the won phases, so it returned the state, and the HUD over the end banner read 200/200 and 0 gold under "Your hero finished on 194 of 200 Health" (Knight, seed 7, first fight). That was there before this work. What this work added was a docstring saying the state was the truth there, and that is what the review caught. `afterFight` now computes what `visit` sets when a fight ends, `finishFight` and `heroNow` both use it, and `runapp.ts` redraws the HUD when the banner goes up. The unit gate checks every fight's end against the replay (155 won, 22 lost); the probe checks the page.
 
-The review also found that nothing watched the HUD's chips on the page, and that the gold half of the unit gate could pass with nothing to read. Both are gated now (P3 and W9 in `docs/learning/gate-proofs.md`).
+The review also found that nothing watched the HUD's chips on the page, and that the gold half of the unit gate could pass with nothing to read. Both are gated now (P3 and W9 in `docs/learning/gate-proofs.md`). A focused re-review of those fixes accepted them, and its three small findings are closed in `0eadd3d`. The one worth knowing: the test's header claimed the fight screen's own maximum too, which it does not hold and which is not the run's.
 
 ## A probe check that was wrong about the page
 

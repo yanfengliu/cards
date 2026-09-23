@@ -90,6 +90,8 @@ One more came from the probe itself. Its first end-banner check compared both of
 
 The first table's other rows were re-run at `268cb9f` with the same failure text. Digests after the last restore there, unchanged from before the first edit: `README.md` `30d36e57…`, `src/ui/run.ts` `fcf1af1e…`, `src/ui/runapp.ts` `c9669894…`, `src/ui/sigils.ts` `fb8fab9e…`, and the rest as above.
 
+A focused re-review of `9f03978..d957d13` accepted it. Its three small findings are closed in `0eadd3d`: the test header's claim no longer covers the fight screen's own maximum, fight ends that moved Health are counted apart from gold (176 of 177), and `heroNow`'s docstring says when it throws. At `0eadd3d` every anchor matched and the 27 mutations that do not need a browser came back as wanted, 22 red and 5 controls green, with the tree clean. The five browser rows stand as run at `268cb9f`: `0eadd3d` changes no probe code, and under `src/` only a comment.
+
 ## 2026-09-11 — a second review of the unlock layer: the storage gate was aimed at an idiom this repo never writes
 
 Taken on branch `worktree-agent-ac7c36708d963e2ab`, cut from `d59a8cb` with `main` at `308d91c` merged in; the suite is **276 tests** here, 248 at `d59a8cb` and 273 at the merge. Fifteen mutations, each applied to the shipped tree, run against the shipped command, reverted, and the file's sha256 compared before and after. All fifteen came back red on a line their reporter marked failed, and none was already failing in a measured green baseline.
