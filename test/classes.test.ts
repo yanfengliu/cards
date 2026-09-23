@@ -25,6 +25,12 @@
 //   The run tests walk a seed window, 1..6 per class, with the greedy router
 //   and append-right placement. A property that fails one seed in ten thousand
 //   is not covered here; `npm run verify:run` covers 200 seeds of the Knight.
+//   The unlock-ladder replay adds the random router and every rung
+//   `unlockLadder` reads off the deeds, and it is the only gate that replays
+//   a Ranger or a Mage at a partly unlocked profile or holds their fights to
+//   their ledgers; the tribal-coverage test reads every combination of deeds.
+//   Each of those asserts its own population, so a window that exercised
+//   nothing fails rather than passes.
 //   The race gate is bound to the three player races in `PLAYER_CARDS` today,
 //   read from the cards rather than listed here, so a fourth race added to the
 //   pool is asked of every class the day it lands.
@@ -39,37 +45,60 @@ import assert from 'node:assert/strict';
 
 import { CARD_POOL, PLAYER_CARDS, PLAYER_HERO } from '../src/content/cards.ts';
 import { CLASSES, CLASS_IDS, classById } from '../src/content/classes.ts';
+import { ACHIEVEMENTS, FRESH_UNLOCKS, unlocksFor } from '../src/content/unlocks.ts';
+import type { Fight } from '../src/engine/fight.ts';
 import { swingsOf } from '../src/engine/resolver.ts';
-import { TRIBAL_TRAITS, makeHero } from '../src/engine/state.ts';
+import { TRIBAL_TRAITS, heroOf, makeHero } from '../src/engine/state.ts';
 import type { CardPool, GameState, Trait, Tribe, UnitCard } from '../src/engine/state.ts';
 import { CLASS_TERMS, classTermFor } from '../src/render/class-terms.ts';
 import { TRAIT_TERMS } from '../src/render/glossary.ts';
 import { RUN_CONTENT } from '../src/run/content.ts';
-import { hashMaps, hashRun } from '../src/run/hash.ts';
+import { hashMaps, hashPlayed, hashRun, runToCanonical } from '../src/run/hash.ts';
 import { fightSeedFor } from '../src/run/nodes.ts';
 import {
   DEFAULT_CLASS_ID,
+  type RunAgent,
   classOf,
   contentForClass,
   defaultClassId,
+  migrateRunLog,
   replayRun,
   runRun,
   startRun,
   travelOptions,
 } from '../src/run/run.ts';
-import { type RunContent, type RunLog, RUN_LOG_FORMAT } from '../src/run/types.ts';
+import { fightSigilProblems, sigilProblems } from '../src/run/sigils.ts';
+import { type RunContent, type RunLog, type UnlockSet, RUN_LOG_FORMAT } from '../src/run/types.ts';
 import { makeRunAgent } from '../src/sim/runbots.ts';
 import { renderClassPick } from '../src/ui/classpick.ts';
 import { PICKABLE_CLASSES, classPickHtml, pickableClassId } from '../src/ui/runapp.ts';
 import { createRunController } from '../src/ui/run.ts';
 
 const SEEDS = [1, 2, 3, 4, 5, 6];
+const ROUTES = ['greedy', 'random'] as const;
 
 function agentFor(seed: number) {
   return makeRunAgent({ route: 'greedy', placement: 'right', seed });
 }
 
 const playerRaces = new Set<Tribe>(PLAYER_CARDS.map((c) => c.tribe));
+
+/**
+ * The unlock sets a profile passes through, read off `ACHIEVEMENTS` in the
+ * order it lists them: nothing earned, then each deed added in turn, ending
+ * with everything owned. Derived rather than written out, so a deed added
+ * tomorrow adds a rung the day it lands.
+ */
+function unlockLadder(): { readonly name: string; readonly set: UnlockSet }[] {
+  const out = [{ name: 'a fresh profile', set: unlocksFor([]) }];
+  for (let i = 1; i <= ACHIEVEMENTS.length; i++) {
+    out.push({
+      name: `${ACHIEVEMENTS[i - 1]!.name} and every deed listed before it`,
+      set: unlocksFor(ACHIEVEMENTS.slice(0, i).map((a) => a.id)),
+    });
+  }
+  return out;
+}
 
 // ------------------------------------------------------------- the content
 
@@ -134,6 +163,78 @@ test('class sets the pool; races appear across all of it: every pool holds every
   }
 });
 
+test('every class can draft every tribal trait and every player race at every unlock set a player can reach', () => {
+  // The test above asks this of each class's *full* pool, and a player drafts
+  // from the pool their unlock set allows. Nothing asked it there: gating both
+  // Chorus cards left Chorus undraftable at a fresh profile for every class
+  // with every gate green. The unlock rule gates the second card of each
+  // tribal pair - the Runesmith, the Marshal, the Elf Lord - and what keeps
+  // each trait draftable at a fresh profile is that the first card of each
+  // pair is weighted above the rule's ceiling by some class. That is a fact
+  // about today's weights, so it is held here rather than trusted.
+  //
+  // The sets are every combination of the shipped deeds, read off
+  // `ACHIEVEMENTS` - 32 today. That is every set the deeds can produce and a
+  // few they cannot (a won run without First Blood), which costs nothing:
+  // owning more can only widen a pool, so a set the deeds cannot produce fails
+  // here only if one they can produce fails too. The rung that binds is the
+  // fresh profile, before First Blood fires and hands over the three 3-cost
+  // tribal cards; the rungs after it are asked too, so the question stays
+  // asked the day an unlock narrows something.
+  //
+  // The subject is the pool a run draws its shelves from, `startRun`'s own
+  // `content.rewards`, not a filter called here.
+  //
+  // Mutations watched going red: `u_songkeeper` gated beside the Elf Lord on
+  // First Blood (Chorus gone at every set First Blood is not in), and on the
+  // won-run deed (gone before *and* after First Blood fires). See
+  // `docs/learning/gate-proofs.md`, 2026-09-22.
+  //
+  // Bound: the shipped pools and deeds, read at every set above. It says a
+  // class *can* be offered each trait, not that any seed is.
+  const deeds = ACHIEVEMENTS.map((a) => a.id);
+  assert.ok(deeds.length > 0 && deeds.length <= 10, `${deeds.length} deeds; 2^n sets must stay small`);
+  const sets: { readonly name: string; readonly set: UnlockSet }[] = [];
+  for (let mask = 0; mask < 1 << deeds.length; mask++) {
+    const earned = deeds.filter((_, i) => (mask & (1 << i)) !== 0);
+    sets.push({
+      name: earned.length === 0 ? 'a fresh profile' : `a profile holding ${earned.join(' + ')}`,
+      set: unlocksFor(earned),
+    });
+  }
+  assert.deepEqual(sets[0]!.set, FRESH_UNLOCKS, 'the first set asked is not a fresh profile');
+
+  const missing: string[] = [];
+  let asked = 0;
+  let narrowed = 0;
+  for (const { name, set } of sets) {
+    for (const cls of CLASSES) {
+      const pool = startRun(RUN_CONTENT, 1, cls.id, set).content.rewards.map((r) => CARD_POOL.card(r.cardId));
+      if (pool.length < cls.rewards.length) narrowed++;
+      const traits = new Set<Trait>(pool.flatMap((c) => c.traits));
+      const races = new Set<Tribe>(pool.map((c) => c.tribe));
+      for (const trait of TRIBAL_TRAITS) {
+        if (!traits.has(trait)) missing.push(`the ${cls.name} at ${name} can draft no card printing ${trait}`);
+      }
+      for (const race of playerRaces) {
+        if (!races.has(race)) missing.push(`the ${cls.name} at ${name} can draft no ${race}`);
+      }
+      asked++;
+    }
+  }
+  assert.equal(asked, sets.length * CLASSES.length, 'a set or a class was skipped');
+  assert.ok(narrowed > 0, 'no set narrowed any pool, so nothing above was asked of an unlock set');
+  assert.deepEqual(
+    missing.slice(0, 12),
+    [],
+    `${missing.length} (set, class) pair(s) cannot draft something every pool must offer. A tribal ` +
+      `trait a class cannot draft is a race that class cannot take as a direction, and the design ` +
+      `says races appear across all of the pool. Ungate a card that prints it ` +
+      `(src/content/unlocks.ts), or list one that is already draftable in that class's pool ` +
+      `(src/content/classes.ts).`,
+  );
+});
+
 test('the three heroes are the design’s three attacks: the Knight swings for 2, the Ranger for 1 twice, the Mage for 1 with a rider', () => {
   // Mutation watched going red: the Ranger's hero given Power 2.
   const state: GameState = { board: { player: [], enemy: [] }, nextUid: 1 };
@@ -194,13 +295,78 @@ test('startRun as a class: the hero, deck and pool are the class’s, and the lo
     assert.equal(run.classId, cls.id);
     assert.equal(run.hero.health, cls.hero.health, `${cls.name}: the run's bar is the class's`);
     assert.equal(run.hero.maxHealth, cls.hero.health);
-    assert.equal(run.content.hero, cls.hero, `${cls.name}: fights are handed the class's hero`);
+    // A claim about the run's *content*, and worded as one. It used to say
+    // "fights are handed the class's hero" while comparing `run.content.hero`,
+    // and a `heroSpecFor` that dropped the class's traits on the way into
+    // every fight left it green. What a fight is handed is the next test's
+    // claim, read off the hero the engine builds inside real fights.
+    assert.equal(run.content.hero, cls.hero, `${cls.name}: the run's content carries the class's hero`);
     assert.deepEqual(run.deck.map((d) => d.cardId), [...cls.startingDeck], `${cls.name}: the starting deck`);
     assert.equal(run.content.rewards, cls.rewards, `${cls.name}: rewards draw from the class's pool`);
 
     const { log } = runRun(RUN_CONTENT, 7, agentFor(7), cls.id);
     assert.equal(log.classId, cls.id, `${cls.name}: the log records the class`);
   }
+});
+
+test('every fight a run plays is fought by its class’s own hero, traits and all', () => {
+  // The claim the test above used to word and not check, checked where it is
+  // true or false: inside the fight. The subject is the hero *entity* the
+  // engine built from the spec the run handed it, read by wrapping the agent's
+  // placement policy, which the engine calls with the live fight. Nothing here
+  // rebuilds a setup or reads `heroSpecFor`, `fightSetupFor` or the run's
+  // content; the expected side is the class of record in
+  // `src/content/classes.ts`.
+  //
+  // Mutation watched going red: `heroSpecFor` rebuilt field by field without
+  // `traits`, so the Ranger swings once and the Mage never burns. Before this
+  // test and the widened `fightSigilProblems`, that passed every gate.
+  //
+  // Bound: seeds 1..6 per class, the greedy router, append-right placement. A
+  // fight is observed when the player places a card in it, and the test
+  // requires that to be every fight the run fought, so a fight the hook missed
+  // fails here instead of quietly shrinking the claim. What the hero does with
+  // its traits is `test/hero-attacks.test.ts`'s.
+  let observed = 0;
+  for (const cls of CLASSES) {
+    const want = cls.hero.traits ?? [];
+    for (const seed of SEEDS) {
+      const bot = agentFor(seed);
+      const fights = new Set<Fight>();
+      const wrong: string[] = [];
+      const agent: RunAgent = {
+        ...bot,
+        placement: (fight, plays) => {
+          if (!fights.has(fight)) {
+            fights.add(fight);
+            const hero = heroOf(fight.state, 'player');
+            if (hero.traits.join(',') !== want.join(',') || hero.cardId !== `hero:${cls.hero.name}`) {
+              wrong.push(
+                `fight ${fights.size} was fought by ${hero.cardId} with traits [${hero.traits.join(', ')}]`,
+              );
+            }
+          }
+          return bot.placement(fight, plays);
+        },
+      };
+      const { run } = runRun(RUN_CONTENT, seed, agent, cls.id);
+      assert.deepEqual(
+        wrong,
+        [],
+        `${cls.name} seed ${seed}: a fight was not fought by the ${cls.name}'s hero, which is ` +
+          `hero:${cls.hero.name} with traits [${want.join(', ')}] - the class's attack did not ` +
+          `reach the engine`,
+      );
+      assert.equal(
+        fights.size,
+        run.fightsFought,
+        `${cls.name} seed ${seed}: the run fought ${run.fightsFought} fight(s) and the placement ` +
+          `hook saw ${fights.size}, so some fight's hero was never read`,
+      );
+      observed += fights.size;
+    }
+  }
+  assert.ok(observed >= CLASSES.length * SEEDS.length, `only ${observed} fights observed across the window`);
 });
 
 test('a run of each class replays from its log to the same hash, and the three classes on one seed are three different runs', () => {
@@ -226,6 +392,94 @@ test('a run of each class replays from its log to the same hash, and the three c
     }
     assert.equal(hashes.size, 3, `seed ${seed}: three classes, three final hashes`);
   }
+});
+
+test('every class replays from its saved log at every rung of the unlock ladder, and every fight it hands the engine is its ledger’s and its class’s', () => {
+  // The product no gate held. `npm run verify:run` replays the Knight at three
+  // unlock sets; `test/unlocks.test.ts` and `test/sigils.test.ts` play the
+  // Knight; the test above replays every class with no unlock layer at all. So
+  // a Ranger or a Mage at a partly unlocked profile - the ordinary case for
+  // anyone who has finished a run and then picked another class - was replayed
+  // by nothing, and its fights were held to its ledger and its hero by nothing.
+  //
+  // Each log goes the way a saved run does: `JSON.stringify`, `JSON.parse`,
+  // `migrateRunLog`, then `replayRun` against the whole content, so the only
+  // thing narrowing the replay is the set inside the log. Canonical strings are
+  // compared rather than digests, so a failure says which field moved.
+  //
+  // Mutations watched going red: `heroSpecFor` dropping the class's traits
+  // (through `fightSigilProblems`), a sigilled card's race set to human, and
+  // `startRun` recording a partial set with its owned half emptied for every
+  // class but the default one. See `docs/learning/gate-proofs.md`, 2026-09-22.
+  //
+  // Bound: seeds 1..6 x both route styles x append-right placement, the rungs
+  // `unlockLadder` reads off `ACHIEVEMENTS`, three classes. The population is
+  // asserted per class - both kinds of sigil granted, sigilled cards in more
+  // than one printed race, and some partly unlocked rung that plays a
+  // different run from a fresh profile. "Plays a different run" is
+  // `hashPlayed`, because `hashRun` names the set and so differs between any
+  // two sets whatever the set did.
+  const rungs = unlockLadder();
+  assert.deepEqual(rungs[0]!.set, FRESH_UNLOCKS, 'the ladder does not start at a fresh profile');
+  assert.ok(rungs.length >= 3, `a ladder of ${rungs.length} has no partly unlocked rung`);
+  let runs = 0;
+  for (const cls of CLASSES) {
+    let heroSigils = 0;
+    let cardSigils = 0;
+    const sigilledRaces = new Set<Tribe>();
+    let partialMoved = 0;
+    for (const seed of SEEDS) {
+      for (const route of ROUTES) {
+        let fresh = '';
+        for (let r = 0; r < rungs.length; r++) {
+          const { name, set } = rungs[r]!;
+          const label = `${cls.name} seed ${seed}/${route}, ${name}`;
+          const { run, log } = runRun(RUN_CONTENT, seed, makeRunAgent({ route, placement: 'right', seed }), cls.id, set);
+          runs++;
+          assert.equal(log.classId, cls.id, `${label}: the log names another class`);
+          assert.deepEqual(log.unlocked, set, `${label}: the log did not record the set the run was played with`);
+          const saved = migrateRunLog(JSON.parse(JSON.stringify(log)));
+          assert.equal(
+            runToCanonical(replayRun(RUN_CONTENT, saved)),
+            runToCanonical(run),
+            `${label}: the saved log did not replay to the run it records`,
+          );
+          assert.deepEqual(sigilProblems(run), [], `${label}: the ledger and the deck disagree`);
+          assert.deepEqual(
+            fightSigilProblems(run),
+            [],
+            `${label}: the fight the run hands the engine is not its content plus its ledger`,
+          );
+          for (const g of run.sigils) {
+            if (g.target === 'hero') {
+              heroSigils++;
+              continue;
+            }
+            cardSigils++;
+            const target = g.target;
+            const dc = run.deck.find((d) => d.instanceId === target.instanceId);
+            if (dc !== undefined) sigilledRaces.add(CARD_POOL.card(dc.cardId).tribe);
+          }
+          const played = hashPlayed(run);
+          if (r === 0) fresh = played;
+          else if (r < rungs.length - 1 && played !== fresh) partialMoved++;
+        }
+      }
+    }
+    assert.ok(heroSigils > 0, `${cls.name}: no hero sigil across the window, so its hero spec was never checked with one`);
+    assert.ok(cardSigils > 0, `${cls.name}: no card sigil across the window, so no sigilled card was checked`);
+    assert.ok(
+      sigilledRaces.size > 1,
+      `${cls.name}: every sigilled card printed one race (${[...sigilledRaces].join(', ')}), so a ` +
+        `sigil that moved a race to that one would pass unseen`,
+    );
+    assert.ok(
+      partialMoved > 0,
+      `${cls.name}: no partly unlocked rung played a different run from a fresh profile on any ` +
+        `seed, so the partial rungs replayed above were fresh-profile runs under another name`,
+    );
+  }
+  assert.equal(runs, CLASSES.length * SEEDS.length * ROUTES.length * rungs.length, 'a run was skipped');
 });
 
 test('a log written before classes existed has no class and replays as the Knight', () => {

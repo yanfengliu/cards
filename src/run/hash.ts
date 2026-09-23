@@ -76,6 +76,11 @@ function unlockedToCanonical(run: RunState): string[] {
 }
 
 export function runToCanonical(run: RunState): string {
+  return [...playedFields(run), ...unlockedToCanonical(run)].join(';');
+}
+
+/** Every line of the canonical form except the unlock set, in order. */
+function playedFields(run: RunState): string[] {
   return [
     `seed=${run.seed}`,
     `class=${run.classId}`,
@@ -102,12 +107,32 @@ export function runToCanonical(run: RunState): string {
     `cards=${run.cardsGained}`,
     `rng=${run.rng.s}/${run.rng.n}`,
     `maps=[${run.maps.map(mapToCanonical).join('||')}]`,
-    ...unlockedToCanonical(run),
-  ].join(';');
+  ];
 }
 
 export function hashRun(run: RunState): string {
   return hashString(runToCanonical(run));
+}
+
+/**
+ * What the run *did*, with the record of which pool it was allowed to draft
+ * from left out: every line `hashRun` hashes except the unlock set.
+ *
+ * `hashRun` is the right digest for "is this the same run" and the wrong one
+ * for "did the unlock set change anything", and the second question is the
+ * one every population check over an unlock ladder asks. The unlock line is in
+ * `hashRun` on purpose - two runs that drafted from different pools are
+ * different runs - so two sets always hash apart, even when the set changed
+ * no draw, no card and no fight. A check that asked "did two sets reach two
+ * different runs?" by comparing `hashRun` could therefore never answer "no".
+ * Four such checks shipped - `verify:run`'s `seedsSeparated` and three guards
+ * in `test/unlocks.test.ts` - and with the narrowing switched off, so that
+ * every set drafted the whole pool, all four still passed. They compare this
+ * instead, so a set that changed nothing is reported as a set that changed
+ * nothing.
+ */
+export function hashPlayed(run: RunState): string {
+  return hashString(playedFields(run).join(';'));
 }
 
 /** Just the three maps. Used to check that a seed's map is route-independent. */

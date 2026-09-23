@@ -24,15 +24,25 @@
 // minutes long.
 //
 // **`npm run verify:run` is one class's gate, and that class is the Knight.**
-// The script names no `--class`, so all eight invariants run against the
-// default - `startRun` with no class named is the Knight - and a Ranger or a
-// Mage whose replay diverged would not turn it red. The other two classes are
-// gated by `test/classes.test.ts` instead, over seeds 1..6 rather than 200.
+// The script names no `--class`, so every invariant runs against the default -
+// `startRun` with no class named is the Knight - and a Ranger or a Mage whose
+// replay diverged would not turn it red. The Knight also has no hero traits, so
+// nothing here can see a class's attack go missing on its way into a fight.
+// The other two classes are gated by `test/classes.test.ts` instead: a smaller
+// seed window, but every rung of the unlock ladder, each run replayed from its
+// log through JSON and `migrateRunLog`, and each run's fights held to its
+// ledger and its class's hero by `fightSigilProblems`.
 // Pointing `--verify` at a class is expected to be useful and is not always
-// meaningful: the eighth invariant asks whether the seed window can see a
-// difference at all, and a class that wins no run in 200 seeds has no such
-// power, so `--verify --class mage` exits non-zero for a reason that is not a
-// code failure. Its message says which.
+// meaningful: one invariant asks whether the seed window can see a difference
+// at all, and a class that wins no run in 200 seeds has no such power, so
+// `--verify --class mage` exits non-zero for a reason that is not a code
+// failure. Its message says which.
+//
+// **`--verify` plays one arm, not four.** The only verdict that reads an arm is
+// `degeneracy`, and it reads the strongest one. The other three fill the report's
+// comparison tables, which are the instrument's - `npm run measure:run` plays
+// all four - exactly as `measure`'s placement report is `measure`'s and not
+// `verify`'s.
 
 import { pathToFileURL } from 'node:url';
 
@@ -41,7 +51,7 @@ import { makeRng, nextU32 } from '../engine/rng.ts';
 import { heroOf } from '../engine/state.ts';
 import { RUN_CONTENT } from '../run/content.ts';
 import { makeDeckCard, runPool } from '../run/deck.ts';
-import { hashMaps, hashRun } from '../run/hash.ts';
+import { hashMaps, hashPlayed, hashRun } from '../run/hash.ts';
 import { branchingTypes, mapProblems } from '../run/map.ts';
 import { drawDistinctCards, fightSeedFor } from '../run/nodes.ts';
 import { contentForClass, replayRun, runRun, startRun } from '../run/run.ts';
@@ -467,8 +477,18 @@ export function checkRuns(
 export type UnlockReplayCheck = {
   /** Whole runs played and replayed. Zero means the check did not run. */
   readonly runs: number;
-  /** Seeds where two of the sets reached different runs. Zero means it proved nothing. */
+  /**
+   * Seeds where two of the sets reached runs that *played* differently -
+   * compared by `hashPlayed`, never by `hashRun`. Zero means it proved nothing.
+   */
   readonly seedsSeparated: number;
+  /**
+   * For each pair of neighbouring rungs, the seeds where the two played
+   * differently. A pair at zero is a ladder with a rung missing: the middle
+   * rung is the one that catches a recorded set with its owned half dropped,
+   * and it can only do that if it is a different pool from both of its ends.
+   */
+  readonly rungsSeparated: readonly { readonly between: string; readonly seeds: number }[];
   readonly problems: string[];
 };
 
@@ -488,9 +508,14 @@ export type UnlockReplayCheck = {
  * partly unlocked profile is what an ordinary player has, and it is the only
  * shape that can tell "recorded the set" from "recorded the gated list".
  *
- * `seedsSeparated` is what stops this reporting "did not run" as "passed": if
- * no two sets ever reached different runs, a `startRun` that ignored its set
- * entirely would satisfy every equality above.
+ * `seedsSeparated` and `rungsSeparated` are what stop this reporting "did not
+ * run" as "passed": if no two sets ever reached different runs, a `startRun`
+ * that ignored its set entirely would satisfy every equality above. **They
+ * compare `hashPlayed`, and for a round they compared `hashRun`** - which
+ * carries the unlock set, so two sets always hashed apart and this reported
+ * 20/20 seeds separated whatever the sets did. With the narrowing switched off
+ * entirely, so that every set drafted from the whole pool, it still reported
+ * 20/20 and `verify:run` exited 0.
  */
 export function checkUnlockReplay(
   seeds: readonly number[],
@@ -505,16 +530,17 @@ export function checkUnlockReplay(
   const key = (set: UnlockSet): string => `g[${set.gated.join(',')}]/o[${set.owned.join(',')}]`;
   let runs = 0;
   let seedsSeparated = 0;
+  const pairs = ladder.slice(1).map((l, i) => ({ between: `${ladder[i]!.name} / ${l.name}`, seeds: 0 }));
 
   for (const { name, set } of ladder) {
     for (const p of unlockProblems(content, set)) {
       problems.push(`${name}: the content is not playable at this set - ${p}`);
     }
   }
-  if (problems.length > 0) return { runs, seedsSeparated, problems };
+  if (problems.length > 0) return { runs, seedsSeparated, rungsSeparated: pairs, problems };
 
   for (const seed of seeds) {
-    const hashes = new Set<string>();
+    const played: string[] = [];
     for (const { name, set } of ladder) {
       const { run, log } = runRun(
         content,
@@ -525,7 +551,7 @@ export function checkUnlockReplay(
       );
       runs++;
       const live = hashRun(run);
-      hashes.add(live);
+      played.push(hashPlayed(run));
       if (log.unlocked === undefined || key(log.unlocked) !== key(set)) {
         problems.push(
           `seed ${seed}, ${name}: the log recorded ` +
@@ -550,9 +576,12 @@ export function checkUnlockReplay(
         );
       }
     }
-    if (hashes.size > 1) seedsSeparated++;
+    if (new Set(played).size > 1) seedsSeparated++;
+    for (let i = 0; i + 1 < played.length; i++) {
+      if (played[i] !== played[i + 1]) pairs[i]!.seeds++;
+    }
   }
-  return { runs, seedsSeparated, problems };
+  return { runs, seedsSeparated, rungsSeparated: pairs, problems };
 }
 
 /**
@@ -859,21 +888,41 @@ function main(): void {
     );
   } else {
     const narrowed = unlockedContent(content, unlocked);
+    const weight = (rows: readonly { readonly weight: number }[]): number =>
+      rows.reduce((sum, r) => sum + r.weight, 0);
     console.log(
       `Unlocks: a fresh profile. ${stillLocked(unlocked).length} of ${unlocked.gated.length} ` +
         `unlockable id(s) are locked, so the pool this arm drafts from is ` +
-        `${narrowed.rewards.length} of ${content.rewards.length} cards and ` +
+        `${narrowed.rewards.length} of ${content.rewards.length} cards, ` +
+        `${weight(narrowed.rewards)} of ${weight(content.rewards)} pool weight, and ` +
         `${narrowed.sigils.length} of ${content.sigils.length} sigils. Locked: ` +
         `${stillLocked(unlocked).join(', ')}.`,
     );
   }
   console.log('');
 
+  // `--verify` plays only the arm a verdict reads. `degeneracy` reads the
+  // strongest arm and nothing else does; the other three exist to fill the
+  // tables below, and they were 45% of the slowest link in `npm run gates`
+  // (measured 2026-09-22: of a 8.4s `verify:run`, 3.1s was those three arms).
+  // The tables are the instrument's, so `npm run measure:run` plays all four.
+  const verifying = has('verify');
   const armGL = runArm('greedy', 'lookahead', seeds, content, unlocked);
-  const armRL = runArm('random', 'lookahead', seeds, content, unlocked);
-  const armGR = runArm('greedy', 'right', seeds, content, unlocked);
-  const armRR = runArm('random', 'right', seeds, content, unlocked);
-  const arms = [armGL, armRL, armGR, armRR];
+  const tableOnly = verifying
+    ? null
+    : {
+        RL: runArm('random', 'lookahead', seeds, content, unlocked),
+        GR: runArm('greedy', 'right', seeds, content, unlocked),
+        RR: runArm('random', 'right', seeds, content, unlocked),
+      };
+  const arms = tableOnly === null ? [armGL] : [armGL, tableOnly.RL, tableOnly.GR, tableOnly.RR];
+  if (tableOnly === null) {
+    console.log(
+      `\`--verify\` plays one arm, ${armGL.name}, because it is the only one a verdict reads. ` +
+        '`npm run measure:run` plays all four and prints the comparisons between them.',
+    );
+    console.log('');
+  }
 
   console.log('| arm | runs won | win rate | 95% CI | mean acts cleared | mean fights | mean rounds/fight | mean end deck |');
   console.log('|---|---|---|---|---|---|---|---|');
@@ -954,34 +1003,38 @@ function main(): void {
 
   console.log('## Does the route matter?');
   console.log('');
-  console.log('Paired, same seeds, placement held fixed. A bot comparison, so it bounds itself.');
-  console.log('');
-  const wins = (a: RunArm): number[] => a.outcomes.map((o) => (o.result === 'won' ? 1 : 0));
-  console.log('| placement held at | greedy route | random route | gap | 95% CI |');
-  console.log('|---|---|---|---|---|');
-  const winRate = (a: RunArm): number =>
-    a.outcomes.filter((o) => o.result === 'won').length / a.outcomes.length;
-  // The row label is the arm's own `PlacementStyle`, so it is a word
-  // `makeRunAgent` accepts rather than a synonym for one. The pair is checked
-  // rather than assumed: the column header claims placement was held fixed, and
-  // a row labelled with one arm's style while the other arm used a different
-  // one would be a false label, not merely an untidy one.
-  const routeRow = (greedyArm: RunArm, randomArm: RunArm): void => {
-    if (greedyArm.placement !== randomArm.placement) {
-      throw new Error(
-        `runmeasure: this row says placement was held fixed and the two arms used ` +
-          `"${greedyArm.placement}" and "${randomArm.placement}". A paired route comparison ` +
-          `must vary the route alone; build both arms with the same placement style.`,
+  if (tableOnly === null) {
+    console.log('Not played under `--verify`, which reads no verdict off it; `npm run measure:run` prints it.');
+  } else {
+    console.log('Paired, same seeds, placement held fixed. A bot comparison, so it bounds itself.');
+    console.log('');
+    const wins = (a: RunArm): number[] => a.outcomes.map((o) => (o.result === 'won' ? 1 : 0));
+    console.log('| placement held at | greedy route | random route | gap | 95% CI |');
+    console.log('|---|---|---|---|---|');
+    const winRate = (a: RunArm): number =>
+      a.outcomes.filter((o) => o.result === 'won').length / a.outcomes.length;
+    // The row label is the arm's own `PlacementStyle`, so it is a word
+    // `makeRunAgent` accepts rather than a synonym for one. The pair is checked
+    // rather than assumed: the column header claims placement was held fixed, and
+    // a row labelled with one arm's style while the other arm used a different
+    // one would be a false label, not merely an untidy one.
+    const routeRow = (greedyArm: RunArm, randomArm: RunArm): void => {
+      if (greedyArm.placement !== randomArm.placement) {
+        throw new Error(
+          `runmeasure: this row says placement was held fixed and the two arms used ` +
+            `"${greedyArm.placement}" and "${randomArm.placement}". A paired route comparison ` +
+            `must vary the route alone; build both arms with the same placement style.`,
+        );
+      }
+      const gap = pairedWinGap(wins(greedyArm), wins(randomArm));
+      console.log(
+        `| ${greedyArm.placement} | ${pct(winRate(greedyArm))} | ${pct(winRate(randomArm))} | ` +
+          `${pct(gap.gap)} | ${pct(gap.ci95[0])}..${pct(gap.ci95[1])} |`,
       );
-    }
-    const gap = pairedWinGap(wins(greedyArm), wins(randomArm));
-    console.log(
-      `| ${greedyArm.placement} | ${pct(winRate(greedyArm))} | ${pct(winRate(randomArm))} | ` +
-        `${pct(gap.gap)} | ${pct(gap.ci95[0])}..${pct(gap.ci95[1])} |`,
-    );
-  };
-  routeRow(armGL, armRL);
-  routeRow(armGR, armRR);
+    };
+    routeRow(armGL, tableOnly.RL);
+    routeRow(tableOnly.GR, tableOnly.RR);
+  }
   console.log('');
 
   if (has('encounters')) {
@@ -1063,14 +1116,18 @@ function main(): void {
       `engine. A run that granted none did not exercise the path, and a path that did not run ` +
       `cannot be reported as passing.`,
   );
-  const unlockOk = unlockReplay.problems.length === 0 && unlockReplay.seedsSeparated > 0;
+  const unlockOk =
+    unlockReplay.problems.length === 0 && unlockReplay.rungsSeparated.every((p) => p.seeds > 0);
   console.log(
     `- The unlock set is an input the log carries: ${unlockOk ? 'PASS' : 'FAIL'}; ` +
       `${unlockReplay.runs} run(s) across ${checkSeeds.length} seeds x 3 sets - a fresh profile, ` +
       `a half-unlocked one and everything owned - each recorded its own set and replayed to its ` +
-      `own hash, and ${unlockReplay.seedsSeparated}/${checkSeeds.length} seed(s) reached a ` +
-      `different run at a different set. A window where every set played the same run would ` +
-      `pass while the set was ignored entirely.`,
+      `own hash, and ${unlockReplay.seedsSeparated}/${checkSeeds.length} seed(s) played ` +
+      `differently at a different set (` +
+      unlockReplay.rungsSeparated.map((p) => `${p.between}: ${p.seeds}`).join('; ') +
+      `). Played, not hashed: the digest names the set, so it differs between two sets even ` +
+      `when the set changed nothing, and a window compared that way passes while the set is ` +
+      `ignored entirely.`,
   );
   const degen = degeneracy(armGL);
   console.log(
@@ -1126,10 +1183,13 @@ function main(): void {
     //   Proves  that the unlock set is an input the log carries: three sets -
     //           a fresh profile, a half-unlocked one, everything owned - over
     //           the check seeds, each run recording its own set and replaying
-    //           to its own hash, with at least one seed reaching a different
-    //           run at a different set. The half-unlocked one is what makes it
-    //           a check: at `owned: []` a run that recorded the gated list with
-    //           an empty owned half is indistinguishable from a correct one.
+    //           to its own hash, with each pair of neighbouring sets playing a
+    //           different run on at least one seed. The half-unlocked one is
+    //           what makes it a check: at `owned: []` a run that recorded the
+    //           gated list with an empty owned half is indistinguishable from a
+    //           correct one. "Playing a different run" is read off
+    //           `hashPlayed`, because `hashRun` names the set and would call
+    //           two sets different runs even where the set changed nothing.
     //   Misses  whether a fresh profile's pool is strong enough to win with.
     //           That is `npm run measure:run -- --unlocks none`, an instrument
     //           and not a gate, for the reason every win rate here is.
@@ -1183,8 +1243,9 @@ function main(): void {
     }
     if (inst.fightSigilProblems.length > 0) {
       failures.push(
-        `${inst.fightSigilProblems.length} sigil grant(s) did not reach the fight the run hands ` +
-          `the engine: ${inst.fightSigilProblems[0]}`,
+        `${inst.fightSigilProblems.length} disagreement(s) between the fight the run hands the ` +
+          `engine and its content plus its ledger - a grant that did not reach it, or a field ` +
+          `nothing granted that moved anyway: ${inst.fightSigilProblems[0]}`,
       );
     }
     if (unlockReplay.problems.length > 0) {
@@ -1193,10 +1254,13 @@ function main(): void {
           `were played with: ${unlockReplay.problems[0]}`,
       );
     }
-    if (unlockReplay.seedsSeparated === 0) {
+    for (const pair of unlockReplay.rungsSeparated) {
+      if (pair.seeds > 0) continue;
       failures.push(
-        `no seed reached a different run at a different unlock set across ${unlockReplay.runs} ` +
-          `run(s), so the unlock-replay check was vacuous and cannot be reported as a pass`,
+        `no seed played a different run at ${pair.between} across ${checkSeeds.length} seeds - ` +
+          `compared by what each run did, not by its digest, which names the set and so always ` +
+          `differs - so those two sets were indistinguishable and the unlock-replay check was ` +
+          `vacuous for them and cannot be reported as a pass`,
       );
     }
     for (const d of degen) failures.push(d);
