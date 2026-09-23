@@ -6,10 +6,15 @@
  *
  * **Why not `npm run a && npm run b && ...`, which is what this replaced.**
  * Each `npm run` boots the npm CLI before it runs anything, and the chain
- * started eight of them - itself and seven gates. Measured warm on 2026-09-22,
- * `npm run typecheck` took 2.33s where `tsc --noEmit` alone took 1.80s, and an
- * `npm run` that does nothing took 0.43s: about 2.6s of a 19.2s gate was npm
- * starting. Fleet canon: anything slow on the critical path is a defect.
+ * started eight of them - itself and seven gates. Measured warm on 2026-09-23,
+ * seven interleaved runs each: `npm run gate:work-plans` took a median 0.82s
+ * where `node tools/gates/work-plans.ts` took 0.36s, so each start cost about
+ * 0.45s, and this file saves seven of them. Five interleaved runs of the whole
+ * gate at the same code took a median 28.1s through seven `npm run`s and
+ * 21.0s through this file - more than seven starts explain, on a machine at
+ * about 80% CPU from other work, so read the per-start figure as the saving
+ * and the whole-gate pair as noisy. Fleet canon: anything slow on the critical
+ * path is a defect.
  *
  * **Why it reads `package.json` rather than listing the commands here.** Every
  * gate stays runnable alone as `npm run <name>`, which `AGENTS.md` promises, so

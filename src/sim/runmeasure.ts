@@ -382,9 +382,11 @@ export type RunInstrument = {
   /** Ledger-versus-deck disagreements, unknown ids, duplicate holds. Empty is the claim. */
   readonly sigilProblems: string[];
   /**
-   * Disagreements between the run's ledger and the fight setup the run hands
-   * the engine: a granted sigil the pool does not carry, a trait in the pool
-   * nothing granted, a hero number that is not the content's plus the ledger's.
+   * Disagreements between the fight setup the run hands the engine and the
+   * run's content plus its ledger: a granted sigil the pool does not carry, a
+   * trait in the pool nothing granted, a hero number that is not the content's
+   * plus the ledger's, or any other field of a card or of the hero - a race, a
+   * name, the hero's traits - that moved on the way in.
    * Empty is the claim, and it is a different claim from `sigilProblems` -
    * that one compares two run-layer records, this one compares the run layer
    * with the engine's own inputs.
@@ -903,9 +905,12 @@ function main(): void {
 
   // `--verify` plays only the arm a verdict reads. `degeneracy` reads the
   // strongest arm and nothing else does; the other three exist to fill the
-  // tables below, and they were 45% of the slowest link in `npm run gates`
-  // (measured 2026-09-22: of a 8.4s `verify:run`, 3.1s was those three arms).
-  // The tables are the instrument's, so `npm run measure:run` plays all four.
+  // tables below, and they cost the slowest link in `npm run gates` about a
+  // quarter of its time. Measured 2026-09-23, five warm interleaved runs of
+  // `verify:run`'s own command at `9b36329` and here: a median 9.31s playing
+  // four arms, 6.82s playing one, on a machine at about 80% CPU from other
+  // work. The tables are the instrument's, so `npm run measure:run` plays all
+  // four.
   const verifying = has('verify');
   const armGL = runArm('greedy', 'lookahead', seeds, content, unlocked);
   const tableOnly = verifying
@@ -1111,9 +1116,10 @@ function main(): void {
   console.log(
     `- Sigils are live, consistent and in the fight: ${sigilsOk ? 'PASS' : 'FAIL'}; ` +
       `${inst.sigilsGranted} granted across ${checkSeeds.length} runs, ` +
-      `${inst.sigilProblems.length} ledger/deck disagreement(s), ` +
-      `${inst.fightSigilProblems.length} disagreement(s) with the fight setup the run hands the ` +
-      `engine. A run that granted none did not exercise the path, and a path that did not run ` +
+      `${inst.sigilProblems.length} ledger/deck disagreement(s), and ` +
+      `${inst.fightSigilProblems.length} disagreement(s) between the fight setup the run hands ` +
+      `the engine and its content plus its ledger, every field of every card and of the hero ` +
+      `compared. A run that granted none did not exercise the path, and a path that did not run ` +
       `cannot be reported as passing.`,
   );
   const unlockOk =
@@ -1175,11 +1181,18 @@ function main(): void {
     //   Proves  that each grant reaches the fight: the pool the run hands
     //           `setupFight` resolves each deck instance to its printed traits
     //           plus its granted ones and nothing else, and the hero spec is
-    //           the content's numbers plus the ledger's exactly. A run holding
-    //           no sigil is checked by the same arithmetic, so a trait that
+    //           the content's numbers plus the ledger's exactly. Every other
+    //           field of each card and of the hero - a race, a name, a hero's
+    //           traits - is walked off the objects and must be the content's,
+    //           the forge's cost, Power and Health aside. A run holding no
+    //           sigil is checked by the same arithmetic, so a trait that
     //           appeared from nowhere is a failure and not a silent pass.
     //   Bound   to the setup, not to a resolved fight: it says the fight was
     //           handed the sigil, not that the card carrying it was drawn.
+    //   Bound   to the Knight, whose hero has no traits, so a class's attack
+    //           dropped on its way into a fight cannot show here. That is
+    //           `test/classes.test.ts`'s, which reads the hero the engine
+    //           built inside every fight of every class.
     //   Proves  that the unlock set is an input the log carries: three sets -
     //           a fresh profile, a half-unlocked one, everything owned - over
     //           the check seeds, each run recording its own set and replaying

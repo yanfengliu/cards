@@ -359,7 +359,7 @@ test('GATED_IDS is the rule its header states, and every departure from it is wr
   // selects a card the list does not gate), a gated card's weight moved above
   // it (the list gates a card the rule does not select), and an exception
   // naming a card the two already agree about. See
-  // `docs/learning/gate-proofs.md`, 2026-09-22.
+  // `docs/learning/gate-proofs.md`, 2026-09-23.
   //
   // Bound: the rule as the header states it, over the cards some class lists.
   // It cannot say the rule is a good one, and a card no class lists is outside

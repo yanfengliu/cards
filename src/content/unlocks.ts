@@ -11,7 +11,7 @@
 //
 //   - appears in **no class's starting deck**, so nothing a run is handed on
 //     turn one is ever missing, and
-//   - is weighted **`GATE_WEIGHT_CEILING` (5) or lower** by every class that
+//   - is weighted **`GATE_WEIGHT_CEILING` or lower** by every class that
 //     lists it, so what a fresh profile cannot draft is the tail of each pool
 //     rather than its middle.
 //
@@ -29,27 +29,31 @@
 // decisions rather than edits: change the list, or write the card into
 // `RULE_EXCEPTIONS` below with the reason it departs. A written-out list with
 // nothing holding it to its rule is how this one went stale: units 11 and 12
-// were built side by side, unit 11 added six tribal cards to every pool, and
-// when the two merged the rule selected three of them - the Runesmith, the
-// Marshal and the Elf Lord, each weighted 3 or less by every class that lists
-// it - while the list still held the seven it was written with. Nothing
-// noticed until a review counted. They are gated now.
+// were built side by side from `dcf2cdf`, unit 11 added six tribal cards to
+// every pool, and when the two merged the rule selected three of them - the
+// Runesmith, the Marshal and the Elf Lord, each weighted at or under the
+// ceiling by every class that lists it - while the list still held the seven
+// cards it was written with. Nothing noticed until a review counted. They are
+// gated now, and First Blood hands them over.
 //
 // What the rule costs each class - how many cards, and how much pool weight, a
 // fresh profile cannot draft - is printed by `npm run measure:run -- --unlocks
 // none`, one class at a time with `--class <id>`, and is not written here. It
-// used to be, and the numbers were wrong on the day they were written: this
-// header gave the Knight's pool as 87 and the Mage's as 78, when at that
+// used to be, and two of the numbers were wrong on the day they were written:
+// `cf2092f` gave the Knight's pool as 87 and the Mage's as 78, and at that
 // commit they weighed 95 and 82.
 //
 // **The tribal pairs.** Each tribal trait is printed by two cards, a 2-cost
 // carrier and a 3-cost one, and the rule gates only the second: the Kindler,
-// the Bannerman and the Songkeeper each have a class that weights them 6, so
-// they stay draftable, and every tribal trait stays draftable at a fresh
-// profile. That is a consequence of today's weights rather than a property of
-// the rule, so it is not left to this sentence: *every class can draft every
-// tribal trait at every unlock set a player can reach* in
-// `test/classes.test.ts` asks it at every set the deeds can produce.
+// the Bannerman and the Songkeeper are each weighted above the ceiling by at
+// least one class, so they stay draftable, and every tribal trait stays
+// draftable at a fresh profile. Both halves of that are held rather than
+// trusted. A carrier that fell under the ceiling everywhere would be a card
+// the rule selects and the list does not gate, which the test above names.
+// And a trait left with no draftable carrier - both of its cards gated,
+// whatever the weights say - turns *every class can draft every tribal trait
+// and every player race at every unlock set a player can reach* in
+// `test/classes.test.ts` red; it asks at every set the deeds can produce.
 //
 // **Nothing here is a balance change and nothing here is power.** No cost,
 // stat or weight moves; a gated card keeps every number it has and every class

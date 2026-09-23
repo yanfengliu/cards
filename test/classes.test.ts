@@ -188,7 +188,7 @@ test('every class can draft every tribal trait and every player race at every un
   // Mutations watched going red: `u_songkeeper` gated beside the Elf Lord on
   // First Blood (Chorus gone at every set First Blood is not in), and on the
   // won-run deed (gone before *and* after First Blood fires). See
-  // `docs/learning/gate-proofs.md`, 2026-09-22.
+  // `docs/learning/gate-proofs.md`, 2026-09-23.
   //
   // Bound: the shipped pools and deeds, read at every set above. It says a
   // class *can* be offered each trait, not that any seed is.
@@ -410,7 +410,7 @@ test('every class replays from its saved log at every rung of the unlock ladder,
   // Mutations watched going red: `heroSpecFor` dropping the class's traits
   // (through `fightSigilProblems`), a sigilled card's race set to human, and
   // `startRun` recording a partial set with its owned half emptied for every
-  // class but the default one. See `docs/learning/gate-proofs.md`, 2026-09-22.
+  // class but the default one. See `docs/learning/gate-proofs.md`, 2026-09-23.
   //
   // Bound: seeds 1..6 x both route styles x append-right placement, the rungs
   // `unlockLadder` reads off `ACHIEVEMENTS`, three classes. The population is
