@@ -13,17 +13,25 @@
 // taken. No test read that sentence: it was written inside `startRunApp`,
 // which needs a document.
 //
-// The class, and so the claim: anything a screen in that window says about the
-// hero's Health, maximum Health or gold is what the replay sets. Not what the
-// phase promises and not what `heroNow` returns - those are the code under
-// test - but what a second controller reaches when it replays the same node
-// through `replayRun` and walks away from every choice still open. The HUD
-// reads `heroNow`, so it must say the same thing, and that includes its hero
-// sigil chips: they read `state.sigils` too, so the Oak that had just made the
-// bar 210 had no chip beside it until the shelf was answered. The review of
-// the fix found the third: over the end banner, before `finishFight`, the HUD
-// kept the Health the hero walked in with, 200/200 under "Your hero finished
-// on 194 of 200 Health".
+// The class, and so the claim: anything the HUD says in that window, and
+// anything a won fight's screen says there, about the hero's Health, maximum
+// Health or gold is what the replay sets. Not what the phase promises and not
+// what `heroNow` returns - those are the code under test - but what a second
+// controller reaches when it replays the same node through `replayRun` and
+// walks away from every choice still open. The HUD reads `heroNow`, so it must
+// say the same thing, and that includes its hero sigil chips: they read
+// `state.sigils` too, so the Oak that had just made the bar 210 had no chip
+// beside it until the shelf was answered. The review of the fix found the
+// third: over the end banner, before `finishFight`, the HUD kept the Health
+// the hero walked in with, 200/200 under "Your hero finished on 194 of 200
+// Health".
+//
+// The fight screen's own words are outside the claim. Its end banner and its
+// subtitle state the fight's maximum, and a fight's hero is built from the
+// Health `heroSpecFor` hands it, which the engine also takes as its maximum. So
+// after a damaged fight they read "186 of 194" beside a HUD rightly reading
+// 186/200. That is how the engine builds a fight, not a choice any design
+// document made, and nothing here reads or holds it.
 //
 // Bound of this gate - what a green run does and does not prove:
 //
@@ -174,6 +182,11 @@ type Tally = {
   ended: { won: number; lost: number };
   /** End banners where the Health or the gold the replay sets differs from the stale state's. */
   endedMoved: number;
+  /**
+   * End banners where the Health itself moved. Counted apart from the gold,
+   * because every won fight pays, so "Health or gold" is met by gold alone.
+   */
+  endedHealthMoved: number;
 };
 
 /**
@@ -212,6 +225,7 @@ function checkEnded(
   );
   tally.ended[outcome.fight.result === 'playerWin' ? 'won' : 'lost']++;
   if (want.health !== stale.hero.health || want.gold !== stale.gold) tally.endedMoved++;
+  if (want.health !== stale.hero.health) tally.endedHealthMoved++;
 }
 
 /** Hold one won-fight screen, and the HUD above it, to the replay. */
@@ -354,6 +368,7 @@ test("everything a won fight's screens and the HUD state about the hero is what 
     statements: 0,
     ended: { won: 0, lost: 0 },
     endedMoved: 0,
+    endedHealthMoved: 0,
   };
   for (const classId of classes) {
     for (let seed = 1; seed <= 4; seed++) {
@@ -374,6 +389,7 @@ test("everything a won fight's screens and the HUD state about the hero is what 
   atLeast(tally.ended.won, 50, 'won fights whose end banner was checked');
   atLeast(tally.ended.lost, 5, 'lost fights whose end banner was checked');
   atLeast(tally.endedMoved, 50, 'end banners where the fight moved the Health or the gold');
+  atLeast(tally.endedHealthMoved, 50, "end banners where the fight moved the hero's Health itself");
   for (const classId of classes) {
     assert.ok(
       (tally.maxMovedAtReward.get(classId) ?? 0) >= 1,

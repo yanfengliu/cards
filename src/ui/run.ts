@@ -242,6 +242,11 @@ function afterFight(
  * One function, so the HUD and the screens cannot disagree about which to
  * read. Gated by "everything a won fight's screens and the HUD state about the
  * hero is what the replay sets" in `test/ui-won.test.ts`.
+ *
+ * While the phase is a fight, it throws when `ended` is not that fight, or is
+ * not over, with `finishFight`'s own reasons. A HUD handed another fight's result should fail
+ * loudly rather than show that fight's numbers. `runapp.ts` clears the result
+ * it holds before the phase can leave the fight, so today it cannot happen.
  */
 export function heroNow(state: RunState, phase: RunPhase, ended: FightOutcome | null = null): HeroNow {
   if ('maxHealthAfter' in phase) {
