@@ -25,7 +25,7 @@ Blinded with `BLIND=1`, which makes the attribution detector return nothing, `SE
 
 ### What each gate is bound to, measured here
 
-`test/ui-won.test.ts` plays shipped `RUN_CONTENT`, all three classes, seeds 1..4, greedy and random routes, append-right placement. Measured at `5e310cb` with a scratch copy that prints its tally: 40 hero sigil screens, 155 reward screens and 17 attach screens; 211 where the fight moved the hero's Health; 30 where a hero sigil taken at the node is held; and a reward screen after a sigil that moved the maximum for every class, 7 Knight, 6 Ranger, 4 Mage. Its truth is a second controller that resumes from the log, replays the node and declines what is still open, so neither `heroNow` nor the phase is the reference. It cannot see the wiring from `runapp.ts` to `heroNow`: W8c cuts that wiring and the gate stays green, as its header says. The browser probe sees it (P2).
+`test/ui-won.test.ts` plays shipped `RUN_CONTENT`, all three classes, seeds 1..4, greedy and random routes, append-right placement. Measured at `5e310cb` with a scratch copy that prints its tally: 40 hero sigil screens, 155 reward screens and 17 attach screens; 211 where the fight moved the hero's Health; 30 where a hero sigil taken at the node is held; and a reward screen after a sigil that moved the maximum for every class, 7 Knight, 6 Ranger, 4 Mage. Its truth is a second controller that resumes from the log, replays the node and declines what is still open, so neither `heroNow` nor the phase is the reference. It cannot see the wiring from `runapp.ts` to `heroNow`: W8c cuts that wiring and the gate stays green. Its header at `5e310cb` disclaimed only `renderNode`'s side of that wiring, which the review below caught; it names `renderHud` now. The browser probe sees it (P2).
 
 `test/explain.test.ts`'s two view gates read "locked" off `GATED_IDS` and the class lists directly. As inherited they read it through `unlockedRewards`, the same call `src/render/glossary.ts` picks its examples with, and R3o shows what that cost: with `u_kindler` gated and the one narrowing letting it through, the Dwarf tooltip says "The Kindler carries Kindle" and the inherited gate stays green. The same mutation against the gate as it stands is R3, red. The short name a card is matched by ("Captain" for "Human Captain") is also worked out in the test now, not by the glossary's own helper, for the same reason.
 
@@ -62,6 +62,33 @@ Blinded with `BLIND=1`, which makes the attribution detector return nothing, `SE
 W1 and P1 are the same edit under two instruments. W1 holds the function to the replay; P1 holds the page, and prints the symptom the review reported, on a bot-played seed: "140 of 180" under a HUD reading 140/210. W8c and P2 are the other half: the one defect the unit gate is blind to by construction, caught by the probe. P1 and P2 ran against a server on port 47391 started from this worktree, confirmed to serve it by fetching `test/docs.test.ts` (200; the file does not exist on `main`) and a missing path (404). The probe's green baseline hashed the run identically in the page, headlessly and in its mirror, `9a9f62ce10c1438c`.
 
 `src/content/unlocks.ts` and `src/run/unlocks.ts` belong to the run-layer worker this round and appear here only as mutation sites. Digests after the last restore, unchanged from before the first edit: `AGENTS.md` `d75eb9a1…`, `ARCHITECTURE.md` `dc88c4ea…`, `README.md` `0c542aa1…`, `src/content/unlocks.ts` `d9510401…`, `src/render/glossary.ts` `ce9fc540…`, `src/run/unlocks.ts` `434023bf…`, `src/ui/run.ts` `70d802e1…`, `src/ui/runapp.ts` `c12a0a57…`, `src/ui/sigils.ts` `4948477d…`, `test/explain.test.ts` `14d2318b…`.
+
+### After an independent review, at `268cb9f`
+
+An independent read-only review of `9f03978` accepted it with fixes. It was one lane, an in-harness Claude reviewer; no Codex lane ran. `268cb9f` closes its code findings, and the whole set was run again there: 32 mutations as wanted, 27 red and 5 controls green, the three self-probes as they must be, and the blinded runner exiting 2. Every anchor was matched before anything ran, through a new `--anchors` dry run. The first full run at `268cb9f` had stopped on W3, whose anchor still carried the indent `heroNow` had before this round restructured it, and refused rather than running a no-op.
+
+What the review found, and what holds it now:
+
+- **The stale window opened a screen earlier than `heroNow` said.** From the moment a fight ends until "Take your reward" hands it over, the phase is still `fight`, so the HUD read the state: 200/200 and 0 gold under "Your hero finished on 194 of 200 Health", on Knight seed 7's first fight. `.probe-ui/run-7-knight-light/fight-won.png` showed that before the fix (`4f3d67bf…`) and shows 194/200 and 25 gold after it (`d6539c07…`). `afterFight` now computes what `visit` sets when a fight ends; `finishFight` builds its cursor from it, `heroNow` states it when handed the finished fight, and `runapp.ts` redraws the HUD when the banner goes up. The unit gate checks every fight's end against the replay, 155 won and 22 lost, 177 of them moving Health or gold (W10, W11). It cannot see `renderHud` hand the fight over or the redraw (W12c green); the probe can (P4, P5).
+- **Nothing watched the HUD's chips on the page.** The chips carry their sigil's id, and the probe holds them to the run on every hero sigil screen and shelf (P3).
+- **The gold half of the unit gate could check nothing.** A reworded gold line left it green; the gold line is now required wherever Health is (W9).
+- **"as its header says" above was wrong at `5e310cb`.** Corrected in place.
+
+One more came from the probe itself. Its first end-banner check compared both of the banner's numbers with the run, and went red on a correct page, the Knight's second fight on seed 7: `the HUD says 186/200, the banner says "186 of 194 Health", and the run holds 186 of 200`. The banner's "of" is the fight's maximum, and `heroSpecFor` hands a fight the run's Health rather than its maximum, so after a damaged fight the two differ by design. The check compares only the Health the hero finished on now. Two different maximums on one screen is pre-existing and is not changed here.
+
+| # | mutation | site | the failure |
+|---|---|---|---|
+| W8c | **control**, re-run: the HUD cut from `heroNow` altogether, `heroNow(s, { kind: 'travel' }, null)` | `src/ui/runapp.ts` | GREEN, as wanted |
+| W9 | the gold line reworded | `src/ui/sigils.ts` | `knight seed 1 greedy, reward screen at node 0: the screen no longer states what the fight paid and the gold it leaves, in the shape "+<pay> gold ... you now have <gold>", so its gold cannot be held to the replay:` |
+| W10 | `heroNow` ignores the finished fight | `src/ui/run.ts` | `knight seed 1 greedy, the end of the fight at node 0 (playerWin): the HUD over the end banner states {"health":200,"maxHealth":200,"gold":0} and the replay sets {"health":188,"maxHealth":200,"gold":25}.` |
+| W11 | what a fight settles pays the node's gold on a loss too | `src/ui/run.ts` | `knight seed 1 random, the end of the fight at node 14 (enemyWin): the HUD over the end banner states {"health":0,"maxHealth":230,"gold":735} and the replay sets {"health":0,"maxHealth":230,"gold":585}.` |
+| W12c | **control**: `renderHud` stops handing the finished fight to `heroNow` | `src/ui/runapp.ts` | GREEN, as wanted: outside the stated bound |
+| P2 | W8c through the browser, re-run | `src/ui/runapp.ts`, through `tools/ui-probe/run.ts 2 light ranger` | `over the end banner the HUD says 180/180, the banner says the hero finished on 160, and the run holds 160 of 180`, caught one screen earlier than at `5e310cb` |
+| P3 | the HUD's chips read the stale state again | `src/ui/runapp.ts`, through the probe | `on the reward screen the HUD's sigil chips show [] and the run holds [si_oak]` |
+| P4 | W12c through the browser | `src/ui/runapp.ts`, through the probe | as P2 |
+| P5 | the HUD is not redrawn when the end banner goes up | `src/ui/runapp.ts`, through the probe | as P2 |
+
+The first table's other rows were re-run at `268cb9f` with the same failure text. Digests after the last restore there, unchanged from before the first edit: `README.md` `30d36e57…`, `src/ui/run.ts` `fcf1af1e…`, `src/ui/runapp.ts` `c9669894…`, `src/ui/sigils.ts` `fb8fab9e…`, and the rest as above.
 
 ## 2026-09-11 — a second review of the unlock layer: the storage gate was aimed at an idiom this repo never writes
 

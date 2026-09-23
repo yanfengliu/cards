@@ -1,12 +1,22 @@
 # 2026-09-23 — final acceptance: the UI and document findings
 
-Branch `worktree-agent-ae9d688c1c25fc728`. It finishes a tree a predecessor left at `8ff8e0c`, cut from `9b36329`, when its session limit ran out in the middle of verifying. The code in that tree was right. What it lacked was a run of anything, so the gates ran first, the diff was read as a list of claims, and every number it quoted was measured again. 282 tests, from 276.
+Branch `worktree-agent-ae9d688c1c25fc728`. It finishes a tree a predecessor left at `8ff8e0c`, cut from `9b36329`, when its session limit ran out in the middle of verifying. That tree's fixes were right, one of its gates was blind (below), and nothing in it had been run. So the gates ran first, the diff was read as a list of claims, and every number it quoted was measured again. 282 tests, from 276.
 
 ## A won node's run state is stale by design, and a screen that reads it is wrong
 
 Between a won fight and its commit, `src/ui/run.ts` keeps the canonical state where it stood before the node: the Health carried in, the maximum from before any hero sigil, and the sigils from before it too. The phase holds what the replay will set. The reward shelf built its opening line inside `startRunApp` and read the maximum off the state, so after the Sigil of the Oak it said "146 of 180 Health" under a HUD reading 146/210. The HUD's sigil chips read the state as well, so the Oak that had just made the bar 210 had no chip until the shelf was answered.
 
-Anything new drawn in that window, such as a fourth decision after a won fight or another number on the shelf, reads `heroNow(state, phase)` and not `state`. The shelf, the hero sigil offer and the HUD already do. `test/ui-won.test.ts` holds everything they state to what a second controller's replay sets. That test cannot see `runapp.ts`'s wiring: W8c cuts it and the test stays green. The browser probe's `checkWonLine` does see it (P2 red), and the probe is outside `npm run gates`.
+Anything new drawn in that window, such as a fourth decision after a won fight or another number on the shelf, reads `heroNow` and not `state`, and over the end banner it hands `heroNow` the finished fight. The shelf, the hero sigil offer and the HUD already do. `test/ui-won.test.ts` holds everything they state to what a second controller's replay sets. That test cannot see `runapp.ts`'s wiring: W8c cuts it and the test stays green. The browser probe's `checkWonLine` does see it (P2 red), and the probe is outside `npm run gates`.
+
+## The window opened a screen earlier, and a review of the close found it
+
+An independent read-only review of `9f03978` accepted it with fixes, all low severity. It was one lane, an in-harness Claude reviewer. The finding worth a section: from the moment a fight ends until "Take your reward" hands it over, the phase is still `fight`. `heroNow` knew only the won phases, so it returned the state, and the HUD over the end banner read 200/200 and 0 gold under "Your hero finished on 194 of 200 Health" (Knight, seed 7, first fight). That was there before this work. What this work added was a docstring saying the state was the truth there, and that is what the review caught. `afterFight` now computes what `visit` sets when a fight ends, `finishFight` and `heroNow` both use it, and `runapp.ts` redraws the HUD when the banner goes up. The unit gate checks every fight's end against the replay (155 won, 22 lost); the probe checks the page.
+
+The review also found that nothing watched the HUD's chips on the page, and that the gold half of the unit gate could pass with nothing to read. Both are gated now (P3 and W9 in `docs/learning/gate-proofs.md`).
+
+## A probe check that was wrong about the page
+
+The first version of the end-banner check compared both numbers in "Your hero finished on 186 of 194 Health" with the run's 186 of 200, and went red on a correct page. A fight's hero is handed the run's Health and not its maximum (`heroSpecFor`), so the banner's "of" is the Health the hero walked in with. The check now compares only the first number. The two maximums on one screen are pre-existing and unchanged, and a player could reasonably ask about them.
 
 ## The gate for the tooltip examples shared the code's filter
 
@@ -28,4 +38,4 @@ The race tooltips named the Captain, the Champion and the Sentinel, and all thre
 
 ## What the page showed
 
-Seed 2 as the Ranger, the shelf after the Goblin Pack elite in act 1: "Your hero stands at **140** of 210 Health. **+55 gold** — you now have 105.", under a HUD reading 140/210 and 105 gold, with the Oak chip beside them. `reward-max-health-moved.png`, 1440x900, sha256 `3986f405e7e40b4d…e831`. On seed 7 all three classes played through the page with every shelf's and hero sigil screen's line held to the HUD and to the run. The Knight won after 24 nodes, the Ranger and the Mage died after 9 and 5, and every page hash equalled its headless run.
+Seed 2 as the Ranger, the shelf after the Goblin Pack elite in act 1: "Your hero stands at **140** of 210 Health. **+55 gold** — you now have 105.", under a HUD reading 140/210 and 105 gold, with the Oak chip beside them. `reward-max-health-moved.png`, 1440x900, sha256 `3986f405e7e40b4d…e831`. The Knight's first fight on seed 7, over the end banner: the HUD read 200/200 and 0 gold before the review's fix (`fight-won.png`, `4f3d67bf…26d3`) and reads 194/200 and 25 gold after it (`d6539c07…5b59`), under "Your hero finished on 194 of 200 Health". On seed 7 all three classes played through the page with every check held: each shelf's and hero sigil screen's line, the HUD's Health and chips there, and the HUD over every end banner. The Knight won after 24 nodes, the Ranger and the Mage died after 9 and 5, and every page hash equalled its headless run.
