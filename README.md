@@ -14,11 +14,13 @@ Three influences, three distinct jobs:
 
 ## Status
 
-**A whole run is playable in the browser.** Three acts, each a branching map you route through; fights, elites and a boss fought on the board; rewards, a forge that upgrades a card for good, shops, events and rests between them; a hero whose Health carries across the whole run; and a deck that grows. The run ends when the hero falls or the last boss does, and then you start another.
+**A whole run is playable in the browser.** It starts with a class: the Knight, the Ranger or the Mage, each a hero with its own swing, a starting deck and the pool of cards its rewards are drawn from. Then three acts, each a branching map you route through; fights, elites and a boss fought on the board; rewards, sigils that give a card a trait or the hero a lasting edge, a forge that upgrades a card for good, shops, events and rests between them; a hero whose Health carries across the whole run; and a deck that grows. The run ends when the hero falls or the last boss does, and then you start another.
+
+Races are rules, not just colours: some cards read the race of the cards standing beside them, so which card goes next to which is part of the decision.
 
 Something survives a run, too: finishing one adds cards and sigils to the pool every later run drafts from. Unlocks widen what a run can be, never how strong it is - there is no permanent bonus anywhere, and every run is winnable from the first one. The Collection button says what you have and what opens the rest.
 
-What is still missing: races as mechanical tribes, and most of the content. The card pool is a few dozen cards against a design that implies hundreds.
+What is still missing is most of the content: the card pool is a few dozen cards against a design that implies hundreds.
 
 Every number in the design is a reasoned starting guess, not a balanced value.
 
@@ -27,6 +29,9 @@ Every number in the design is a reasoned starting guess, not a balanced value.
 - [Work unit 3](docs/work/3_playable-fight/plan.md) — the fight screen, and what a fight is actually like to play.
 - [Work unit 5](docs/work/5_run-structure/plan.md) — the run: the map, the acts, and where runs end.
 - [Work unit 8](docs/work/8_playable-run/plan.md) — the run on screen, and what a whole run is like to play.
+- [Work unit 10](docs/work/10_classes/plan.md) — the three classes, and how differently each one plays.
+- [Work unit 11](docs/work/11_tribes/plan.md) — races become rules, and the traits that read them.
+- [Work unit 12](docs/work/12_unlocks/plan.md) — what survives a run, and why it is never power.
 
 ## Running it
 
@@ -37,9 +42,11 @@ npm install
 npm start        # then open http://127.0.0.1:5175/src/ui/index.html
 ```
 
-The page opens on a run. `?seed=42` picks the run's seed; the same seed and the same choices replay the same run, and the end screen prints the run's hash and its replay log. A run in progress is saved in the browser between page loads and picked up where it stood between nodes; `?fresh=1` ignores the saved one, and the HUD's Restart button abandons it. What you have unlocked is saved beside it and survives every run; `?unlocks=all` plays with everything unlocked and `?unlocks=none` with nothing, and neither writes to what you have actually earned.
+The page opens on the class pick, and picking a class starts the run; `?class=ranger` names the class in the address and skips the pick. `?seed=42` picks the run's seed, and the same seed, class and choices, with the same things unlocked, replay the same run - the end screen prints the run's hash and its replay log. A run in progress is saved in the browser between page loads, so a reload picks it up where it stood between nodes, as the class it was started as, instead of opening on the pick; `?fresh=1` ignores the saved one, and the HUD's Restart button abandons it. What you have unlocked is saved beside it and survives every run. `?unlocks=all` plays with everything unlocked and `?unlocks=none` with nothing, and neither saves anything - not what the run earns and not the run itself, so a reload starts over.
 
-A single fight, on its own, is still addressable: `?encounter=hard&seed=42&theme=dark`.
+`?theme=dark` or `?theme=light` sets the colours, and `?hatch=1` rules each card's field with its heraldic hatching, so race reads without colour. Both are also buttons in the header.
+
+A single fight, on its own, is still addressable: `?encounter=hard&seed=42&theme=dark`, or `?mode=fight` for the default encounter.
 
 ## Checking it
 
@@ -47,7 +54,7 @@ A single fight, on its own, is still addressable: `?encounter=hard&seed=42&theme
 npm test            # rules, the design's worked example, determinism
 npm run measure     # the A/B: does optimal placement beat random placement?
 npm run measure:run # whole runs: win rate per act, where runs end, run length
-npm run gates       # typecheck, both boundary gates, tests, both instrument checks
+npm run gates       # the gates every commit passes, cheapest first; AGENTS.md says what each one proves
 ```
 
 `npm run gates` is what passes before any commit that touches code.

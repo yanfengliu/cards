@@ -6,6 +6,92 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-23 — final acceptance, UI and documents: a shelf that read the stale state, race tooltips that named locked cards, and documents describing code that had moved
+
+Taken at `5e310cb` on branch `worktree-agent-ae9d688c1c25fc728`. That branch finishes the tree the coordinator preserved at `8ff8e0c`, cut from `9b36329`. The entry that tree carried here was never backed by a run this session could see, so it was taken out rather than inherited, and everything below was run again. The suite is **282 tests** at `5e310cb` and 276 at `9b36329`. Twenty-five mutations through `.probe/mutate.mjs`, written fresh: twenty-one wanted red and came back red on a line naming their gate, four controls wanted green and got it, and the three self-probes came back as they must. Every anchor had to match exactly once, with `\n` read as the file's own line ending (the sources are CRLF on disk, the plans LF). Every touched file was restored from the bytes read before the edit and its sha256 compared, and `git status` was clean before the first mutation and after the last.
+
+### The runner
+
+The shape `docs/policies/local-rules.md` prescribes. A red is attributed to a `not ok N - <name>` line under `--test-reporter=tap`, by exact name. Every command runs once unmutated first; it must exit 0, every named test must be on an `ok` line in it (so a misspelt name cannot pass for "not red"), and no expected failure may already be there. The crash guard is differenced against that baseline: the whole suite prints one crash-shaped line on a green run, the `SyntaxError` `test/unlocks.test.ts` logs on purpose. TAP result lines are not read as crash evidence, so a test whose name holds a crash word cannot fake one. The two browser mutations are attributed by text: `checkWonLine`'s message, parsed, with the screen's numbers and the HUD's each compared to the run's.
+
+```
+self-probes
+  ok   SELF      wanted UNCONFIRMED got UNCONFIRMED a mutation that cannot compile
+  ok   ATTRIB    wanted UNCONFIRMED got UNCONFIRMED a real mutation (W2) paired with the name of a test it does NOT break
+  ok   POSITIVE  wanted RED         got RED         the SAME mutation paired with the name of a test it DOES break
+```
+
+Blinded with `BLIND=1`, which makes the attribution detector return nothing, `SELF` and `ATTRIB` still came back `UNCONFIRMED` and `POSITIVE` came back `UNCONFIRMED` too; the runner printed "A self-probe came back wrong" and **exited 2** before any mutation ran.
+
+### What each gate is bound to, measured here
+
+`test/ui-won.test.ts` plays shipped `RUN_CONTENT`, all three classes, seeds 1..4, greedy and random routes, append-right placement. Measured at `5e310cb` with a scratch copy that prints its tally: 40 hero sigil screens, 155 reward screens and 17 attach screens; 211 where the fight moved the hero's Health; 30 where a hero sigil taken at the node is held; and a reward screen after a sigil that moved the maximum for every class, 7 Knight, 6 Ranger, 4 Mage. Its truth is a second controller that resumes from the log, replays the node and declines what is still open, so neither `heroNow` nor the phase is the reference. It cannot see the wiring from `runapp.ts` to `heroNow`: W8c cuts that wiring and the gate stays green. Its header at `5e310cb` disclaimed only `renderNode`'s side of that wiring, which the review below caught; it names `renderHud` now. The browser probe sees it (P2).
+
+`test/explain.test.ts`'s two view gates read "locked" off `GATED_IDS` and the class lists directly. As inherited they read it through `unlockedRewards`, the same call `src/render/glossary.ts` picks its examples with, and R3o shows what that cost: with `u_kindler` gated and the one narrowing letting it through, the Dwarf tooltip says "The Kindler carries Kindle" and the inherited gate stays green. The same mutation against the gate as it stands is R3, red. The short name a card is matched by ("Captain" for "Human Captain") is also worked out in the test now, not by the glossary's own helper, for the same reason.
+
+`test/docs.test.ts` holds `ARCHITECTURE.md`'s source tree to every directory under `src/`, both status paragraphs to every top-level directory, and `README.md` to every parameter a `URLSearchParams` is asked for under `src/ui/`. Each asserts its walk found its subject.
+
+| # | mutation | site | the failure |
+|---|---|---|---|
+| W1 | **the defect as it shipped**: the shelf writes its own opening line and reads the maximum off `state.hero.maxHealth` | `src/ui/sigils.ts` | `knight seed 1 greedy, reward screen at node 21: the screen says "192 of 200 Health" and the replay sets 192 of 230. The run state is stale until the node commits; read heroNow, as the HUD does.` |
+| W2 | the shared opening line reads its maximum off the stale state | `src/ui/sigils.ts` | same as W1 |
+| W3 | `heroNow` reads the maximum off the stale state, so the HUD does too | `src/ui/run.ts` | `knight seed 1 greedy, reward screen at node 21: the HUD states {"health":192,"maxHealth":200,"gold":135} and the replay sets {"health":192,"maxHealth":230,"gold":135}` |
+| W4 | `heroNow` reads the hero sigils off the stale state | `src/ui/run.ts` | `knight seed 1 greedy, reward screen at node 21: the HUD's chips show hero sigils [] and the replay has the hero holding [si_oak]` |
+| W5 | the opening line states the Health the hero carried into the fight | `src/ui/sigils.ts` | `knight seed 1 greedy, reward screen at node 0: the screen says "200 of 200 Health" and the replay sets 188 of 200.` |
+| W6 | the opening line states the gold from before the fight paid | `src/ui/sigils.ts` | `knight seed 1 greedy, reward screen at node 0: the screen says you now have 0 gold and the replay sets 25` |
+| W7 | the opening line stops stating Health at all | `src/ui/sigils.ts` | `knight seed 1 greedy, reward screen at node 0: the screen no longer states the hero's Health at all:` |
+| W8c | **control**: `runapp.ts`'s HUD stops reading `heroNow`'s won branch | `src/ui/runapp.ts` | GREEN, as wanted: outside the gate's stated bound |
+| P1 | W1 through the browser | `tools/ui-probe/run.ts 2 light ranger` | `the reward screen says "140 of 180 Health", the HUD says 140/210, and the run holds 140 of 210` |
+| P2 | W8c through the browser | `tools/ui-probe/run.ts 2 light ranger` | `the reward screen says "160 of 180 Health", the HUD says 180/180, and the run holds 160 of 180` |
+| R1a | the race tooltips typed back as they were at `9b36329` | `src/render/glossary.ts` | `The Human tooltip names "Captain" (u_captain), which a player on a fresh profile cannot draft:` |
+| R1b | the same edit, under the scan of typed strings | `src/render/glossary.ts` | `src/render/glossary.ts types "Captain" (u_captain) into a string the player can read, and a fresh profile cannot draft it:` |
+| R2 | the examples drawn from the class pools instead of the starting decks | `src/render/glossary.ts` | as R1a |
+| R2c | **control**: R2 under the typed-string scan | `src/render/glossary.ts` | GREEN, as wanted: a name built at run time is outside that scan, which is why the tooltip gate stands beside it |
+| R3 | `u_kindler` gated, and `unlockedRewards` letting it through | `src/content/unlocks.ts`, `src/run/unlocks.ts` | `The Dwarf tooltip names "Kindler" (u_kindler), which a player on a fresh profile cannot draft:` |
+| R3o | **control**: R3 against the gate as inherited, "locked" read through `unlockedRewards` | the same, and `test/explain.test.ts` | GREEN: the blind spot this round closed |
+| R3c | **control**: `u_kindler` gated, filter and derivation as shipped | `src/content/unlocks.ts` | GREEN, as wanted: the Dwarf tooltip re-derives to the next tribal dwarf a fresh profile can draft |
+| R4 | the race tooltips drop their tribal card | `src/render/glossary.ts` | `A fresh profile can draft a Human card carrying a tribal trait, and the Human tooltip names none - the one card that makes the race a rule:` |
+| R5 | a gated card typed into a view string elsewhere | `src/ui/runapp.ts` | `src/ui/runapp.ts types "Human Captain" (u_captain) into a string the player can read, and a fresh profile cannot draft it:` |
+| D1 | `ARCHITECTURE.md`'s tree restored to the plan it was at `9b36329` | `ARCHITECTURE.md` | `ARCHITECTURE.md's line for src/content/ leaves out [cards.fixture.json, cards.ts, classes.ts, sigils.ts, tribes.fixture.json, unlocks.ts] and names [(blazons, cards), cards.json, encounters.json, enemies.json, live, on, sigils.json, the], which are not on disk.` |
+| D2 | a new file under `src/ui/` the tree does not list | `src/ui/extra.ts`, created | `ARCHITECTURE.md's line for src/ui/ leaves out [extra.ts] and names [], which are not on disk.` |
+| D3 | `AGENTS.md`'s "What this is" restored to `9b36329` | `AGENTS.md` | `AGENTS.md's "What this is" does not name src/content/, src/run/, src/ui/, which are on disk.` |
+| D4 | `ARCHITECTURE.md`'s Status restored to `9b36329` | `ARCHITECTURE.md` | `ARCHITECTURE.md's Status paragraph does not name src/run/, src/ui/, which are on disk.` |
+| D5 | the README drops `?class=` | `README.md` | `the app reads ?class= from the address and README.md never says so.` |
+| D6 | the app reads a parameter the README has never heard of | `src/ui/runapp.ts` | `the app reads ?pool= from the address and README.md never says so.` |
+
+W1 and P1 are the same edit under two instruments. W1 holds the function to the replay; P1 holds the page, and prints the symptom the review reported, on a bot-played seed: "140 of 180" under a HUD reading 140/210. W8c and P2 are the other half: the one defect the unit gate is blind to by construction, caught by the probe. P1 and P2 ran against a server on port 47391 started from this worktree, confirmed to serve it by fetching `test/docs.test.ts` (200; the file does not exist on `main`) and a missing path (404). The probe's green baseline hashed the run identically in the page, headlessly and in its mirror, `9a9f62ce10c1438c`.
+
+`src/content/unlocks.ts` and `src/run/unlocks.ts` belong to the run-layer worker this round and appear here only as mutation sites. Digests after the last restore, unchanged from before the first edit: `AGENTS.md` `d75eb9a1…`, `ARCHITECTURE.md` `dc88c4ea…`, `README.md` `0c542aa1…`, `src/content/unlocks.ts` `d9510401…`, `src/render/glossary.ts` `ce9fc540…`, `src/run/unlocks.ts` `434023bf…`, `src/ui/run.ts` `70d802e1…`, `src/ui/runapp.ts` `c12a0a57…`, `src/ui/sigils.ts` `4948477d…`, `test/explain.test.ts` `14d2318b…`.
+
+### After an independent review, at `268cb9f`
+
+An independent read-only review of `9f03978` accepted it with fixes. It was one lane, an in-harness Claude reviewer; no Codex lane ran. `268cb9f` closes its code findings, and the whole set was run again there: 32 mutations as wanted, 27 red and 5 controls green, the three self-probes as they must be, and the blinded runner exiting 2. Every anchor was matched before anything ran, through a new `--anchors` dry run. The first full run at `268cb9f` had stopped on W3, whose anchor still carried the indent `heroNow` had before this round restructured it, and refused rather than running a no-op.
+
+What the review found, and what holds it now:
+
+- **The stale window opened a screen earlier than `heroNow` said.** From the moment a fight ends until "Take your reward" hands it over, the phase is still `fight`, so the HUD read the state: 200/200 and 0 gold under "Your hero finished on 194 of 200 Health", on Knight seed 7's first fight. `.probe-ui/run-7-knight-light/fight-won.png` showed that before the fix (`4f3d67bf…`, viewed then and since overwritten by later probe runs) and shows 194/200 and 25 gold after it (`d6539c07…`). `afterFight` now computes what `visit` sets when a fight ends; `finishFight` builds its cursor from it, `heroNow` states it when handed the finished fight, and `runapp.ts` redraws the HUD when the banner goes up. The unit gate checks every fight's end against the replay, 155 won and 22 lost, 177 of them moving Health or gold (W10, W11). It cannot see `renderHud` hand the fight over or the redraw (W12c green); the probe can (P4, P5).
+- **Nothing watched the HUD's chips on the page.** The chips carry their sigil's id, and the probe holds them to the run on every hero sigil screen and shelf (P3).
+- **The gold half of the unit gate could check nothing.** A reworded gold line left it green; the gold line is now required wherever Health is (W9).
+- **"as its header says" above was wrong at `5e310cb`.** Corrected in place.
+
+One more came from the probe itself. Its first end-banner check compared both of the banner's numbers with the run, and went red on a correct page, the Knight's second fight on seed 7: `the HUD says 186/200, the banner says "186 of 194 Health", and the run holds 186 of 200`. The banner's "of" is the fight's maximum. `heroSpecFor` hands a fight only the run's Health (`src/run/nodes.ts:159`), and the engine takes that as the hero's maximum too (`src/engine/state.ts:308`), so after a damaged fight the two differ. No design document chose that; it is how the engine builds a fight. The check compares only the Health the hero finished on now. Two different maximums on one screen is pre-existing and is not changed here, and the focused re-review had `test/ui-won.test.ts`'s header carve it out of the gate's claim.
+
+| # | mutation | site | the failure |
+|---|---|---|---|
+| W8c | **control**, re-run: the HUD cut from `heroNow` altogether, `heroNow(s, { kind: 'travel' }, null)` | `src/ui/runapp.ts` | GREEN, as wanted |
+| W9 | the gold line reworded | `src/ui/sigils.ts` | `knight seed 1 greedy, reward screen at node 0: the screen no longer states what the fight paid and the gold it leaves, in the shape "+<pay> gold ... you now have <gold>", so its gold cannot be held to the replay:` |
+| W10 | `heroNow` ignores the finished fight | `src/ui/run.ts` | `knight seed 1 greedy, the end of the fight at node 0 (playerWin): the HUD over the end banner states {"health":200,"maxHealth":200,"gold":0} and the replay sets {"health":188,"maxHealth":200,"gold":25}.` |
+| W11 | what a fight settles pays the node's gold on a loss too | `src/ui/run.ts` | `knight seed 1 random, the end of the fight at node 14 (enemyWin): the HUD over the end banner states {"health":0,"maxHealth":230,"gold":735} and the replay sets {"health":0,"maxHealth":230,"gold":585}.` |
+| W12c | **control**: `renderHud` stops handing the finished fight to `heroNow` | `src/ui/runapp.ts` | GREEN, as wanted: outside the stated bound |
+| P2 | W8c through the browser, re-run | `src/ui/runapp.ts`, through `tools/ui-probe/run.ts 2 light ranger` | `over the end banner the HUD says 180/180, the banner says the hero finished on 160, and the run holds 160 of 180`, caught one screen earlier than at `5e310cb` |
+| P3 | the HUD's chips read the stale state again | `src/ui/runapp.ts`, through the probe | `on the reward screen the HUD's sigil chips show [] and the run holds [si_oak]` |
+| P4 | W12c through the browser | `src/ui/runapp.ts`, through the probe | as P2 |
+| P5 | the HUD is not redrawn when the end banner goes up | `src/ui/runapp.ts`, through the probe | as P2 |
+
+The first table's other rows were re-run at `268cb9f` with the same failure text. Digests after the last restore there, unchanged from before the first edit: `README.md` `30d36e57…`, `src/ui/run.ts` `fcf1af1e…`, `src/ui/runapp.ts` `c9669894…`, `src/ui/sigils.ts` `fb8fab9e…`, and the rest as above.
+
+A focused re-review of `9f03978..d957d13` accepted it. Its three small findings are closed in `0eadd3d`: the test header's claim no longer covers the fight screen's own maximum, fight ends that moved Health are counted apart from gold (176 of 177), and `heroNow`'s docstring says when it throws. At `0eadd3d` every anchor matched and the 27 mutations that do not need a browser came back as wanted, 22 red and 5 controls green, with the tree clean. The five browser rows stand as run at `268cb9f`: `0eadd3d` changes no probe code, and under `src/` only a comment.
+
 ## 2026-09-11 — a second review of the unlock layer: the storage gate was aimed at an idiom this repo never writes
 
 Taken on branch `worktree-agent-ac7c36708d963e2ab`, cut from `d59a8cb` with `main` at `308d91c` merged in; the suite is **276 tests** here, 248 at `d59a8cb` and 273 at the merge. Fifteen mutations, each applied to the shipped tree, run against the shipped command, reverted, and the file's sha256 compared before and after. All fifteen came back red on a line their reporter marked failed, and none was already failing in a measured green baseline.

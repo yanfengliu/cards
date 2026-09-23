@@ -28,7 +28,14 @@
  *   a fight read a race - unit 11 is when that stopped being true.
  */
 
-import { type Trait, type Tribe, MOST_ADJACENT, TRIBAL_TRAITS } from '../engine/state.ts';
+import {
+  type Trait,
+  type Tribe,
+  type UnitCard,
+  MOST_ADJACENT,
+  TRIBAL_TRAITS,
+  isTribalTrait,
+} from '../engine/state.ts';
 import {
   BANNER_POWER,
   CHORUS_POWER,
@@ -36,6 +43,10 @@ import {
   RELAY_POWER,
   WAKE_POWER,
 } from '../engine/resolver.ts';
+import { ENEMY_CARDS, PLAYER_CARDS } from '../content/cards.ts';
+import { CLASSES } from '../content/classes.ts';
+import { FRESH_UNLOCKS } from '../content/unlocks.ts';
+import { unlockedRewards } from '../run/unlocks.ts';
 import { CLASS_TRAIT_TERMS } from './class-terms.ts';
 import type { IconName } from './icons.ts';
 import { type HatchPattern, type Tincture, TINCTURES, hatchOf } from './heraldry/tinctures.ts';
@@ -262,12 +273,77 @@ export function tribeTerm(tribe: string): Term {
   );
 }
 
+/**
+ * The cards a race's tooltip may point at, read out of the content rather than
+ * typed into the sentence.
+ *
+ * The typed version named the Captain and the Champion as humans and the
+ * Sentinel as an elf, and all three are gated: a player on a fresh profile read
+ * a tooltip pointing at cards they could not draft, while the tribal cards -
+ * the ones that make a race a rule - went unnamed. Typed examples go stale the
+ * way a typed list in a gate does, and for the same reason: the author gating a
+ * card has no reason to open the glossary.
+ *
+ * So the examples come from two places a fresh profile always reaches:
+ *
+ *   - **Every class's starting deck.** A run is handed its whole deck on turn
+ *     one, and `src/content/unlocks.ts` refuses at load to gate a card any
+ *     starting deck names, so these can never be locked.
+ *   - **One tribal card per race**, the cheapest one a fresh profile can draft,
+ *     through the same `unlockedRewards` the draft itself narrows by. Gating it
+ *     takes it out of this sentence in the same edit; if a race has none left,
+ *     the sentence says nothing about one.
+ *
+ * `test/explain.test.ts` holds both the sentence and every string typed under
+ * `src/render/` and `src/ui/` to naming no card a fresh profile cannot draft.
+ * It reads that list off `GATED_IDS` and the class lists itself, not through
+ * `unlockedRewards`, so a narrowing that went wrong here would not fool the
+ * gate the same way.
+ */
+const IN_A_STARTING_DECK = new Set<string>(CLASSES.flatMap((c) => c.startingDeck));
+
+const FRESH_DRAFTABLE = new Set<string>(
+  CLASSES.flatMap((c) => unlockedRewards(FRESH_UNLOCKS, c.rewards).map((r) => r.cardId)),
+);
+
+/**
+ * A card's name inside its own race's sentence: "Dwarf Pikeman" is the
+ * Pikeman there, and a name without its race in front is left whole.
+ */
+function nameInRace(card: UnitCard, raceName: string): string {
+  const prefix = `${raceName} `;
+  return card.name.startsWith(prefix) ? card.name.slice(prefix.length) : card.name;
+}
+
+/** "Your line's heavy bodies — the Shieldbearer, ... The Kindler carries Kindle, ..." */
+function playerRaceLine(tribe: Tribe, raceName: string, kind: string): string {
+  const own = PLAYER_CARDS.filter((c) => c.tribe === tribe);
+  const starters = own.filter((c) => IN_A_STARTING_DECK.has(c.id)).map((c) => nameInRace(c, raceName));
+  const tribal = own
+    .filter((c) => FRESH_DRAFTABLE.has(c.id) && c.traits.some(isTribalTrait))
+    .sort((a, b) => a.cost - b.cost)[0];
+  const list = starters.length === 0 ? '' : ` — the ${listWords(starters)}`;
+  const reads =
+    tribal === undefined
+      ? ''
+      : ` The ${nameInRace(tribal, raceName)} carries ` +
+        `${listWords(tribal.traits.filter(isTribalTrait).map((t) => TRAIT_TERMS[t].name))}, ` +
+        'which reads the races beside it.';
+  return `Your line’s ${kind}${list}.${reads}`;
+}
+
+/** "The enemy's rank and file — the Goblin, Shieldwall and Ogre." */
+function enemyRaceLine(tribe: Tribe, raceName: string, kind: string): string {
+  const names = ENEMY_CARDS.filter((c) => c.tribe === tribe).map((c) => nameInRace(c, raceName));
+  return `The enemy’s ${kind}${names.length === 0 ? '' : ` — the ${listWords(names)}`}.`;
+}
+
 export const TRIBE_TERMS: Readonly<Record<Tribe, Term>> = {
-  human: { name: 'Human', icon: 'human', line: 'Your line’s generalists — the Squire, Captain and Champion.' },
-  dwarf: { name: 'Dwarf', icon: 'dwarf', line: 'Your line’s heavy bodies — Shieldbearers, Ironguards, Pikemen.' },
-  elf: { name: 'Elf', icon: 'elf', line: 'Your line’s archers and wardens — the Archer, the Wayfinder, the Sentinel.' },
-  orc: { name: 'Orc', icon: 'orc', line: 'The enemy’s rank and file — Goblins, Shieldwalls and Ogres.' },
-  beast: { name: 'Beast', icon: 'beast', line: 'The enemy’s armoured monsters, such as the Stone Troll.' },
+  human: { name: 'Human', icon: 'human', line: playerRaceLine('human', 'Human', 'generalists') },
+  dwarf: { name: 'Dwarf', icon: 'dwarf', line: playerRaceLine('dwarf', 'Dwarf', 'heavy bodies') },
+  elf: { name: 'Elf', icon: 'elf', line: playerRaceLine('elf', 'Elf', 'archers and wardens') },
+  orc: { name: 'Orc', icon: 'orc', line: enemyRaceLine('orc', 'Orc', 'rank and file') },
+  beast: { name: 'Beast', icon: 'beast', line: enemyRaceLine('beast', 'Beast', 'armoured monsters') },
   hero: { name: 'Hero', icon: 'hero', line: 'Not a race. A hero is one per side and its Health is the fight.' },
 };
 

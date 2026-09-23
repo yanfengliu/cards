@@ -2,7 +2,7 @@
 
 How the game gets built, verified, and improved. The game itself is [`docs/design/game.md`](docs/design/game.md); this is the engineering that has to hold it up.
 
-Status: **partly built**. A headless deterministic prototype of one fight exists — `src/engine/`, `src/content/`, `src/sim/` — alongside the SVG heraldry renderer in `src/render/`. There is no UI layer. Four of the gates described below are real commands today: `npm run gate:boundaries`, `npm run gate:banned-apis`, `npm test` and `npm run verify`, each named in `AGENTS.md`, which lists a gate only once the command that satisfies it exists. Everything else here is still a plan, and is written in the future tense where it is.
+Status: **playable**. A whole run plays end to end in the browser: a class pick, three acts of branching map, fights on the headless deterministic engine, and rewards, sigils and unlocks between them. The code is the rules engine in `src/engine/`, the data in `src/content/`, the run layer in `src/run/`, the headless measurements in `src/sim/`, the SVG heraldry renderer in `src/render/` and the browser UI in `src/ui/`, laid out file by file below. Every gate `AGENTS.md` lists is a real command, and `AGENTS.md` lists a gate only once the command that satisfies it exists; `npm run gates` chains the ones that must pass before a commit. Anything here that is still a plan is written in the future tense.
 
 ## The keystone: determinism
 
@@ -40,12 +40,18 @@ The architecture is one rule: **`engine` depends on nothing, and everything depe
 
 ```
 src/
-  engine/     state.ts  actions.ts  resolver.ts  effects.ts  rng.ts  replay.ts
-  content/    cards.json  sigils.json  enemies.json  encounters.json   (blazons live on the cards)
-  sim/        agents/  run.ts  metrics.ts
-  render/     board.ts  card.ts  anim.ts  heraldry.ts  charges/
-  ui/         input.ts
+  content/           cards.fixture.json  cards.ts  classes.ts  sigils.ts  tribes.fixture.json  unlocks.ts
+  engine/            cast.ts  fight.ts  hash.ts  resolver.ts  rng.ts  state.ts
+  render/            anim.ts  blazons.ts  board.ts  class-terms.ts  escape.ts  fx.ts  glossary.ts  heraldry/  icons.ts  inspect.ts  map.ts  odds.ts  sigil-terms.ts  view.ts
+  render/heraldry/   blazon.ts  card.ts  charges.ts  tinctures.ts
+  run/               content.ts  deck.ts  hash.ts  map.ts  nodes.ts  run.ts  sigils.ts  types.ts  unlocks.ts
+  sim/               ablate.ts  bots.ts  measure.ts  runbots.ts  runmeasure.ts
+  ui/                app.css  app.ts  classpick.ts  index.html  input.ts  main.ts  profile.ts  run.ts  runapp.ts  session.ts  sigils.ts  unlocks.ts
 ```
+
+That tree is the disk, not a plan for it: `test/docs.test.ts` reads every directory under `src/` and fails when a line here names a file that is not there or leaves out one that is, and prints the block to paste. It was a plan once, and stayed one after the code left it behind — `actions.ts`, `effects.ts`, `replay.ts` and four `.json` files that never existed, and no `src/run/` at all.
+
+`src/run/` is the layer the diagram above leaves out. It depends on `engine` and, by design, on `content` — `src/run/content.ts` is that binding — and `sim`, `render` and `ui` depend on it: a run is a pure function of its seed, its class and its unlock set, played through the same engine a single fight is.
 
 **Make this a lint rule, not a good intention.** An architecture that is only written down erodes; one that is a gate does not. Both rules exist now, and both read the TypeScript AST rather than grepping, because `rng.ts` and `measure.ts` name the banned APIs in comments in order to say they are never called and a grep gate is red on a clean tree.
 

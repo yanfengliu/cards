@@ -1,9 +1,9 @@
 # A malformed work plan goes red at commit
 
-Status: active
+Status: complete
 Owner: coordinator
 Created: 2026-09-11
-Updated: 2026-09-11
+Updated: 2026-09-23
 
 ## Problem and outcome
 
@@ -49,10 +49,14 @@ The gate follows the two properties `boundaries.ts` and `banned-apis.ts` establi
 
 ## Outcome
 
-Implemented on branch `worktree-agent-ae829ffbddee3454e`, cut from `dcf2cdf`. Not merged and not reviewed; the integration owner holds acceptance, so this stays `active` rather than `complete` — and recording the branch here rather than on the Status line is the thing the gate exists to enforce.
+**Merged to main at `5f51827`**, "Integrate unit 13: a malformed work plan goes red at commit", on 2026-09-10. The integration owner verified the gate itself rather than on the worker's report, with a mutation the worker had not used - the exact free-text Status shape that had blocked allocation. It went red with a fleet checkout reachable, stayed red with `FLEET_DIR` pointing at nothing, and went green on revert. No independent review was commissioned for the three lines this unit added to `AGENTS.md`'s Gates section, and none occurred.
 
-`npm run gates` exits 0 with the new gate third in the chain: 14 plans checked, every probe rule fired, and the fleet cross-check agreed with `fleet/scripts/lib/work-docs-format.mjs` on all 23 texts. 218 tests pass. `git diff dcf2cdf -- src/ test/` is empty, and `verify` and `verify:run` reproduce line for line apart from `Elapsed` (60 and 80 lines compared).
+**The checks that held, re-run on 2026-09-23** from a clean extraction of `5f51827` with its own `package.json`: `npm run gates` exits 0. That is typecheck, `gate:boundaries`, `gate:banned-apis`, `gate:work-plans` - 14 plans checked and every probe rule fired, with the fleet cross-check skipped as it must be when no `fleet/` checkout is reachable - then 218 of 218 tests, `npm run verify` at a 9.75 pp gap (CI 5.61..13.89), and every `npm run verify:run` check, the strongest arm winning 176/200.
+
+The worker's handoff, before the merge, as it was recorded: implemented on branch `worktree-agent-ae829ffbddee3454e`, cut from `dcf2cdf`. `npm run gates` exited 0 with the new gate third in the chain: 14 plans checked, every probe rule fired, and the fleet cross-check agreed with `fleet/scripts/lib/work-docs-format.mjs` on all 23 texts. 218 tests passed. `git diff dcf2cdf -- src/ test/` was empty, and `verify` and `verify:run` reproduced line for line apart from `Elapsed` (60 and 80 lines compared).
 
 Sixteen mutations are recorded with their exact failure text in `docs/learning/gate-proofs.md`. No existing plan needed repair.
+
+This plan is the first limitation below, demonstrated on itself. It read `Status: active` and "Not merged" from `5f51827` on 2026-09-10 until a final acceptance review read it on 2026-09-22, through every run of the gate it describes.
 
 Limitations, stated in the gate's header and repeated here because they are what the next defect will come from: the gate says nothing about whether a plan is **true**. `Status: complete` on unfinished work passes, and so does an `## Outcome` reading "Pending" on a closed unit. It does not check `registry.json`, the allocation lock, or Git attributes. And it does not check `reviews/<round>_<stage>.md` format, because no review round exists in this repo yet and a rule that scans nothing reports "did not run" as "passed" — that hole is named rather than covered by a rule with no inputs.

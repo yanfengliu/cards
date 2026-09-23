@@ -23,7 +23,13 @@
  * inspected. Sigils add five: the hero sigil offer after an elite, a shelf
  * holding a card sigil, the attach screen, the fight with a sigilled card in
  * the line hovered so its panel is open, and the hero hovered once the run
- * holds a hero sigil, which is the only screen that names them in full.
+ * holds a hero sigil, which is the only screen that names them in full. A
+ * sixth is the shelf after a hero sigil that moved the maximum, which is the
+ * screen whose opening line once printed the old maximum. Every hero sigil
+ * offer and every shelf has that line, the HUD's Health and the HUD's sigil
+ * chips read off the page and held to the run (`checkWonLine`), and every
+ * fight's end banner has the HUD's Health held to the banner and the run
+ * (`checkEndBanner`) - every time, not only when a screen is shot.
  *
  * **The class is a parameter, and `all` is the default.** It was the Knight,
  * hardcoded, for the whole unit that added the other two - so the Ranger and
@@ -62,6 +68,7 @@ import { runRun, travelOptions } from '../../src/run/run.ts';
 import type { RunState } from '../../src/run/types.ts';
 import { earnedBy, unlockedRewards } from '../../src/run/unlocks.ts';
 import { makeRunAgent } from '../../src/sim/runbots.ts';
+import { STAT_TERMS } from '../../src/render/glossary.ts';
 import { createRunController } from '../../src/ui/run.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -104,6 +111,109 @@ async function look(page: Page): Promise<{ subtitle: string; screen: string; rea
       over: title.startsWith('The run is'),
     };
   });
+}
+
+/**
+ * The line a won fight's screen opens with, and the HUD above it - its Health
+ * and its hero sigil chips - held to the run.
+ *
+ * The reward shelf once built this line itself and read its maximum off the
+ * run state, which does not move until the node commits. After the Sigil of
+ * the Oak it said "146 of 180 Health" under a HUD reading 146/210, and the
+ * HUD's chips had no Oak until the shelf was answered. `test/ui-won.test.ts`
+ * holds the functions that draw both. What that test cannot see is the page:
+ * whether `renderNode` and `renderHud` still call those functions. This reads
+ * all three off the screen.
+ */
+async function checkWonLine(
+  page: Page,
+  seed: number,
+  classId: string,
+  want: {
+    readonly healthAfter: number;
+    readonly maxHealthAfter: number;
+    readonly heroSigilsAfter: readonly { readonly id: string }[];
+  },
+  where: string,
+): Promise<void> {
+  const seen = await page.evaluate(() => ({
+    lead: document.querySelector('#run-node .run__lead')?.textContent ?? '',
+    hud: document.querySelector('.hud__stat--health')?.textContent ?? '',
+    chips: Array.from(document.querySelectorAll('.hud__stat--sigil')).map(
+      (el) => (el as HTMLElement).dataset['sigilId'] ?? '(a chip with no sigil id)',
+    ),
+  }));
+  const said = new RegExp(`(\\d+) of (\\d+) ${STAT_TERMS.health.name}`).exec(seen.lead);
+  const hud = /(\d+)\s*\/\s*(\d+)/.exec(seen.hud);
+  if (said === null || hud === null) {
+    throw new Error(
+      `seed ${seed} as the ${classId}: the ${where} screen or the HUD states no ${STAT_TERMS.health.name}. ` +
+        `Screen: "${seen.lead}". HUD: "${seen.hud}".`,
+    );
+  }
+  const truth = `${want.healthAfter} of ${want.maxHealthAfter}`;
+  if (`${said[1]} of ${said[2]}` !== truth || `${hud[1]} of ${hud[2]}` !== truth) {
+    throw new Error(
+      `seed ${seed} as the ${classId}: the ${where} screen says "${said[1]} of ${said[2]} ` +
+        `${STAT_TERMS.health.name}", the HUD says ${hud[1]}/${hud[2]}, and the run holds ${truth}.`,
+    );
+  }
+  const held = want.heroSigilsAfter.map((s) => s.id);
+  if (seen.chips.join(',') !== held.join(',')) {
+    throw new Error(
+      `seed ${seed} as the ${classId}: on the ${where} screen the HUD's sigil chips show ` +
+        `[${seen.chips.join(', ')}] and the run holds [${held.join(', ')}].`,
+    );
+  }
+}
+
+/** What the HUD and the end banner say, read before "Take your reward" hands the fight over. */
+async function readEndBanner(page: Page): Promise<{ readonly hud: string; readonly banner: string }> {
+  // The button is made by the same `onFightOver` that redraws the HUD, so
+  // once it is there the HUD has been drawn for the finished fight.
+  await page.waitForSelector('[data-run="finish-fight"]');
+  return page.evaluate(() => ({
+    hud: document.querySelector('.hud__stat--health')?.textContent ?? '',
+    banner: document.querySelector('.banner')?.textContent ?? '',
+  }));
+}
+
+/**
+ * The HUD over a fight's end banner, held to the banner and to the run.
+ *
+ * Until "Take your reward" hands the outcome over, the run state still holds
+ * the Health the hero walked in with, and the HUD once showed it: 200/200
+ * under "Your hero finished on 194 of 200 Health". The truth is what the
+ * mirror holds once it has been handed the same fight - the next phase's
+ * numbers after a win, the committed run after a loss. On a win the banner's
+ * own sentence is a second witness, written by the fight screen from the
+ * fight, but only for the Health the hero finished on: its "of" is the fight's
+ * maximum, which is the Health the hero walked in with (`heroSpecFor` hands a
+ * fight the run's Health, not its maximum), so after a damaged fight it reads
+ * "186 of 194" under a HUD rightly reading 186/200.
+ */
+function checkEndBanner(
+  seen: { readonly hud: string; readonly banner: string },
+  holds: { readonly health: number; readonly maxHealth: number },
+  seed: number,
+  classId: string,
+  fightNo: number,
+): void {
+  const where = `seed ${seed} as the ${classId}, fight ${fightNo}`;
+  const hud = /(\d+)\s*\/\s*(\d+)/.exec(seen.hud);
+  if (hud === null) {
+    throw new Error(`${where}: the HUD over the end banner states no ${STAT_TERMS.health.name}. HUD: "${seen.hud}".`);
+  }
+  const truth = `${holds.health} of ${holds.maxHealth}`;
+  const banner = new RegExp(`Your hero finished on (\\d+) of \\d+ ${STAT_TERMS.health.name}`).exec(seen.banner);
+  const finishedOn = banner === null ? null : Number(banner[1]);
+  if (`${hud[1]} of ${hud[2]}` !== truth || (finishedOn !== null && finishedOn !== holds.health)) {
+    throw new Error(
+      `${where}: over the end banner the HUD says ${hud[1]}/${hud[2]}` +
+        `${finishedOn === null ? '' : `, the banner says the hero finished on ${finishedOn}`}, ` +
+        `and the run holds ${truth}.`,
+    );
+  }
 }
 
 /**
@@ -398,6 +508,8 @@ async function playRun(
           );
         }
         await page.waitForSelector('.banner');
+        const fightNo = mirror.state.fightsFought + 1;
+        const atBanner = await readEndBanner(page);
         await shoot(page, dir, expect.fight.result === 'playerWin' ? 'fight-won' : 'fight-lost', taken);
         // The last thing the player reads. A screenshot only shows the log's
         // scrolled viewport, and the lines this run was changed for - the tail
@@ -411,13 +523,24 @@ async function playRun(
             .slice(-8)
             .map((el) => (el.textContent ?? '').trim()),
         );
-        console.log(`   [log tail] ${classId} fight ${mirror.state.fightsFought + 1}: ${tail.join(' | ')}`);
+        console.log(`   [log tail] ${classId} fight ${fightNo}: ${tail.join(' | ')}`);
         await page.locator('[data-run="finish-fight"]').click();
         mirror.finishFight({ fight: expect.fight, rounds: expect.log });
+        const next = mirror.phase;
+        checkEndBanner(
+          atBanner,
+          'maxHealthAfter' in next
+            ? { health: next.healthAfter, maxHealth: next.maxHealthAfter }
+            : { health: mirror.state.hero.health, maxHealth: mirror.state.hero.maxHealth },
+          seed,
+          classId,
+          fightNo,
+        );
         break;
       }
       case 'sigil': {
         await page.waitForSelector('[data-run="sigil"]');
+        await checkWonLine(page, seed, classId, phase, 'hero sigil');
         await shoot(page, dir, 'sigil-offer', taken);
         const shownIds: string[] = await page.evaluate(() =>
           Array.from(document.querySelectorAll('[data-run="sigil"][data-sigil-id]')).map(
@@ -435,8 +558,14 @@ async function playRun(
       }
       case 'reward': {
         await page.waitForSelector('[data-run="reward"]');
+        await checkWonLine(page, seed, classId, phase, 'reward');
         const hasSigil = phase.offer.some((o) => o.kind === 'sigil');
         await shoot(page, dir, hasSigil ? 'reward-sigil' : 'reward', taken);
+        // The screen the maximum was once wrong on: a shelf after a hero sigil
+        // that moved it. Shot the first time, beside the ordinary one.
+        if (phase.maxHealthAfter !== mirror.state.hero.maxHealth) {
+          await shoot(page, dir, 'reward-max-health-moved', taken);
+        }
         const shownSigils = await page.locator('[data-run="reward"][data-sigil-id]').count();
         if (shownSigils !== phase.offer.filter((o) => o.kind === 'sigil').length) {
           throw new Error(`seed ${seed}: the shelf shows ${shownSigils} sigil(s) and the run offers ${hasSigil ? 1 : 0}`);

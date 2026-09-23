@@ -1,6 +1,6 @@
 # Cards — design of record
 
-Status: **playable**. One fight plays end to end in the browser on a headless deterministic engine, and a run — three acts, a branching map, a persistent hero — exists headlessly and is being wired to the UI. Every number here is a starting guess with a reason attached, not a balanced value. The worked example is the specification; the prose around it is commentary. Decisions marked **[owner]** were made by the owner directly and are not open for an agent to reverse without asking.
+Status: **playable**. A whole run plays end to end in the browser on a headless deterministic engine — a class pick, three acts of branching map, a hero whose Health persists across them, sigils, and unlocks that carry into the next run. Every number here is a starting guess with a reason attached, not a balanced value. The worked example is the specification; the prose around it is commentary. Decisions marked **[owner]** were made by the owner directly and are not open for an agent to reverse without asking.
 
 ## The pitch
 

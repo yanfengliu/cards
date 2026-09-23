@@ -1,9 +1,9 @@
 # Races become mechanical tribes
 
-Status: active
+Status: complete
 Owner: coordinator
 Created: 2026-09-10
-Updated: 2026-09-10
+Updated: 2026-09-23
 
 Review round 1 is closed: six findings, six gates, eleven mutations. See "Review round 1" below.
 
@@ -61,7 +61,7 @@ Banner is Kindle with the race test inverted, and that is the design content rat
 - [x] **Before and after measurements captured and explained**, not suppressed.
 - [x] **Independent review of the engine changes.** Commissioned by the coordinator and run. It passed the resolver work — one mutation site, nothing announced by hand, board-index order gated, a queue and not a stack, no recursion, the act-case ordering right and gated, and the hash omission correct — and returned six findings about what was *not* gated. All six are closed below.
 - [x] **Every review finding closed with a gate watched going red.** Six findings, six gates, eleven mutations, in `docs/learning/gate-proofs.md`.
-- [ ] **Merged to main.** The worker was told to commit on its branch and not merge.
+- [x] **Merged to main**, at `299fede`. The worker was told to commit on its branch and not merge, and the coordinator merged.
 
 ## Implementation steps
 
@@ -78,7 +78,7 @@ Banner is Kindle with the race test inverted, and that is the design content rat
 - [x] `ARCHITECTURE.md`'s verb list; `docs/design/game.md`'s trait list and walked example; devlog.
 - [x] Independent review, commissioned by the coordinator.
 - [x] Close all six review findings, each with a gate watched going red; re-run `npm run gates` and diff `npm run verify` against the base.
-- [ ] Merge. Coordinator's.
+- [x] Merge. Coordinator's, at `299fede`.
 
 ## Review round 1
 
@@ -108,7 +108,13 @@ That entry came with a read-only sweep for the same shape elsewhere, reported to
 
 ## Outcome
 
-Pending integration. Implemented and locally verified on branch `worktree-agent-a8d4d25fe3d5ac7c5`, cut from `dcf2cdf`; review round 1 closed on branch `worktree-agent-aacf45b44fe4cb1d7`, which carries `8efbbb2` and `main` at `5f51827`.
+**Merged to main at `299fede`**, "Integrate unit 11: races are mechanical, and a tripwire that was built for this failed", on 2026-09-10. It carries review round 1's close (`1b8900d`) and `main` at `5f51827`. The review was one-legged: the Codex lane was quota-blocked, as the integration commit records.
+
+**The checks that held, re-run on 2026-09-23** from a clean extraction of `299fede` with its own `package.json`: `npm run gates` exits 0. That is typecheck, both AST gates, `gate:work-plans` (14 plans), 236 of 236 tests, `npm run verify` at the same 9.75 pp gap (CI 5.61..13.89) the base revision had, and every `npm run verify:run` check, the strongest arm winning 178/200.
+
+Before the merge, this section read as follows, and it stands as the record of the branch.
+
+Implemented and locally verified on branch `worktree-agent-a8d4d25fe3d5ac7c5`, cut from `dcf2cdf`; review round 1 closed on branch `worktree-agent-aacf45b44fe4cb1d7`, which carries `8efbbb2` and `main` at `5f51827`.
 
 **Checks.** `npm run gates` green: typecheck, both AST gates, 230 tests (218 at the base), `npm run verify`, `npm run verify:run`. `npm audit --audit-level=high` clean — no dependency changed. Sixteen mutations, each applied to the shipped tree, run against the shipped command, reverted, and the bytes compared; all sixteen red for their own reason, in `docs/learning/gate-proofs.md`.
 

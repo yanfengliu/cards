@@ -1,9 +1,9 @@
 # Classes: Knight, Mage, Ranger
 
-Status: active
+Status: complete
 Owner: coordinator
 Created: 2026-09-10
-Updated: 2026-09-10
+Updated: 2026-09-23
 
 ## Problem and outcome
 
@@ -58,7 +58,7 @@ The fourth session closed the independent review, on branch `worktree-agent-a203
 - [x] `npm run gates` passes and `npm run verify` is unchanged.
 - [x] Independent review of the resolver's ordering changes, which `AGENTS.md` makes high-risk. Commissioned by the coordinator against `8b4177c`. It found the resolver **sound** — all 22 mutations the test files claim to catch go red, deaths stay batched, ordering intact, mutual damage takes no new special case — and found four things in the surfaces the new verbs feed.
 - [x] The review's findings closed, each with a gate watched going red. Session four, below.
-- [ ] Merged to main. The coordinator owns integration.
+- [x] Merged to main, at `a974d04`. The coordinator owns integration.
 
 ## Implementation steps
 
@@ -67,11 +67,11 @@ The fourth session closed the independent review, on branch `worktree-agent-a203
 - [x] The class-pick screen and the `--class` flag - workers 1 and 2.
 - [x] The two test files - worker 2, `8b4177c`.
 - [x] Red proofs for the gates, per-class measurements, this plan, and the devlog - worker 3.
-- [ ] Independent review, integration, merge - coordinator.
+- [x] Independent review, integration, merge - coordinator. Two reviews, closed in sessions four and five; merged at `a974d04`.
 
-## Outcome
+## Session three — the record, and each class measured
 
-The code is done and gated; this session added the record of it and changed no behaviour.
+This was the Outcome until the merge. It stands as session three's record: the code was done and gated, and that session added the record of it and changed no behaviour.
 
 **Verified at** `8b4177c` plus this session's documentation commit. `npm run gates` passes: 189 tests, 189 pass, 0 fail. `npm run verify` reports a 9.75 pp optimal-vs-random gap (CI 5.61..13.89) against a 5.00 pp floor, byte-identical before and after this session apart from its `Elapsed` line. `npm run verify:run` passes all eight checks. Node v24.18.1.
 
@@ -138,3 +138,11 @@ The player-facing half went to the view, where it belongs: `buildBeats` drops a 
 **The probe plays all three classes now.** `tools/ui-probe/run.ts` hardcoded the Knight, so the Ranger and the Mage — the two classes the unit added — had never been played through the DOM. The class is a parameter and `all` is the default. Seed 7, light: the Knight dies after 18 nodes and 13 fights, the Ranger after 12 nodes and 9, the Mage after 9 nodes and 7, and all three page hashes match their own headless runs (`3d135f5e12b240ea`, `05c0abc0051e0c26`, `00d9697c77f5df89`). The probe also prints the log's last eight lines at every banner, because a screenshot shows only the log's scrolled viewport and the lines this change is about are the ones that scroll off it. `tools/ui-probe/pick.ts` was re-run for the same reason and is green.
 
 **Not done here.** The merge to main, and an independent re-review — `src/engine/resolver.ts` was touched, though only its comments, and `AGENTS.md` makes that file high-risk. Until the merge, this work is on branch `worktree-agent-ac92c8ed9709f58e2`.
+
+## Outcome
+
+**Merged to main at `a974d04`**, "Integrate unit 10: three classes, two new hero verbs, and two reviews' findings closed", on 2026-09-10. It carries session five's close (`12d6648`). Both reviews were one-legged, as the integration commit records: the Codex lane was quota-blocked, so the second lens was an in-harness subagent whose claims the reviewer checked rather than adopted. No third engine review was commissioned, because the resolver's diff in the final round was comments only.
+
+**The checks that held, re-run on 2026-09-23** from a clean extraction of `a974d04` with its own `package.json`: `npm run gates` exits 0. At that revision the chain was typecheck, `gate:boundaries`, `gate:banned-apis`, 199 of 199 tests, `npm run verify` at a 9.75 pp gap (CI 5.61..13.89), and every `npm run verify:run` check; `gate:work-plans` did not exist until `5f51827`. The strongest `verify:run` arm won 31/200 there, with sigils still out of scope, which unit 9 changed after.
+
+The per-class measurements are in session three above, and they are measurements of the options rather than targets, per `docs/policies/local-rules.md`.

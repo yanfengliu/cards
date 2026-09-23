@@ -44,11 +44,13 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 
 import { ENEMY_CARDS, PLAYER_CARDS, PLAYER_HERO } from '../src/content/cards.ts';
 import { CLASSES } from '../src/content/classes.ts';
+import { GATED_IDS } from '../src/content/unlocks.ts';
 import { RELAY_POWER, WAKE_POWER, drain } from '../src/engine/resolver.ts';
 import { makeRng } from '../src/engine/rng.ts';
 import {
@@ -212,6 +214,151 @@ test('an unknown race gets a truthful placeholder rather than a blank', () => {
   const term = tribeTerm('gnome');
   assert.equal(term.name, 'gnome');
   assert.match(term.line, /no entry/);
+});
+
+// ------------------------------------------ what a new player can be pointed at
+
+// The race tooltips used to name the Captain and the Champion as humans and the
+// Sentinel as an elf - typed into the sentence, and all three gated - so a
+// player on a fresh profile was pointed at cards they could not draft, and the
+// tribal cards went unnamed. The two gates below hold the class, not the three
+// names: nothing a player reads in the view may name a card a fresh profile
+// cannot draft.
+//
+// Bound: "cannot draft" is read straight off the content - a card in
+// `GATED_IDS`, or one no class starts with and no class pool lists - so the
+// list follows every gating change, including ones not made yet. It is read
+// there and not through `unlockedRewards`, because that is the call the
+// glossary picks its examples with, and a gate built on the same call agrees
+// with the glossary whenever the call is wrong. A card is "named" when its full
+// name, or its name without its first word ("Captain" for "Human Captain"),
+// appears at the start of a word, case-sensitive, so "Captains" counts and
+// "captain" does not; the short name is worked out here rather than by the
+// glossary's own helper, for the same reason. The first gate reads the race
+// tooltips as rendered; the second reads every string typed under
+// `src/render/` and `src/ui/` - literals and template text off the TypeScript
+// AST, and `index.html` as text - so it sees a name typed anywhere in the view
+// and nothing built at run time from content, which is where names are meant
+// to come from. The Collection panel names locked cards on purpose, and it
+// builds those names from content, so it is outside both by construction.
+
+/** Every player card a fresh profile cannot hold: gated, or in no starting deck and no class pool. */
+function lockedAtAFreshProfile(): (typeof PLAYER_CARDS)[number][] {
+  const gated = new Set(GATED_IDS);
+  const starters = new Set(CLASSES.flatMap((c) => c.startingDeck));
+  const inAPool = new Set(CLASSES.flatMap((c) => c.rewards.map((r) => r.cardId)));
+  return PLAYER_CARDS.filter((c) => gated.has(c.id) || (!starters.has(c.id) && !inAPool.has(c.id)));
+}
+
+/** The words a card can be named by: its full name, and the name without its first word. */
+function namesOf(card: (typeof ALL_CARDS)[number]): string[] {
+  const words = card.name.split(' ');
+  return words.length > 1 ? [card.name, words.slice(1).join(' ')] : [card.name];
+}
+
+/** Does `text` name `name` at the start of a word? Plurals count; lower case does not. */
+function mentions(text: string, name: string): boolean {
+  return new RegExp(`(^|[^A-Za-z])${name.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}`).test(text);
+}
+
+test('a race tooltip points only at cards a fresh profile can draft', () => {
+  const locked = lockedAtAFreshProfile();
+  // The subject has to exist, or "names no locked card" is true of anything.
+  assert.ok(
+    locked.length > 0,
+    `no player card is out of a fresh profile's reach - GATED_IDS names none - so "the tooltip ` +
+      `names no locked card" would pass for any tooltip at all`,
+  );
+  const lockedIds = new Set(locked.map((c) => c.id));
+  for (const [tribe, term] of Object.entries(TRIBE_TERMS)) {
+    for (const card of locked) {
+      for (const name of namesOf(card)) {
+        assert.ok(
+          !mentions(term.line, name),
+          `The ${term.name} tooltip names "${name}" (${card.id}), which a player on a fresh profile ` +
+            `cannot draft:\n\n${term.line}\n\nName a card from a starting deck, or derive the example ` +
+            `through FRESH_UNLOCKS, as src/render/glossary.ts does.`,
+        );
+      }
+    }
+    // What it does name: at least one card, every one of its own race, and -
+    // for a race a fresh profile can draft a tribal card of - one of those.
+    const named = ALL_CARDS.filter((c) => namesOf(c).some((n) => mentions(term.line, n)));
+    if (tribe === 'hero') continue;
+    assert.ok(named.length > 0, `The ${term.name} tooltip names no card at all:\n\n${term.line}`);
+    for (const card of named) {
+      assert.equal(card.tribe, tribe, `The ${term.name} tooltip names ${card.name}, a ${card.tribe}:\n\n${term.line}`);
+      assert.ok(!lockedIds.has(card.id), `unreachable: ${card.id} was checked above`);
+    }
+    const tribalOnOffer = PLAYER_CARDS.some(
+      (c) => c.tribe === tribe && !lockedIds.has(c.id) && c.traits.some(isTribalTrait),
+    );
+    if (tribalOnOffer) {
+      assert.ok(
+        named.some((c) => c.traits.some(isTribalTrait)),
+        `A fresh profile can draft a ${term.name} card carrying a tribal trait, and the ${term.name} ` +
+          `tooltip names none - the one card that makes the race a rule:\n\n${term.line}`,
+      );
+    }
+  }
+});
+
+/** Every `.ts` file under `dir`, and every `.html`, repo-relative with forward slashes. */
+function viewFilesUnder(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string): void => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(ts|html)$/.test(entry.name)) out.push(path.relative(ROOT, full).split(path.sep).join('/'));
+    }
+  };
+  walk(path.join(ROOT, dir));
+  return out.sort();
+}
+
+/** The strings a file types: literals and template text off the AST, or the whole of an `.html`. */
+function typedStrings(rel: string): string[] {
+  const source = readFileSync(path.join(ROOT, rel), 'utf8');
+  if (rel.endsWith('.html')) return [source];
+  const out: string[] = [];
+  const visit = (n: ts.Node): void => {
+    if (ts.isStringLiteralLike(n)) out.push(n.text);
+    if (ts.isTemplateExpression(n)) {
+      out.push(n.head.text);
+      for (const span of n.templateSpans) out.push(span.literal.text);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(ts.createSourceFile(rel, source, ts.ScriptTarget.ES2023, true, ts.ScriptKind.TS));
+  return out;
+}
+
+test('no string typed into the view names a card a fresh profile cannot draft', () => {
+  const locked = lockedAtAFreshProfile();
+  assert.ok(locked.length > 0, 'GATED_IDS names no player card, so this scan would have nothing to look for');
+  const files = [...viewFilesUnder('src/render'), ...viewFilesUnder('src/ui')];
+  // The walk found its subject: both directories, the glossary and the page.
+  for (const must of ['src/render/glossary.ts', 'src/ui/runapp.ts', 'src/ui/index.html']) {
+    assert.ok(files.includes(must), `the walk over the view did not find ${must}; it is reading the wrong tree`);
+  }
+  let strings = 0;
+  for (const rel of files) {
+    for (const text of typedStrings(rel)) {
+      strings++;
+      for (const card of locked) {
+        for (const name of namesOf(card)) {
+          assert.ok(
+            !mentions(text, name),
+            `${rel} types "${name}" (${card.id}) into a string the player can read, and a fresh ` +
+              `profile cannot draft it:\n\n${text.slice(0, 300)}\n\nRead card names from the content ` +
+              `at the point they are shown, never type one.`,
+          );
+        }
+      }
+    }
+  }
+  assert.ok(strings >= 1000, `only ${strings} typed strings found under src/render/ and src/ui/; the AST walk is not reading them`);
 });
 
 // -------------------------------------------------------------- truthfulness

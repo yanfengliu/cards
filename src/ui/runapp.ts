@@ -69,8 +69,8 @@ import {
 import { cardEntityView } from '../render/view.ts';
 import type { RunLog } from '../run/types.ts';
 import { type FightOutcome, createFightScreen, initialTheme, need } from './app.ts';
-import { type NodeOutcome, type RunController, createRunController } from './run.ts';
-import { attachHtml, heroSigilChips, heroSigilOfferHtml, sigilMarks, sigilOutcomeWords, sigilShelfButton } from './sigils.ts';
+import { type NodeOutcome, type RunController, createRunController, heroNow } from './run.ts';
+import { attachHtml, heroSigilChips, heroSigilOfferHtml, rewardHtml, sigilMarks, sigilOutcomeWords } from './sigils.ts';
 import { escapeHtml as esc } from '../render/escape.ts';
 
 /**
@@ -480,6 +480,9 @@ export function startRunApp(): void {
         `<button type="button" class="btn--primary" data-run="finish-fight">` +
         `${won ? 'Take your reward' : 'See how the run ended'} →</button>`;
       dom.after.hidden = false;
+      // The banner says what the fight left the hero on; the HUD above it
+      // has to say the same, not the Health the hero walked in with.
+      renderHud();
     },
     resolveCard: (id) => {
       try {
@@ -629,12 +632,13 @@ export function startRunApp(): void {
       dom.subtitle.textContent =
         `${className()} · Act ${act + 1} of ${RUN_CONTENT.acts.length} — ${actName(act)} · ${where}`;
     }
-    // A won fight's screens promise the numbers the replay will set, hero
-    // sigil included, so the HUD reads them off the phase until the commit.
-    const won = p.kind === 'reward' || p.kind === 'sigil' || p.kind === 'attach' ? p : null;
-    const health = won === null ? s.hero.health : won.healthAfter;
-    const maxHealth = won === null ? s.hero.maxHealth : won.maxHealthAfter;
-    const gold = won === null ? s.gold : won.goldAfter;
+    // From the moment a fight ends until its node commits, the state still
+    // holds what the hero brought in. So the HUD reads `heroNow`, the one
+    // function every screen in that window reads too: over the end banner it
+    // states what the finished fight settles, and on a won fight's screens the
+    // numbers the replay will set, hero sigil included. The sigil chips as well:
+    // a sigil taken at this node is not in the state until it commits.
+    const { health, maxHealth, gold, heroSigils } = heroNow(s, p, pendingFight);
     const frac = health / Math.max(1, maxHealth);
     dom.status.innerHTML =
       `<span class="hud__stat hud__stat--health" title="${esc(`Your hero's Health. It persists across the whole run and is only healed at a rest, by an event, or by a hero sigil.`)}">` +
@@ -647,7 +651,7 @@ export function startRunApp(): void {
       `<span class="hud__stat" title="Cards in your deck. Rewards, shops and events add to it; nothing removes from it.">` +
       iconSvg('deck', { size: 13, label: 'cards in deck' }) +
       `<b>${s.deck.length}</b></span>` +
-      heroSigilChips(s) +
+      heroSigilChips(heroSigils) +
       `<span class="hud__stat hud__stat--seed" title="The run's seed. The same seed and the same choices replay the same run.">seed ${s.seed}</span>` +
       // Not during a fight: the collection needs the run panel, and showing
       // that panel idles the fight screen out from under the fight.
@@ -826,16 +830,7 @@ export function startRunApp(): void {
         `<p class="run__muted">${outcomeWords(o)}</p>` +
         `<p><button type="button" class="btn--primary" data-run="continue">Onward</button></p>`;
     } else if (p.kind === 'reward') {
-      const f = p.outcome.fight;
-      html =
-        `<h2 class="run__title">${iconSvg(NODE_ICON[p.node.type], { size: 22, decorative: true })} ${esc(p.encounter.name)} beaten</h2>` +
-        `<p class="run__lead">Won in ${f.round} round${f.round === 1 ? '' : 's'}. Your hero stands at <b>${p.healthAfter}</b> of ${s.hero.maxHealth} ${STAT_TERMS.health.name}.` +
-        ` <b>+${p.goldAfter - s.gold} gold</b> — you now have ${p.goldAfter}.</p>` +
-        `<p>Take one ${p.offer.some((o) => o.kind === 'sigil') ? 'card into your deck, or the sigil for a card you already hold,' : 'card into your deck,'} or none:</p>` +
-        `<div class="run__offer">${p.offer
-          .map((o, i) => (o.kind === 'card' ? cardButton(CARD_POOL.card(o.cardId), `data-run="reward" data-pick="${i}"`) : sigilShelfButton(o.sigil, i)))
-          .join('')}</div>` +
-        `<p><button type="button" data-run="reward" data-pick="-1">Take nothing</button></p>`;
+      html = rewardHtml(p, s, cardButton);
     } else if (p.kind === 'sigil') {
       html = heroSigilOfferHtml(p, s);
     } else if (p.kind === 'attach') {
