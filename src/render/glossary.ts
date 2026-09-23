@@ -296,6 +296,9 @@ export function tribeTerm(tribe: string): Term {
  *
  * `test/explain.test.ts` holds both the sentence and every string typed under
  * `src/render/` and `src/ui/` to naming no card a fresh profile cannot draft.
+ * It reads that list off `GATED_IDS` and the class lists itself, not through
+ * `unlockedRewards`, so a narrowing that went wrong here would not fool the
+ * gate the same way.
  */
 const IN_A_STARTING_DECK = new Set<string>(CLASSES.flatMap((c) => c.startingDeck));
 
@@ -307,7 +310,7 @@ const FRESH_DRAFTABLE = new Set<string>(
  * A card's name inside its own race's sentence: "Dwarf Pikeman" is the
  * Pikeman there, and a name without its race in front is left whole.
  */
-export function nameInRace(card: UnitCard, raceName: string): string {
+function nameInRace(card: UnitCard, raceName: string): string {
   const prefix = `${raceName} `;
   return card.name.startsWith(prefix) ? card.name.slice(prefix.length) : card.name;
 }

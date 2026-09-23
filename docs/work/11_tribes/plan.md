@@ -3,7 +3,7 @@
 Status: complete
 Owner: coordinator
 Created: 2026-09-10
-Updated: 2026-09-22
+Updated: 2026-09-23
 
 Review round 1 is closed: six findings, six gates, eleven mutations. See "Review round 1" below.
 
@@ -110,7 +110,7 @@ That entry came with a read-only sweep for the same shape elsewhere, reported to
 
 **Merged to main at `299fede`**, "Integrate unit 11: races are mechanical, and a tripwire that was built for this failed", on 2026-09-10. It carries review round 1's close (`1b8900d`) and `main` at `5f51827`. The review was one-legged: the Codex lane was quota-blocked, as the integration commit records.
 
-**The checks that held, re-run on 2026-09-22** from a clean extraction of `299fede` with its own `package.json`: `npm run gates` exits 0. That is typecheck, both AST gates, `gate:work-plans` (14 plans), 236 of 236 tests, `npm run verify` at the same 9.75 pp gap (CI 5.61..13.89) the base revision had, and every `npm run verify:run` check, the strongest arm winning 178/200.
+**The checks that held, re-run on 2026-09-23** from a clean extraction of `299fede` with its own `package.json`: `npm run gates` exits 0. That is typecheck, both AST gates, `gate:work-plans` (14 plans), 236 of 236 tests, `npm run verify` at the same 9.75 pp gap (CI 5.61..13.89) the base revision had, and every `npm run verify:run` check, the strongest arm winning 178/200.
 
 Before the merge, this section read as follows, and it stands as the record of the branch.
 

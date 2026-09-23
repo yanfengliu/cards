@@ -50,8 +50,7 @@ import ts from 'typescript';
 
 import { ENEMY_CARDS, PLAYER_CARDS, PLAYER_HERO } from '../src/content/cards.ts';
 import { CLASSES } from '../src/content/classes.ts';
-import { FRESH_UNLOCKS } from '../src/content/unlocks.ts';
-import { unlockedRewards } from '../src/run/unlocks.ts';
+import { GATED_IDS } from '../src/content/unlocks.ts';
 import { RELAY_POWER, WAKE_POWER, drain } from '../src/engine/resolver.ts';
 import { makeRng } from '../src/engine/rng.ts';
 import {
@@ -75,7 +74,6 @@ import {
   TINCTURE_TERMS,
   TRAIT_TERMS,
   TRIBE_TERMS,
-  nameInRace,
   tribeTerm,
 } from '../src/render/glossary.ts';
 import { CLASS_TERMS } from '../src/render/class-terms.ts';
@@ -227,32 +225,35 @@ test('an unknown race gets a truthful placeholder rather than a blank', () => {
 // names: nothing a player reads in the view may name a card a fresh profile
 // cannot draft.
 //
-// Bound: "cannot draft" is read off the content - not in any class's starting
-// deck, and not in any class's pool once `FRESH_UNLOCKS` has narrowed it - so
-// the list follows every gating change, including ones not made yet. A card is
-// "named" when its full name or its name without the race in front appears at
-// the start of a word, case-sensitive, so "Captains" counts and "captain" does
-// not. The first gate reads the race tooltips as rendered; the second reads
-// every string typed under `src/render/` and `src/ui/` - literals and template
-// text off the TypeScript AST, and `index.html` as text - so it sees a name
-// typed anywhere in the view and nothing built at run time from content, which
-// is where names are meant to come from. The Collection panel names locked
-// cards on purpose, and it builds those names from content, so it is outside
-// both by construction.
+// Bound: "cannot draft" is read straight off the content - a card in
+// `GATED_IDS`, or one no class starts with and no class pool lists - so the
+// list follows every gating change, including ones not made yet. It is read
+// there and not through `unlockedRewards`, because that is the call the
+// glossary picks its examples with, and a gate built on the same call agrees
+// with the glossary whenever the call is wrong. A card is "named" when its full
+// name, or its name without its first word ("Captain" for "Human Captain"),
+// appears at the start of a word, case-sensitive, so "Captains" counts and
+// "captain" does not; the short name is worked out here rather than by the
+// glossary's own helper, for the same reason. The first gate reads the race
+// tooltips as rendered; the second reads every string typed under
+// `src/render/` and `src/ui/` - literals and template text off the TypeScript
+// AST, and `index.html` as text - so it sees a name typed anywhere in the view
+// and nothing built at run time from content, which is where names are meant
+// to come from. The Collection panel names locked cards on purpose, and it
+// builds those names from content, so it is outside both by construction.
 
-/** Every player card a fresh profile can never hold: in no starting deck, and not draftable. */
+/** Every player card a fresh profile cannot hold: gated, or in no starting deck and no class pool. */
 function lockedAtAFreshProfile(): (typeof PLAYER_CARDS)[number][] {
+  const gated = new Set(GATED_IDS);
   const starters = new Set(CLASSES.flatMap((c) => c.startingDeck));
-  const draftable = new Set(
-    CLASSES.flatMap((c) => unlockedRewards(FRESH_UNLOCKS, c.rewards).map((r) => r.cardId)),
-  );
-  return PLAYER_CARDS.filter((c) => !starters.has(c.id) && !draftable.has(c.id));
+  const inAPool = new Set(CLASSES.flatMap((c) => c.rewards.map((r) => r.cardId)));
+  return PLAYER_CARDS.filter((c) => gated.has(c.id) || (!starters.has(c.id) && !inAPool.has(c.id)));
 }
 
-/** The words a card can be named by: its name, and its name inside its own race's sentence. */
+/** The words a card can be named by: its full name, and the name without its first word. */
 function namesOf(card: (typeof ALL_CARDS)[number]): string[] {
-  const inRace = nameInRace(card, tribeTerm(card.tribe).name);
-  return inRace === card.name ? [card.name] : [card.name, inRace];
+  const words = card.name.split(' ');
+  return words.length > 1 ? [card.name, words.slice(1).join(' ')] : [card.name];
 }
 
 /** Does `text` name `name` at the start of a word? Plurals count; lower case does not. */
@@ -264,9 +265,9 @@ test('a race tooltip points only at cards a fresh profile can draft', () => {
   const locked = lockedAtAFreshProfile();
   // The subject has to exist, or "names no locked card" is true of anything.
   assert.ok(
-    locked.length >= 7,
-    `only ${locked.length} player card(s) are out of a fresh profile's reach; the content gates ` +
-      `seven or more, so this check is reading the wrong list`,
+    locked.length > 0,
+    `no player card is out of a fresh profile's reach - GATED_IDS names none - so "the tooltip ` +
+      `names no locked card" would pass for any tooltip at all`,
   );
   const lockedIds = new Set(locked.map((c) => c.id));
   for (const [tribe, term] of Object.entries(TRIBE_TERMS)) {
@@ -335,6 +336,7 @@ function typedStrings(rel: string): string[] {
 
 test('no string typed into the view names a card a fresh profile cannot draft', () => {
   const locked = lockedAtAFreshProfile();
+  assert.ok(locked.length > 0, 'GATED_IDS names no player card, so this scan would have nothing to look for');
   const files = [...viewFilesUnder('src/render'), ...viewFilesUnder('src/ui')];
   // The walk found its subject: both directories, the glossary and the page.
   for (const must of ['src/render/glossary.ts', 'src/ui/runapp.ts', 'src/ui/index.html']) {

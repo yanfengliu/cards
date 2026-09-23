@@ -3,7 +3,7 @@
 Status: complete
 Owner: coordinator
 Created: 2026-09-10
-Updated: 2026-09-22
+Updated: 2026-09-23
 
 ## Problem and outcome
 
@@ -143,6 +143,6 @@ The player-facing half went to the view, where it belongs: `buildBeats` drops a 
 
 **Merged to main at `a974d04`**, "Integrate unit 10: three classes, two new hero verbs, and two reviews' findings closed", on 2026-09-10. It carries session five's close (`12d6648`). Both reviews were one-legged, as the integration commit records: the Codex lane was quota-blocked, so the second lens was an in-harness subagent whose claims the reviewer checked rather than adopted. No third engine review was commissioned, because the resolver's diff in the final round was comments only.
 
-**The checks that held, re-run on 2026-09-22** from a clean extraction of `a974d04` with its own `package.json`: `npm run gates` exits 0. At that revision the chain was typecheck, `gate:boundaries`, `gate:banned-apis`, 199 of 199 tests, `npm run verify` at a 9.75 pp gap (CI 5.61..13.89), and every `npm run verify:run` check; `gate:work-plans` did not exist until `5f51827`. The strongest `verify:run` arm won 31/200 there, with sigils still out of scope, which unit 9 changed after.
+**The checks that held, re-run on 2026-09-23** from a clean extraction of `a974d04` with its own `package.json`: `npm run gates` exits 0. At that revision the chain was typecheck, `gate:boundaries`, `gate:banned-apis`, 199 of 199 tests, `npm run verify` at a 9.75 pp gap (CI 5.61..13.89), and every `npm run verify:run` check; `gate:work-plans` did not exist until `5f51827`. The strongest `verify:run` arm won 31/200 there, with sigils still out of scope, which unit 9 changed after.
 
 The per-class measurements are in session three above, and they are measurements of the options rather than targets, per `docs/policies/local-rules.md`.
