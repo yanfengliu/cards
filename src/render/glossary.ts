@@ -284,27 +284,46 @@ export function tribeTerm(tribe: string): Term {
  * way a typed list in a gate does, and for the same reason: the author gating a
  * card has no reason to open the glossary.
  *
- * So the examples come from two places a fresh profile always reaches:
+ * **The sentence is the same for every class** - the panel is not told which
+ * class is playing - so each card it names has to be true for whichever class
+ * reads it. "Can hold" below means from a class's first run: in its starting
+ * deck, or in its pool and not gated, read through the same `unlockedRewards`
+ * the draft narrows by. A fresh profile is the floor, because an unlock only
+ * ever widens a pool.
  *
- *   - **Every class's starting deck.** A run is handed its whole deck on turn
- *     one, and `src/content/unlocks.ts` refuses at load to gate a card any
- *     starting deck names, so these can never be locked.
- *   - **One tribal card per race**, the cheapest one a fresh profile can draft,
- *     through the same `unlockedRewards` the draft itself narrows by. Gating it
- *     takes it out of this sentence in the same edit; if a race has none left,
- *     the sentence says nothing about one.
+ *   - **The starting-deck cards.** `src/content/unlocks.ts` refuses at load to
+ *     gate a card any starting deck names, but that keeps a card unlocked
+ *     only for the class whose deck it is. So a starter every class can hold
+ *     is named plainly, and one some class can never hold is named as the
+ *     class that starts with it: "the Mage's Herald". Until the final
+ *     acceptance review of `907c8e9` all of them were named plainly, so the
+ *     Knight read about the Herald, the Archer and the Treewarden, which it
+ *     can never hold at any unlock set, the Ranger about the Ironguard and the
+ *     Treewarden, and the Mage about the Hornblower and the Archer.
+ *   - **One tribal card per race**, the cheapest one every class can draft at
+ *     a fresh profile, named plainly. Gating it, or dropping it from one
+ *     class's pool, takes it out of this sentence in the same edit; if a race
+ *     has none left, the sentence says nothing about one.
  *
- * `test/explain.test.ts` holds both the sentence and every string typed under
- * `src/render/` and `src/ui/` to naming no card a fresh profile cannot draft.
- * It reads that list off `GATED_IDS` and the class lists itself, not through
- * `unlockedRewards`, so a narrowing that went wrong here would not fool the
- * gate the same way.
+ * `test/explain.test.ts` holds the sentence, for each class on its own, to
+ * naming plainly no card that class cannot hold at a fresh profile, and to
+ * giving a card only to a class that starts with it. It also holds every
+ * string typed under `src/render/` and `src/ui/` to naming no card a fresh
+ * profile cannot draft. It reads all of that off `GATED_IDS` and the class
+ * lists itself, not through `unlockedRewards`, so a narrowing that went wrong
+ * here would not fool the gate the same way.
  */
 const IN_A_STARTING_DECK = new Set<string>(CLASSES.flatMap((c) => c.startingDeck));
 
-const FRESH_DRAFTABLE = new Set<string>(
-  CLASSES.flatMap((c) => unlockedRewards(FRESH_UNLOCKS, c.rewards).map((r) => r.cardId)),
+/** Every card each class can hold from its first run, one set per class. */
+const HOLDABLE_FROM_THE_FIRST_RUN: readonly ReadonlySet<string>[] = CLASSES.map(
+  (c) => new Set<string>([...c.startingDeck, ...unlockedRewards(FRESH_UNLOCKS, c.rewards).map((r) => r.cardId)]),
 );
+
+/** Can every class hold this card from its first run? */
+function everyClassHolds(id: string): boolean {
+  return HOLDABLE_FROM_THE_FIRST_RUN.every((held) => held.has(id));
+}
 
 /**
  * A card's name inside its own race's sentence: "Dwarf Pikeman" is the
@@ -315,14 +334,27 @@ function nameInRace(card: UnitCard, raceName: string): string {
   return card.name.startsWith(prefix) ? card.name.slice(prefix.length) : card.name;
 }
 
-/** "Your line's heavy bodies — the Shieldbearer, ... The Kindler carries Kindle, ..." */
+/** "Your line's heavy bodies — the Shieldbearer, ..., and the Knight’s Ironguard. The Kindler carries Kindle, ..." */
 function playerRaceLine(tribe: Tribe, raceName: string, kind: string): string {
   const own = PLAYER_CARDS.filter((c) => c.tribe === tribe);
-  const starters = own.filter((c) => IN_A_STARTING_DECK.has(c.id)).map((c) => nameInRace(c, raceName));
+  const starters = own.filter((c) => IN_A_STARTING_DECK.has(c.id));
+  const plain = starters.filter((c) => everyClassHolds(c.id)).map((c) => nameInRace(c, raceName));
+  const groups = [
+    ...(plain.length === 0 ? [] : [`the ${listWords(plain)}`]),
+    ...starters
+      .filter((c) => !everyClassHolds(c.id))
+      .map((c) => {
+        const owners = CLASSES.filter((cls) => cls.startingDeck.includes(c.id)).map((cls) => `${cls.name}’s`);
+        return `the ${listWords(owners)} ${nameInRace(c, raceName)}`;
+      }),
+  ];
   const tribal = own
-    .filter((c) => FRESH_DRAFTABLE.has(c.id) && c.traits.some(isTribalTrait))
+    .filter((c) => everyClassHolds(c.id) && c.traits.some(isTribalTrait))
     .sort((a, b) => a.cost - b.cost)[0];
-  const list = starters.length === 0 ? '' : ` — the ${listWords(starters)}`;
+  const list =
+    groups.length === 0
+      ? ''
+      : ` — ${groups.length === 1 ? groups[0]! : `${groups.slice(0, -1).join(', ')}, and ${groups[groups.length - 1]!}`}`;
   const reads =
     tribal === undefined
       ? ''
