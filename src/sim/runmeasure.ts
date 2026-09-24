@@ -387,8 +387,8 @@ export type RunInstrument = {
    * pool nothing granted, a hero Power or Armour that is not the content's
    * plus the ledger's or a hero Health that is not the run's, any other field
    * of a deck card or of the player's hero - a race, a name, the hero's
-   * traits - that moved on the way in, a fight that did not shuffle the
-   * run's whole deck, a hand size or Energy that moved, or an enemy hero
+   * traits - that moved on the way in, a fight whose shuffled deck is not the
+   * run's deck, a hand size or Energy that moved, or an enemy hero
    * whose Power or Armour is not what its act prints. Nothing else of the
    * enemy side is compared. A fight the watch did not read is listed here
    * too. Read in two places: in every fight each checked run played, as the

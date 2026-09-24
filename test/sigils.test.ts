@@ -587,7 +587,7 @@ test('foughtSigilProblems names what moved in a fight the engine holds, and watc
   );
 });
 
-test('the enemy hero’s Power and Armour are held to what the act prints for the node, with the pick restated rather than asked of encounterFor', () => {
+test('the enemy hero’s Power and Armour are held to what the act prints for the node, with the pick held on an act whose two elites and two ordinary fights differ', () => {
   // Both readings used to ask `encounterFor` what the enemy hero should be,
   // and `fightSetupFor` builds the fight out of `encounterFor`, so a boss
   // that gained the player's Power sigils inside it passed every gate. The
