@@ -27,8 +27,11 @@
 //   and `fightSigilProblems` are empty, and the population is asserted so a
 //   window that granted none fails rather than passes. `foughtSigilProblems`
 //   is made to fire here, on fixture fights at an elite and at the boss with
-//   one thing moved; holding every fight of every shipped class to its ledger
-//   is `test/classes.test.ts`'s.
+//   one thing moved. `watchFights`' tally of the fights that held a card sigil
+//   and of those that held a Power or Armour sigil is held where the right
+//   answer is 0 as well as 1: on fixture bosses holding one kind or none, and
+//   on a window that granted nothing. Holding every fight of every shipped
+//   class to its ledger is `test/classes.test.ts`'s.
 //   The log format: a format 1 log recorded before sigils existed upgrades to
 //   the current format and replays to the hash it had then. The two goldens
 //   are the bound - two seeds, two route styles, `RUN_CONTENT` as it stood.
@@ -89,7 +92,13 @@ import {
   runRun,
   startRun,
 } from '../src/run/run.ts';
-import { fightSigilProblems, foughtSigilProblems, sigilProblems, watchFights } from '../src/run/sigils.ts';
+import {
+  type FightTally,
+  fightSigilProblems,
+  foughtSigilProblems,
+  sigilProblems,
+  watchFights,
+} from '../src/run/sigils.ts';
 import {
   RUN_LOG_FORMAT,
   type CardSigilDef,
@@ -98,7 +107,7 @@ import {
   type RunLog,
   type SigilDef,
 } from '../src/run/types.ts';
-import { checkRuns } from '../src/sim/runmeasure.ts';
+import { checkRuns, unheldFightKinds } from '../src/sim/runmeasure.ts';
 import { makeRunAgent } from '../src/sim/runbots.ts';
 import { TRAIT_TERMS } from '../src/render/glossary.ts';
 import { CARD_SIGIL_TERMS, heroEffectWords, heroSigilTerm } from '../src/render/sigil-terms.ts';
@@ -540,6 +549,38 @@ test('foughtSigilProblems names what moved in a fight the engine holds, and watc
   const blind = watchFights(makeRunAgent({ route: 'greedy', placement: 'right', seed: 1 }));
   runFight(fightSetupFor(at, node), blind.agent.placement);
   assert.match(blind.problems.join('\n'), /began a fight before the run chose where to go/);
+
+  // The tally, where the right answer is 0. The boss above holds both kinds,
+  // so it counts 1 and 1 whether the tally reads the ledger or counts every
+  // fight it sees. Each boss here holds one kind or none, and the Oak - a
+  // hero sigil that moves neither Power nor Armour - must not count as the
+  // second kind.
+  const tallied = (grant: (r: typeof run) => void): FightTally => {
+    const r = startRun(content, 6);
+    grant(r);
+    const boss = nodeOfType(r, 'boss');
+    r.row = boss.row;
+    r.nodeId = boss.id;
+    const w = watchFights(makeRunAgent({ route: 'greedy', placement: 'right', seed: 1 }));
+    w.agent.travel(r, [boss]);
+    runFight(fightSetupFor(r, boss), w.agent.placement);
+    assert.deepEqual(w.problems, [], 'the watch found a disagreement in a fight fightSetupFor built');
+    return w.held.boss;
+  };
+  assert.deepEqual(tallied(() => {}), { fights: 1, withCardSigil: 0, withHeroSigil: 0 }, 'a boss fought holding no sigil');
+  assert.deepEqual(
+    tallied((r) => {
+      attachCardSigil(r, 0, RELAY);
+      grantHeroSigil(r, OAK);
+    }),
+    { fights: 1, withCardSigil: 1, withHeroSigil: 0 },
+    'a boss fought holding a card sigil and the Oak, which moves neither Power nor Armour',
+  );
+  assert.deepEqual(
+    tallied((r) => grantHeroSigil(r, BULWARK)),
+    { fights: 1, withCardSigil: 0, withHeroSigil: 1 },
+    'a boss fought holding the Bulwark and no card sigil',
+  );
 });
 
 test('the enemy hero’s Power and Armour are held to what the act prints for the node, with the pick restated rather than asked of encounterFor', () => {
@@ -672,6 +713,16 @@ test('the measurement instrument reports the sigil path as run only when it ran'
   const inert = checkRuns(seeds, 1, 'greedy', 'right', fixtureContent({ sigils: [] }));
   assert.equal(inert.sigilsGranted, 0);
   assert.deepEqual(inert.fightSigilProblems, [], 'a run that granted nothing must still agree with its fights');
+  // Nothing was granted, so no fight of any kind held a sigil, and the count
+  // `--verify` reads must say 0 - where a tally that counted every fight it
+  // saw would say as many as were fought.
+  for (const kind of ['fight', 'elite', 'boss'] as const) {
+    const t = inert.fightsHeld[kind];
+    assert.ok(t.fights > 0, `the window fought no ${kind}, so a 0 below would prove nothing`);
+    assert.equal(t.withCardSigil, 0, `${kind}: ${t.withCardSigil} fight(s) counted with a card sigil where none was granted`);
+    assert.equal(t.withHeroSigil, 0, `${kind}: ${t.withHeroSigil} fight(s) counted with a Power or Armour sigil where none was granted`);
+  }
+  assert.deepEqual(unheldFightKinds(inert), ['fight', 'elite', 'boss']);
 });
 
 // ---------------------------------------------------------------------------
