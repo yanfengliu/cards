@@ -295,8 +295,8 @@ test('each hero sigil reaches a fight through its seam, and none is there withou
   const bent = fightSetupFor(run, node);
   assert.equal(bent.playerHero.power, content.hero.power + 1, 'the Lance did not reach the fight');
   assert.equal(bent.playerHero.armour, content.hero.armour + 1, 'the Bulwark did not reach the fight');
-  assert.equal(bent.enemyHero.power, 2, 'a hero sigil reached the enemy hero');
-  assert.equal(bent.enemyHero.armour, 0);
+  assert.equal(bent.enemyHero.power, 2, 'with the Lance and the Bulwark held, the enemy hero is not at the 2 Power its encounter prints');
+  assert.equal(bent.enemyHero.armour, 0, 'with the Lance and the Bulwark held, the enemy hero is not at the 0 Armour its encounter prints');
 
   run.hero.health = 25;
   grantHeroSigil(run, OAK);

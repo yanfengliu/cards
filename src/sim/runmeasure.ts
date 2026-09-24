@@ -384,15 +384,16 @@ export type RunInstrument = {
   /**
    * Disagreements between what the engine is handed and the run's content
    * plus its ledger: a granted sigil the pool does not carry, a trait in the
-   * pool nothing granted, a hero number that is not the content's plus the
-   * ledger's, any other field of a deck card or of the player's hero - a
-   * race, a name, the hero's traits - that moved on the way in, a fight that
-   * did not shuffle the run's whole deck, a hand size or Energy that moved,
-   * or an enemy hero whose Power or Armour is not what its act prints.
-   * Nothing else of the enemy side is compared. Read in two places: in
-   * every fight each checked run played, as the engine held it when the fight
-   * began (`watchFights`), and in one setup built from each finished run
-   * (`fightSigilProblems`).
+   * pool nothing granted, a hero Power or Armour that is not the content's
+   * plus the ledger's or a hero Health that is not the run's, any other field
+   * of a deck card or of the player's hero - a race, a name, the hero's
+   * traits - that moved on the way in, a fight that did not shuffle the
+   * run's whole deck, a hand size or Energy that moved, or an enemy hero
+   * whose Power or Armour is not what its act prints. Nothing else of the
+   * enemy side is compared. A fight the watch did not read is listed here
+   * too. Read in two places: in every fight each checked run played, as the
+   * engine held it when the fight began (`watchFights`), and in one setup
+   * built from each finished run (`fightSigilProblems`).
    * Empty is the claim, and it is a different claim from `sigilProblems` -
    * that one compares two run-layer records, this one compares the run layer
    * with the engine's own inputs.
@@ -1254,24 +1255,25 @@ function main(): void {
     //           deck cards through gives each deck instance its printed
     //           traits plus its granted ones and nothing else, and the hero
     //           it built has the content's Power and Armour plus the
-    //           ledger's exactly, and the Health the run stood at.
-    //           Every other field of each deck card - a race, a name - is
-    //           walked off the printed and the resolved card and must be the
-    //           printed one, the forge's cost, Power and Health aside. The
-    //           hero is read through a fixed map of its five `HeroSpec`
-    //           fields - name, traits, Power, Armour, Health - and its name
-    //           and traits must be the content's. The deck each fight
-    //           shuffled must be the run's, and the hand size and Energy
-    //           both sides share must be the content's. A setup built from
-    //           each finished run, for a grant taken after the last fight, is
-    //           held to the same cards, hero, hand size and Energy, with its
-    //           `HeroSpec` walked field by field; it has no shuffled deck. A
-    //           run holding no sigil is checked by the same arithmetic, so a
-    //           trait that appeared from nowhere is a failure and not a
-    //           silent pass. A window also fails if some kind of fight -
-    //           ordinary, elite or boss - was never fought with a card sigil
-    //           in the deck, or never with a Power or Armour sigil in the
-    //           ledger; one fight with each is enough, not one with both.
+    //           ledger's exactly, and the Health the run stood at. Every
+    //           other field of each deck card - a race, a name - is walked
+    //           off the printed and the resolved card and must be the
+    //           printed one, the forge's cost, Power and Health aside, and
+    //           the id, which must be the instance's. The hero is read
+    //           through a fixed map of its five `HeroSpec` fields - name,
+    //           traits, Power, Armour, Health - and its name and traits must
+    //           be the content's. The deck each fight shuffled must be the
+    //           run's, and the hand size and Energy both sides share must be
+    //           the content's. A setup built from each finished run, for a
+    //           grant taken after the last fight, is held to the same cards,
+    //           hero, hand size and Energy, with its `HeroSpec` walked field
+    //           by field; it has no shuffled deck. A run holding no sigil is
+    //           checked by the same arithmetic, so a trait that appeared from
+    //           nowhere is a failure and not a silent pass. A window also
+    //           fails if some kind of fight - ordinary, elite or boss - was
+    //           never fought with a card sigil in the deck, or never with a
+    //           Power or Armour sigil in the ledger; one fight with each is
+    //           enough, not one with both.
     //   Proves  of the enemy side, only that the enemy hero's Power and
     //           Armour are what the act prints for that node, read off the
     //           content's act table rather than through `encounterFor`.

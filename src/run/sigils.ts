@@ -200,7 +200,7 @@ function seamSetup(run: RunState): { setup: FightSetup; at: RunState; node: MapN
  *   - The player's Power and Armour are the content's plus every `heroPower`
  *     and `heroArmour` in the ledger, exactly - so a run holding none fights
  *     at the content's numbers and one holding two gets both - and its Health
- *     is the run's bar.
+ *     is the Health the run stands at.
  *   - Every **other** field of the player's hero is the content hero's, walked
  *     the same way: its name, and its `traits`, which *are* the class - the
  *     Ranger's `volley`, the Mage's `scorch`. `heroSpecFor` carries them
