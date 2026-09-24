@@ -113,6 +113,7 @@ import {
   unlockedRewards,
 } from '../src/run/unlocks.ts';
 import { makeRunAgent } from '../src/sim/runbots.ts';
+import { checkUnlockReplay } from '../src/sim/runmeasure.ts';
 import {
   applyRunToProfile,
   emptyProfile,
@@ -493,6 +494,78 @@ test('owning everything gated plays the same run as no unlock layer, and says wh
     assert.equal(hashPlayed(open.run), hashRun(open.run), `seed ${seed}: with no set, hashPlayed is hashRun`);
     assert.match(runToCanonical(all.run), /;unlocked=g\[/);
     assert.doesNotMatch(runToCanonical(open.run), /unlocked=/);
+  }
+});
+
+test('verify:run’s unlock check reads what each run did: where the sets narrow nothing, it sees no seed separated', () => {
+  // `checkUnlockReplay` in `src/sim/runmeasure.ts` is the whole of
+  // verify:run's "two neighbouring unlock sets played the same run" check,
+  // and until this test nothing called it. Its fix - a seed counts as
+  // separated by `hashPlayed`, never by `hashRun`, which names the set - could
+  // be taken back out of that one file, the call and its import, with every
+  // gate green; with the narrowing also switched off, verify:run then printed
+  // 20/20 separated, as it did before the fix.
+  //
+  // So the check is asked here of a content the sets cannot narrow: every
+  // gated id taken out of every pool and out of the sigils, so all three of
+  // its sets draft the same pool and play the same runs. It must count no
+  // seed separated. It is asked of the shipped content on the same seeds too,
+  // where it must separate every neighbouring pair, so the zero is about the
+  // content and not a check that has stopped counting.
+  //
+  // Mutation watched going red: `played.push(hashRun(run))`, with `hashPlayed`
+  // dropped from the import - the review's exact revert. See
+  // `docs/learning/gate-proofs.md`, 2026-09-23.
+  //
+  // Bound: seeds 1..4, the check's own router, placement and three sets. That
+  // the sets separate on verify:run's 20 seeds is verify:run's own failure
+  // condition; this says only that the count reads what a run did.
+  const seeds = [1, 2, 3, 4];
+  const gated = new Set(FRESH_UNLOCKS.gated);
+  const keep = <T extends { readonly cardId: string }>(rows: readonly T[]): readonly T[] =>
+    rows.filter((r) => !gated.has(r.cardId));
+  const inert: RunContent = {
+    ...RUN_CONTENT,
+    rewards: keep(RUN_CONTENT.rewards),
+    sigils: RUN_CONTENT.sigils.filter((s) => !gated.has(s.id)),
+    ...(RUN_CONTENT.classes === undefined
+      ? {}
+      : { classes: RUN_CONTENT.classes.map((c) => ({ ...c, rewards: keep(c.rewards) })) }),
+  };
+  // The narrowest set narrows nothing here, so no wider one can.
+  const narrowed = unlockedContent(inert, FRESH_UNLOCKS);
+  assert.deepEqual(
+    [narrowed.rewards.length, narrowed.sigils.length, ...(narrowed.classes ?? []).map((c) => c.rewards.length)],
+    [inert.rewards.length, inert.sigils.length, ...(inert.classes ?? []).map((c) => c.rewards.length)],
+    'the stripped content still holds something a fresh profile cannot draft',
+  );
+  assert.ok(
+    (RUN_CONTENT.classes ?? []).some((c, i) => c.rewards.length > (inert.classes ?? [])[i]!.rewards.length),
+    'nothing was stripped, so the shipped content was never narrowed either and the zero below means nothing',
+  );
+
+  const flat = checkUnlockReplay(seeds, inert);
+  assert.deepEqual(flat.problems, [], 'the stripped content did not record or replay a set');
+  assert.equal(flat.runs, seeds.length * flat.rungsSeparated.length + seeds.length, 'a run was skipped');
+  assert.equal(
+    flat.seedsSeparated,
+    0,
+    `${flat.seedsSeparated} of ${seeds.length} seeds were counted as playing differently at a different ` +
+      `set, and no set here narrows anything - the count is reading the digest, which names the set, ` +
+      `rather than what the run did`,
+  );
+  for (const pair of flat.rungsSeparated) {
+    assert.equal(pair.seeds, 0, `${pair.between}: ${pair.seeds} seed(s) counted as separated where nothing can separate them`);
+  }
+
+  const live = checkUnlockReplay(seeds, RUN_CONTENT);
+  assert.deepEqual(live.problems, []);
+  for (const pair of live.rungsSeparated) {
+    assert.ok(
+      pair.seeds > 0,
+      `${pair.between}: no seed separated on the shipped content, so the zero above cannot tell a check ` +
+        `that reads what a run did from one that counts nothing`,
+    );
   }
 });
 

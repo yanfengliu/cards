@@ -564,6 +564,11 @@ export type UnlockReplayCheck = {
  * 20/20 seeds separated whatever the sets did. With the narrowing switched off
  * entirely, so that every set drafted from the whole pool, it still reported
  * 20/20 and `verify:run` exited 0.
+ *
+ * Nothing but `main` called this, so the fix could be taken back out of this
+ * file - the call below and its import - with every gate green. `test/unlocks.test.ts`
+ * now asks it of a content its sets cannot narrow, where the count must be
+ * zero, and of the shipped content, where every pair must separate.
  */
 export function checkUnlockReplay(
   seeds: readonly number[],
