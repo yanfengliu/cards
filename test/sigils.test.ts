@@ -25,7 +25,10 @@
 //   The run: over the fixture and the first shipped seeds, both kinds are
 //   granted, every run replays from its log to the same hash, `sigilProblems`
 //   and `fightSigilProblems` are empty, and the population is asserted so a
-//   window that granted none fails rather than passes.
+//   window that granted none fails rather than passes. `foughtSigilProblems`
+//   is made to fire here, on fixture fights at an elite and at the boss with
+//   one thing moved; holding every fight of every shipped class to its ledger
+//   is `test/classes.test.ts`'s.
 //   The log format: a format 1 log recorded before sigils existed upgrades to
 //   the current format and replays to the hash it had then. The two goldens
 //   are the bound - two seeds, two route styles, `RUN_CONTENT` as it stood.
@@ -39,7 +42,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { runFight } from '../src/engine/fight.ts';
+import { type Fight, type FightSetup, runFight } from '../src/engine/fight.ts';
 import { hashString } from '../src/engine/hash.ts';
 import { drain } from '../src/engine/resolver.ts';
 import { makeRng } from '../src/engine/rng.ts';
@@ -84,7 +87,7 @@ import {
   runRun,
   startRun,
 } from '../src/run/run.ts';
-import { fightSigilProblems, sigilProblems } from '../src/run/sigils.ts';
+import { fightSigilProblems, foughtSigilProblems, sigilProblems, watchFights } from '../src/run/sigils.ts';
 import {
   RUN_LOG_FORMAT,
   type CardSigilDef,
@@ -433,6 +436,105 @@ test('fightSigilProblems compares the ledger with the fight, in both directions'
   const said = fightSigilProblems(misplaced).join('\n');
   assert.match(said, /t_grunt#1/, 'the card the ledger names was not checked');
   assert.match(said, /t_grunt#0/, 'the card that actually carries it was not checked');
+});
+
+test('foughtSigilProblems names what moved in a fight the engine holds, and watchFights hands it every fight', () => {
+  // The detector has to fire, or the ladder test in `test/classes.test.ts`
+  // would pass for a check that returns nothing. Each case builds a real
+  // setup through `fightSetupFor` at an elite and at the boss - the two kinds
+  // `fightSigilProblems`' one setup never stands at - moves one thing the
+  // engine is handed, runs the fight, and reads it where the watch does: at
+  // the first placement. The first three moves are the final acceptance
+  // review's mutations of `fightSetupFor`, restated as fights.
+  const content = fixtureContent();
+  const run = startRun(content, 6);
+  attachCardSigil(run, 0, RELAY);
+  grantHeroSigil(run, LANCE);
+  grantHeroSigil(run, BULWARK);
+  const placer = makeRunAgent({ route: 'greedy', placement: 'right', seed: 1 }).placement;
+  const read = (at: typeof run, setup: FightSetup): string => {
+    let said: string[] | null = null;
+    runFight(setup, (fight, plays) => {
+      said ??= foughtSigilProblems(at, fight);
+      return placer(fight, plays);
+    });
+    assert.ok(said !== null, 'the engine never asked for a placement, so the fight was never read');
+    return (said as string[]).join('\n');
+  };
+  for (const type of ['elite', 'boss'] as const) {
+    const node = nodeOfType(run, type);
+    const at = cloneRunState(run);
+    at.row = node.row;
+    at.nodeId = node.id;
+    const setup = fightSetupFor(at, node);
+    assert.equal(read(at, setup), '', `${type}: the fight as the run builds it`);
+
+    const stripped = { ...setup, pool: runPool(content.pool, at.deck.map((d) => ({ ...d, sigils: [] }))) };
+    assert.match(
+      read(at, stripped),
+      /the fight resolves t_grunt#0 with traits \[\] and the ledger says it should be \[relay\]/,
+      `${type}: card sigils stripped from the pool`,
+    );
+
+    const raced: FightSetup = {
+      ...setup,
+      pool: {
+        ...setup.pool,
+        card: (id) => {
+          const c = setup.pool.card(id);
+          return id === 't_grunt#0' ? { ...c, tribe: 'elf' } : c;
+        },
+      },
+    };
+    assert.match(
+      read(at, raced),
+      /the fight resolves t_grunt#0 with tribe "elf", and t_grunt prints "human"/,
+      `${type}: a sigilled card's race moved`,
+    );
+
+    const plain = { ...setup, playerHero: { ...setup.playerHero, power: content.hero.power, armour: content.hero.armour } };
+    const unarmed = read(at, plain);
+    assert.match(unarmed, /hero with power 2, and it should be 3: the content's 2 plus every Power sigil/, `${type}: Power`);
+    assert.match(unarmed, /hero with armour 0, and it should be 1: the content's 0 plus every Armour sigil/, `${type}: Armour`);
+
+    const traitless = { ...setup, playerHero: { ...setup.playerHero, traits: ['volley' as Trait] } };
+    assert.match(read(at, traitless), /hero with traits \["volley"\], and it should be \[\]/, `${type}: the hero's traits`);
+
+    const short = { ...setup, playerDeck: setup.playerDeck.slice(1) };
+    assert.match(read(at, short), /the fight shuffled \[.*\] and the run's deck is \[/, `${type}: a card left out of the deck`);
+
+    const armed = { ...setup, enemyHero: { ...setup.enemyHero, power: setup.enemyHero.power + 1 } };
+    assert.match(
+      read(at, armed),
+      new RegExp(`built the enemy hero at ${setup.enemyHero.power + 1} Power / 0 Armour and its encounter prints ${setup.enemyHero.power} / 0`),
+      `${type}: the enemy hero`,
+    );
+  }
+
+  // A fight read after its first round is refused rather than guessed at.
+  const node = nodeOfType(run, 'boss');
+  const at = cloneRunState(run);
+  at.row = node.row;
+  at.nodeId = node.id;
+  const late: Fight = { ...runFight(fightSetupFor(at, node), placer).fight, round: 2 };
+  assert.match(foughtSigilProblems(at, late).join('\n'), /read in round 2, and what it was handed can only be read at its first placement/);
+
+  // The watch: `travel` hands it the run, the engine's first placement call
+  // hands it the fight, and what it finds is named with where it was.
+  const watch = watchFights(makeRunAgent({ route: 'greedy', placement: 'right', seed: 1 }));
+  watch.agent.travel(at, [node]);
+  const stripped = { ...fightSetupFor(at, node), pool: runPool(content.pool, at.deck.map((d) => ({ ...d, sigils: [] }))) };
+  runFight(stripped, watch.agent.placement);
+  assert.equal(watch.held.boss.fights, 1, 'the watch saw the boss fight once, however many rounds it lasted');
+  assert.equal(watch.held.boss.withCardSigil, 1);
+  assert.equal(watch.held.boss.withHeroSigil, 1);
+  assert.match(
+    watch.problems.join('\n'),
+    new RegExp(`^act 1 row ${node.row + 1}, the boss: the fight resolves t_grunt#0 with traits \\[\\]`, 'm'),
+  );
+  const blind = watchFights(makeRunAgent({ route: 'greedy', placement: 'right', seed: 1 }));
+  runFight(fightSetupFor(at, node), blind.agent.placement);
+  assert.match(blind.problems.join('\n'), /began a fight before the run chose where to go/);
 });
 
 test('the run hash moves with a sigil, and with which card it went on', () => {

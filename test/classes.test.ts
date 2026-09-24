@@ -27,8 +27,9 @@
 //   is not covered here; `npm run verify:run` covers 200 seeds of the Knight.
 //   The unlock-ladder replay adds the random router and every rung
 //   `unlockLadder` reads off the deeds, and it is the only gate that replays
-//   a Ranger or a Mage at a partly unlocked profile or holds their fights to
-//   their ledgers; the tribal-coverage test reads every combination of deeds.
+//   a Ranger or a Mage at a partly unlocked profile or holds every fight they
+//   play, elites and bosses included, to their ledgers; the tribal-coverage
+//   test reads every combination of deeds.
 //   Each of those asserts its own population, so a window that exercised
 //   nothing fails rather than passes.
 //   The race gate is bound to the three player races in `PLAYER_CARDS` today,
@@ -67,7 +68,7 @@ import {
   startRun,
   travelOptions,
 } from '../src/run/run.ts';
-import { fightSigilProblems, sigilProblems } from '../src/run/sigils.ts';
+import { fightSigilProblems, sigilProblems, watchFights } from '../src/run/sigils.ts';
 import { type RunContent, type RunLog, type UnlockSet, RUN_LOG_FORMAT } from '../src/run/types.ts';
 import { makeRunAgent } from '../src/sim/runbots.ts';
 import { renderClassPick } from '../src/ui/classpick.ts';
@@ -395,7 +396,7 @@ test('a run of each class replays from its log to the same hash, and the three c
   }
 });
 
-test('every class replays from its saved log at every rung of the unlock ladder, and every fight it hands the engine is its ledger’s and its class’s', () => {
+test('every class replays from its saved log at every rung of the unlock ladder, and every fight it plays, elites and bosses included, is handed its ledger and its class’s hero', () => {
   // The product no gate held. `npm run verify:run` replays the Knight at three
   // unlock sets; `test/unlocks.test.ts` and `test/sigils.test.ts` play the
   // Knight; the test above replays every class with no unlock layer at all. So
@@ -408,20 +409,36 @@ test('every class replays from its saved log at every rung of the unlock ladder,
   // thing narrowing the replay is the set inside the log. Canonical strings are
   // compared rather than digests, so a failure says which field moved.
   //
+  // "Every fight it plays" is read through `watchFights`: the agent's placement
+  // policy, which the engine calls with the live fight, hands each fight to
+  // `foughtSigilProblems` before its first round resolves. It reads the pool
+  // the engine resolves cards through, the hero entity it built and the deck
+  // it shuffled, and holds them to the run's ledger as it stands at that node.
+  // Until the final acceptance review of `907c8e9` this test called only
+  // `fightSigilProblems`, which builds one setup from the finished run at act
+  // 0's first node - always an ordinary fight - so card sigils stripped from
+  // every elite and boss fight passed it and all seven gates.
+  //
   // Mutations watched going red: `heroSpecFor` dropping the class's traits
   // (through `fightSigilProblems`), a sigilled card's race set to human,
   // `startRun` recording a partial set with its owned half emptied for every
-  // class but the default one, and `startRun` handing every class the Knight's
-  // hero whenever a set is passed. See `docs/learning/gate-proofs.md`,
-  // 2026-09-23.
+  // class but the default one, `startRun` handing every class the Knight's
+  // hero whenever a set is passed, and the review's three: card sigils
+  // stripped from every elite and boss fight, a sigilled card's race moved in
+  // boss fights only, and hero-sigil Power and Armour dropped in boss fights
+  // only. See `docs/learning/gate-proofs.md`, 2026-09-23.
   //
   // Bound: seeds 1..6 x both route styles x append-right placement, the rungs
   // `unlockLadder` reads off `ACHIEVEMENTS`, three classes. The population is
   // asserted per class - both kinds of sigil granted, sigilled cards in more
-  // than one printed race, and some partly unlocked rung that plays a
+  // than one printed race, elites and bosses fought both with a card sigil in
+  // the deck and with a Power or Armour sigil in the ledger, every fight a run
+  // fought seen by the watch, and some partly unlocked rung that plays a
   // different run from a fresh profile. "Plays a different run" is
   // `hashPlayed`, because `hashRun` names the set and so differs between any
-  // two sets whatever the set did.
+  // two sets whatever the set did. A fight is read as it is handed, not as it
+  // resolves, and the hero's own maximum Health is not held: see
+  // `foughtSigilProblems`.
   const rungs = unlockLadder();
   assert.deepEqual(rungs[0]!.set, FRESH_UNLOCKS, 'the ladder does not start at a fresh profile');
   assert.ok(rungs.length >= 3, `a ladder of ${rungs.length} has no partly unlocked rung`);
@@ -431,14 +448,33 @@ test('every class replays from its saved log at every rung of the unlock ladder,
     let cardSigils = 0;
     const sigilledRaces = new Set<Tribe>();
     let partialMoved = 0;
+    const held = { elite: { fights: 0, withCardSigil: 0, withHeroSigil: 0 }, boss: { fights: 0, withCardSigil: 0, withHeroSigil: 0 } };
     for (const seed of SEEDS) {
       for (const route of ROUTES) {
         let fresh = '';
         for (let r = 0; r < rungs.length; r++) {
           const { name, set } = rungs[r]!;
           const label = `${cls.name} seed ${seed}/${route}, ${name}`;
-          const { run, log } = runRun(RUN_CONTENT, seed, makeRunAgent({ route, placement: 'right', seed }), cls.id, set);
+          const watch = watchFights(makeRunAgent({ route, placement: 'right', seed }));
+          const { run, log } = runRun(RUN_CONTENT, seed, watch.agent, cls.id, set);
           runs++;
+          assert.deepEqual(
+            watch.problems,
+            [],
+            `${label}: a fight the run played was not handed its content plus its ledger`,
+          );
+          const seen = watch.held.fight.fights + watch.held.elite.fights + watch.held.boss.fights;
+          assert.equal(
+            seen,
+            run.fightsFought,
+            `${label}: the run fought ${run.fightsFought} fight(s) and the watch held ${seen}, so ` +
+              `some fight was never read`,
+          );
+          for (const kind of ['elite', 'boss'] as const) {
+            held[kind].fights += watch.held[kind].fights;
+            held[kind].withCardSigil += watch.held[kind].withCardSigil;
+            held[kind].withHeroSigil += watch.held[kind].withHeroSigil;
+          }
           assert.equal(log.classId, cls.id, `${label}: the log names another class`);
           assert.deepEqual(log.unlocked, set, `${label}: the log did not record the set the run was played with`);
           const saved = migrateRunLog(JSON.parse(JSON.stringify(log)));
@@ -448,20 +484,21 @@ test('every class replays from its saved log at every rung of the unlock ladder,
             `${label}: the saved log did not replay to the run it records`,
           );
           assert.deepEqual(sigilProblems(run), [], `${label}: the ledger and the deck disagree`);
-          // `fightSigilProblems` holds each fight to `run.content.hero`, so the
-          // content hero has to be held to the class here, at this rung: the
-          // real-fight hero test above plays no unlock set, and a hero swapped
-          // only when a set is passed would pass both.
+          // The watch and `fightSigilProblems` hold each fight to
+          // `run.content.hero`, so the content hero has to be held to the
+          // class here, at this rung: the real-fight hero test above plays no
+          // unlock set, and a hero swapped only when a set is passed would
+          // pass both.
           assert.deepEqual(
             run.content.hero,
             cls.hero,
             `${label}: the run's content carries a hero that is not the ${cls.name}'s, so every ` +
-              `fight below is held to the wrong hero`,
+              `fight above was held to the wrong hero`,
           );
           assert.deepEqual(
             fightSigilProblems(run),
             [],
-            `${label}: the fight the run hands the engine is not its content plus its ledger`,
+            `${label}: the setup built from the finished run is not its content plus its ledger`,
           );
           for (const g of run.sigils) {
             if (g.target === 'hero') {
@@ -481,6 +518,15 @@ test('every class replays from its saved log at every rung of the unlock ladder,
     }
     assert.ok(heroSigils > 0, `${cls.name}: no hero sigil across the window, so its hero spec was never checked with one`);
     assert.ok(cardSigils > 0, `${cls.name}: no card sigil across the window, so no sigilled card was checked`);
+    for (const kind of ['elite', 'boss'] as const) {
+      const t = held[kind];
+      assert.ok(
+        t.withCardSigil > 0 && t.withHeroSigil > 0,
+        `${cls.name}: the watch held ${t.fights} ${kind} fight(s), ${t.withCardSigil} with a card ` +
+          `sigil in the deck and ${t.withHeroSigil} with a Power or Armour sigil in the ledger, so ` +
+          `"every ${kind} fight is handed its ledger" was not asked of a ${kind} with both kinds of grant to hand over`,
+      );
+    }
     assert.ok(
       sigilledRaces.size > 1,
       `${cls.name}: every sigilled card printed one race (${[...sigilledRaces].join(', ')}), so a ` +

@@ -12,19 +12,33 @@
 //
 // What it cannot see, and what covers that instead: `sigilProblems` compares
 // two run-layer records of the same grant, so a grant both records agree on
-// and the *fight* never receives passes it. `fightSigilProblems`, below, is
-// the other half - it reads the pool and the hero spec the run hands the
-// engine and asks whether each granted sigil is in there, each ungranted one
-// is not, and every other field of each card and of the hero is the content's.
-// Both are called by `npm run verify:run`, which plays the Knight, and by
-// `test/sigils.test.ts` and `test/classes.test.ts`, which play all three
-// classes between them.
+// and the *fight* never receives passes it. The other half reads what the
+// engine is handed and asks whether each granted sigil is in there, each
+// ungranted one is not, and every other field of each card and of the hero is
+// the content's. It comes in two readings:
+//
+//   - `foughtSigilProblems` reads **every fight a run plays**, elites and
+//     bosses included, as the engine holds it when the fight begins: the pool
+//     it resolves cards through, the hero it built and the deck it shuffled.
+//     `watchFights` hands it each one through the agent's placement policy,
+//     which the engine calls with the live fight.
+//   - `fightSigilProblems` reads **one setup** built from the finished run, so
+//     a grant taken after the last fight, which no fight ever receives, is
+//     still asked of the one function that builds a setup.
+//
+// The second alone was the whole check until the final acceptance review of
+// `907c8e9`: it stands the run at act 0's first node, always an ordinary
+// fight, so card sigils stripped from every elite and boss fight changed 129
+// of 360 runs and passed all seven gates. Both are called by `npm run
+// verify:run`, which plays the Knight, by `test/classes.test.ts`, which plays
+// all three classes, and by `test/sigils.test.ts`, which makes each one fire
+// on fixture fights with one thing moved.
 
-import type { FightSetup } from '../engine/fight.ts';
-import type { HeroSpec } from '../engine/state.ts';
+import type { Fight, FightSetup } from '../engine/fight.ts';
+import { type CardPool, type Entity, type HeroSpec, type UnitCard, heroOf } from '../engine/state.ts';
 import { encounterFor, sigilById } from './nodes.ts';
-import { cloneRunState, fightSetupFor } from './run.ts';
-import type { MapNode, RunState, SigilDef } from './types.ts';
+import { type RunAgent, cloneRunState, fightSetupFor } from './run.ts';
+import type { MapNode, NodeType, RunState, SigilDef } from './types.ts';
 
 export function sigilProblems(run: RunState): string[] {
   const problems: string[] = [];
@@ -117,11 +131,14 @@ export function sigilProblems(run: RunState): string[] {
  *
  * A finished run stands nowhere a fight can be fought - a won run's `act` is
  * past the last one, a lost run's node is where it died - so this stands a
- * copy of it at act 0's first node. That is honest rather than convenient:
- * nothing the check below reads depends on which node it is. The pool is
- * `runPool(content.pool, deck)` and the hero spec is `heroSpecFor(run)`, and
- * both are functions of the deck and the ledger alone. The encounter comes
- * back only so the enemy hero can be compared with what it prints.
+ * copy of it at act 0's first node, which is always an ordinary fight. That
+ * rests on an assumption: that nothing the check below reads depends on which
+ * node it is. Today the pool is `runPool(content.pool, deck)` and the hero
+ * spec is `heroSpecFor(run)`, both functions of the deck and the ledger alone,
+ * but nothing here can see an elite or a boss. **The assumption is not what
+ * holds real fights to the ledger** - `foughtSigilProblems` reads every one a
+ * run plays. The encounter comes back only so the enemy hero can be compared
+ * with what it prints.
  */
 function seamSetup(run: RunState): { setup: FightSetup; enemy: HeroSpec } {
   const at = cloneRunState(run);
@@ -141,10 +158,11 @@ function seamSetup(run: RunState): { setup: FightSetup; enemy: HeroSpec } {
 }
 
 /**
- * Every granted sigil is in the fight the run hands the engine, and nothing
- * that was never granted is - read as: each card the fight resolves and the
- * hero it is handed are the content, plus what the ledger granted, plus what
- * the forge did, **field by field**, and nothing else. The pool object itself
+ * Every granted sigil is in the setup the run would hand the engine from
+ * where it finished, and nothing that was never granted is - read as: each
+ * card the fight resolves and the hero it is handed are the content, plus
+ * what the ledger granted, plus what the forge did, **field by field**, and
+ * nothing else. It is one setup, built by `seamSetup`. The pool object itself
  * is not walked: its `handSize` and `energyPerTurn` are held below, and
  * `runPool` hands over no `castable`, which is harmless while no spell or
  * piece of equipment can enter a run deck: `runPool` would throw building the
@@ -196,25 +214,87 @@ function seamSetup(run: RunState): { setup: FightSetup; enemy: HeroSpec } {
  * forge's arithmetic is restated here from the design's "+1 Power, +1 Health,
  * or -1 cost" for the same reason.
  *
- * The bound: this reads the setup, not a resolved fight. It proves the fight
- * is *handed* the sigil, not that a card carrying one was ever drawn - which
- * is a matter of the shuffle, and is what `test/sigils.test.ts`'s comparison
- * of a sigilled Relay against a printed one covers instead. And it holds the
- * fight to `run.content.hero`, not to the class: that the content's hero *is*
- * the class's is `test/classes.test.ts`'s claim, and that every fight a class
+ * The bound: this reads **one** setup, built at a node it picks, not the
+ * fights the run played - `foughtSigilProblems` below is those - and it reads
+ * the setup, not a resolved fight. It proves the fight is *handed* the sigil,
+ * not that a card carrying one was ever drawn - which is a matter of the
+ * shuffle, and is what `test/sigils.test.ts`'s comparison of a sigilled Relay
+ * against a printed one covers instead. And it holds the fight to
+ * `run.content.hero`, not to the class: that the content's hero *is* the
+ * class's is `test/classes.test.ts`'s claim, and that every fight a class
  * plays is handed its class's hero is a second test there that reads the hero
  * the engine built inside real fights.
  */
 export function fightSigilProblems(run: RunState): string[] {
-  const problems: string[] = [];
-  const base = run.content.pool;
   const { setup, enemy } = seamSetup(run);
+  const ledger = readLedger(run);
+  const { power, armour } = ledger;
+  const problems = cardProblems(run, setup.pool, ledger);
 
-  // The ledger, re-read from scratch: instance id -> the traits its card
-  // sigils grant, in the order they were granted, minus anything the card
-  // already prints (attaching such a sigil is refused, and a ledger holding
-  // one is `sigilProblems`'s complaint rather than this one's).
-  const fromLedger = new Map<string, string[]>();
+  const hero = run.content.hero;
+  // The hero's other fields, walked the same way: its name and its traits,
+  // which are the class. The three numbers have their own checks below.
+  for (const key of fieldsOf(hero, setup.playerHero)) {
+    if (key === 'power' || key === 'armour' || key === 'health') continue;
+    const got = fieldOf(setup.playerHero, key);
+    const expected = fieldOf(hero, key);
+    const same =
+      key === 'traits' ? sameValue(got ?? [], expected ?? []) : sameValue(got, expected);
+    if (!same) {
+      problems.push(
+        `the fight's hero has ${key} ${shown(got)}, and the hero this run's content hands every ` +
+          `fight - the ${run.classId}'s - has ${shown(expected)}. No sigil moves a hero's ${key}, ` +
+          `so the fight must be handed the content's`,
+      );
+    }
+  }
+  if (setup.playerHero.power !== hero.power + power) {
+    problems.push(
+      `the fight's hero swings for ${setup.playerHero.power}, and the content's ${hero.power} plus ` +
+        `every Power sigil in the ledger make it ${hero.power + power}`,
+    );
+  }
+  if (setup.playerHero.armour !== hero.armour + armour) {
+    problems.push(
+      `the fight's hero wears ${setup.playerHero.armour} Armour, and the content's ${hero.armour} ` +
+        `plus every Armour sigil in the ledger make it ${hero.armour + armour}`,
+    );
+  }
+  if (setup.playerHero.health !== run.hero.health) {
+    problems.push(
+      `the fight's hero opens on ${setup.playerHero.health} Health and the run stands at ` +
+        `${run.hero.health}`,
+    );
+  }
+  problems.push(...perFightNumberProblems(run, setup.pool));
+  if (setup.enemyHero.power !== enemy.power || setup.enemyHero.armour !== enemy.armour) {
+    problems.push(
+      `the enemy hero fights at ${setup.enemyHero.power} Power / ${setup.enemyHero.armour} Armour ` +
+        `and its encounter prints ${enemy.power} / ${enemy.armour} - a hero sigil reached the ` +
+        `other side`,
+    );
+  }
+
+  return problems;
+}
+
+/** The ledger, re-read from scratch, as both readings of a fight expect it. */
+type LedgerReading = {
+  /**
+   * Instance id -> the traits its card sigils grant, in the order they were
+   * granted, minus anything the card already prints (attaching such a sigil
+   * is refused, and a ledger holding one is `sigilProblems`'s complaint
+   * rather than this one's).
+   */
+  readonly granted: ReadonlyMap<string, readonly string[]>;
+  /** What every `heroPower` and every `heroArmour` in the ledger adds, summed. */
+  readonly power: number;
+  readonly armour: number;
+};
+
+function readLedger(run: RunState): LedgerReading {
+  const base = run.content.pool;
+  const granted = new Map<string, string[]>();
   let power = 0;
   let armour = 0;
   for (const g of run.sigils) {
@@ -231,17 +311,37 @@ export function fightSigilProblems(run: RunState): string[] {
     const dc = run.deck.find((d) => d.instanceId === id);
     if (dc === undefined) continue; // Also `sigilProblems`'s complaint.
     if (base.card(dc.cardId).traits.includes(def.trait)) continue;
-    const list = fromLedger.get(id) ?? [];
+    const list = granted.get(id) ?? [];
     if (!list.includes(def.trait)) list.push(def.trait);
-    fromLedger.set(id, list);
+    granted.set(id, list);
   }
+  return { granted, power, armour };
+}
 
+/**
+ * Each deck card as `pool` resolves it, held to its printed card, the ledger's
+ * grants and its forge record: the traits exactly, every other field walked
+ * off both objects. A card the pool cannot resolve at all is a problem rather
+ * than a throw, so one missing instance does not hide the rest.
+ */
+function cardProblems(run: RunState, pool: CardPool, ledger: LedgerReading): string[] {
+  const problems: string[] = [];
+  const base = run.content.pool;
   for (const dc of run.deck) {
     const card = base.card(dc.cardId);
     const printed = card.traits;
-    const granted = fromLedger.get(dc.instanceId) ?? [];
+    const granted = ledger.granted.get(dc.instanceId) ?? [];
     const want = [...printed, ...granted];
-    const resolved = setup.pool.card(dc.instanceId);
+    let resolved: UnitCard;
+    try {
+      resolved = pool.card(dc.instanceId);
+    } catch (e) {
+      problems.push(
+        `the fight cannot resolve ${dc.instanceId}, a card in the run's deck: ` +
+          `${e instanceof Error ? e.message : String(e)}`,
+      );
+      continue;
+    }
     const fought = resolved.traits;
     if (fought.join(',') !== want.join(',')) {
       problems.push(
@@ -281,61 +381,219 @@ export function fightSigilProblems(run: RunState): string[] {
       }
     }
   }
+  return problems;
+}
+
+/**
+ * The pool's two per-fight numbers are read for *both* sides by `fight.ts` -
+ * `enemyPlays` draws the enemy to the same `handSize` - so a hero sigil that
+ * moved either would hand the enemy the same card. Nothing may move them.
+ */
+function perFightNumberProblems(run: RunState, pool: CardPool): string[] {
+  const base = run.content.pool;
+  if (pool.handSize === base.handSize && pool.energyPerTurn === base.energyPerTurn) return [];
+  return [
+    `the fight is handed a hand of ${pool.handSize} and ${pool.energyPerTurn} Energy where the ` +
+      `content's pool is ${base.handSize} and ${base.energyPerTurn} - both are read for both ` +
+      `sides, so moving one arms the enemy too`,
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Every fight a run plays, read as the engine holds it
+// ---------------------------------------------------------------------------
+
+/**
+ * How each field of a `HeroSpec` is read back off the hero the engine built
+ * from it (`makeHero` in `src/engine/state.ts`). A `Record` over `keyof
+ * HeroSpec`, so a field the spec gains does not compile until somebody says
+ * how the check reads it.
+ */
+const ON_THE_BUILT_HERO: Readonly<Record<keyof HeroSpec, (e: Entity) => unknown>> = {
+  name: (e) => e.cardId,
+  health: (e) => e.health,
+  power: (e) => e.basePower,
+  armour: (e) => e.armour,
+  traits: (e) => e.traits,
+};
+
+/**
+ * One fight a run is playing, held to the run's content plus its ledger as
+ * the engine actually holds it: the `CardPool` it resolves every card
+ * through, the hero entity it built from the spec it was handed, the enemy
+ * hero, and the deck it shuffled.
+ *
+ * `fightSigilProblems` above reads one setup, built from the finished run at
+ * a node it picks, and cannot see an elite or a boss. This is the reading
+ * the claim "every fight is handed its ledger" is about: `watchFights` calls
+ * it once for every fight a run plays - ordinary, elite and boss - through
+ * the agent's placement policy, the hook `test/classes.test.ts` already read
+ * the hero entity through.
+ *
+ * Two preconditions, both of which `watchFights` meets:
+ *
+ *   - `run` is the run *at the node the fight is fought at*: the live
+ *     `RunState` the agent's `travel` was last handed. Nothing on it moves
+ *     during a fight - `visit` carries the Health out and grants anything won
+ *     only after `driver.fight` returns - so its deck, ledger and bar are
+ *     exactly what the fight was built from.
+ *   - `fight` is read at its first placement, before round 1 resolves: nothing
+ *     has struck, no card has left the hand, and `startTurn` has cleared only
+ *     the per-turn buff. Read any later and it is refused, not guessed at.
+ *
+ * The expected side is read the way `fightSigilProblems` reads it - off the
+ * ledger, the printed cards, the forge records and `run.content.hero` - and
+ * never off `resolveDeckCard`, `heroSpecFor` or `fightSetupFor`.
+ *
+ * Not held: the hero's `maxHealth`. The engine takes the Health a fight is
+ * handed as its maximum too, so a fight's own maximum is the Health the hero
+ * walked in with rather than the run's. That is display-only and recorded as
+ * open in `docs/learning/defect-register.md`. Holding it here would either
+ * pin that defect as correct or fail on every run that took damage.
+ */
+export function foughtSigilProblems(run: RunState, fight: Fight): string[] {
+  if (fight.round !== 1) {
+    return [
+      `the fight was read in round ${fight.round}, and what it was handed can only be read at its ` +
+        `first placement, before round 1 resolves`,
+    ];
+  }
+  const node = run.maps[run.act]?.nodes[run.nodeId];
+  if (node === undefined) {
+    return [
+      `the run stands at node ${run.nodeId} of act ${run.act + 1}, which its map does not hold, so ` +
+        `there is no encounter to hold the fight to`,
+    ];
+  }
+  const ledger = readLedger(run);
+  const problems = cardProblems(run, fight.pool, ledger);
+
+  // The deck the engine shuffled, as a multiset. At the first placement no
+  // card has left play, so the undrawn part of the deck plus the hand is all
+  // of it - also when a deck smaller than the hand was reshuffled to draw.
+  const shuffled = [...fight.player.deck.slice(fight.player.cursor), ...fight.player.hand].sort();
+  const held = run.deck.map((d) => d.instanceId).sort();
+  if (shuffled.join(',') !== held.join(',')) {
+    problems.push(
+      `the fight shuffled [${shuffled.join(', ')}] and the run's deck is [${held.join(', ')}] - a ` +
+        `card the ledger granted a sigil to is only handed to the fight if it is in the deck`,
+    );
+  }
 
   const hero = run.content.hero;
-  // The hero's other fields, walked the same way: its name and its traits,
-  // which are the class. The three numbers have their own checks below.
-  for (const key of fieldsOf(hero, setup.playerHero)) {
-    if (key === 'power' || key === 'armour' || key === 'health') continue;
-    const got = fieldOf(setup.playerHero, key);
-    const expected = fieldOf(hero, key);
-    const same =
-      key === 'traits' ? sameValue(got ?? [], expected ?? []) : sameValue(got, expected);
-    if (!same) {
+  const built = heroOf(fight.state, 'player');
+  const want: Readonly<Record<keyof HeroSpec, { readonly value: unknown; readonly why: string }>> = {
+    name: {
+      value: `hero:${hero.name}`,
+      why: `the hero this run's content hands every fight, the ${run.classId}'s, and no sigil moves it`,
+    },
+    traits: {
+      value: hero.traits ?? [],
+      why: `the ${run.classId}'s traits, which are the class, and no sigil moves them`,
+    },
+    power: {
+      value: hero.power + ledger.power,
+      why: `the content's ${hero.power} plus every Power sigil in the ledger`,
+    },
+    armour: {
+      value: hero.armour + ledger.armour,
+      why: `the content's ${hero.armour} plus every Armour sigil in the ledger`,
+    },
+    health: { value: run.hero.health, why: 'the Health the run stood at when the fight began' },
+  };
+  for (const key of Object.keys(ON_THE_BUILT_HERO) as (keyof HeroSpec)[]) {
+    const got = ON_THE_BUILT_HERO[key](built);
+    if (!sameValue(got, want[key].value)) {
       problems.push(
-        `the fight's hero has ${key} ${shown(got)}, and the hero this run's content hands every ` +
-          `fight - the ${run.classId}'s - has ${shown(expected)}. No sigil moves a hero's ${key}, ` +
-          `so the fight must be handed the content's`,
+        `the engine built the player's hero with ${key} ${shown(got)}, and it should be ` +
+          `${shown(want[key].value)}: ${want[key].why}`,
       );
     }
   }
-  if (setup.playerHero.power !== hero.power + power) {
-    problems.push(
-      `the fight's hero swings for ${setup.playerHero.power}, and the content's ${hero.power} plus ` +
-        `every Power sigil in the ledger make it ${hero.power + power}`,
-    );
-  }
-  if (setup.playerHero.armour !== hero.armour + armour) {
-    problems.push(
-      `the fight's hero wears ${setup.playerHero.armour} Armour, and the content's ${hero.armour} ` +
-        `plus every Armour sigil in the ledger make it ${hero.armour + armour}`,
-    );
-  }
-  if (setup.playerHero.health !== run.hero.health) {
-    problems.push(
-      `the fight's hero opens on ${setup.playerHero.health} Health and the run stands at ` +
-        `${run.hero.health}`,
-    );
-  }
-  // The pool's two per-fight numbers are read for *both* sides by `fight.ts` -
-  // `enemyPlays` draws the enemy to the same `handSize` - so a hero sigil that
-  // moved either would hand the enemy the same card. Nothing may move them.
-  if (setup.pool.handSize !== base.handSize || setup.pool.energyPerTurn !== base.energyPerTurn) {
-    problems.push(
-      `the fight is handed a hand of ${setup.pool.handSize} and ${setup.pool.energyPerTurn} ` +
-        `Energy where the content's pool is ${base.handSize} and ${base.energyPerTurn} - both are ` +
-        `read for both sides, so moving one arms the enemy too`,
-    );
-  }
-  if (setup.enemyHero.power !== enemy.power || setup.enemyHero.armour !== enemy.armour) {
-    problems.push(
-      `the enemy hero fights at ${setup.enemyHero.power} Power / ${setup.enemyHero.armour} Armour ` +
-        `and its encounter prints ${enemy.power} / ${enemy.armour} - a hero sigil reached the ` +
-        `other side`,
-    );
-  }
 
+  problems.push(...perFightNumberProblems(run, fight.pool));
+
+  const printed = encounterFor(run, node).enemyHero;
+  const foe = heroOf(fight.state, 'enemy');
+  if (foe.basePower !== printed.power || foe.armour !== printed.armour) {
+    problems.push(
+      `the engine built the enemy hero at ${foe.basePower} Power / ${foe.armour} Armour and its ` +
+        `encounter prints ${printed.power} / ${printed.armour} - a hero sigil reached the other side`,
+    );
+  }
   return problems;
+}
+
+/** The node kinds a fight is fought at. */
+export type FightNodeType = Extract<NodeType, 'fight' | 'elite' | 'boss'>;
+
+/** How many fights of one kind a watch held, and how many of them had something to hold. */
+export type FightTally = {
+  fights: number;
+  /** Fights where a card in the deck carried a card sigil the ledger granted. */
+  withCardSigil: number;
+  /** Fights where the ledger held a hero sigil that moves the hero's Power or Armour. */
+  withHeroSigil: number;
+};
+
+/** What `watchFights` hands back: the agent to play with, and what it saw. */
+export type FightWatch = {
+  /** The agent handed in, with its `travel` and `placement` watched. Decides nothing differently. */
+  readonly agent: RunAgent;
+  /** Fights held so far, by the kind of node each was fought at. */
+  readonly held: Readonly<Record<FightNodeType, Readonly<FightTally>>>;
+  /** Every disagreement `foughtSigilProblems` found, each naming the fight it was found in. */
+  readonly problems: readonly string[];
+};
+
+/**
+ * `agent`, watched: the first time the engine hands its placement policy a
+ * fight, that fight is held to the run as it stands at the node, by
+ * `foughtSigilProblems`. Every decision is still `agent`'s own, so a watched
+ * run is the unwatched run, draw for draw and hash for hash.
+ *
+ * The live run is taken from `travel`, which `step` asks before every node, so
+ * a fight's run is the node's. A fight seen before any travel choice, or at a
+ * node that is not a fight, elite or boss, is a problem rather than a guess.
+ * `held` is what makes "every fight" checkable by the caller: its fights must
+ * add up to the run's own `fightsFought`, and a window with no elite or no
+ * boss fought while a sigil was held did not test the claim for them.
+ */
+export function watchFights(agent: RunAgent): FightWatch {
+  const tally = (): FightTally => ({ fights: 0, withCardSigil: 0, withHeroSigil: 0 });
+  const held: Record<FightNodeType, FightTally> = { fight: tally(), elite: tally(), boss: tally() };
+  const problems: string[] = [];
+  const seen = new Set<Fight>();
+  let at: RunState | null = null;
+  const watched: RunAgent = {
+    ...agent,
+    travel: (run, options) => {
+      at = run;
+      return agent.travel(run, options);
+    },
+    placement: (fight, plays) => {
+      if (!seen.has(fight)) {
+        seen.add(fight);
+        const run: RunState | null = at;
+        const node = run === null ? undefined : run.maps[run.act]?.nodes[run.nodeId];
+        if (run === null || node === undefined) {
+          problems.push(`fight ${seen.size}: the engine began a fight before the run chose where to go`);
+        } else if (node.type !== 'fight' && node.type !== 'elite' && node.type !== 'boss') {
+          problems.push(`fight ${seen.size}: the engine began a fight at a ${node.type} node`);
+        } else {
+          const ledger = readLedger(run);
+          const t = held[node.type];
+          t.fights++;
+          if (ledger.granted.size > 0) t.withCardSigil++;
+          if (ledger.power !== 0 || ledger.armour !== 0) t.withHeroSigil++;
+          const where = `act ${run.act + 1} row ${node.row + 1}, ${node.type === 'fight' ? 'a fight' : `the ${node.type}`}`;
+          for (const p of foughtSigilProblems(run, fight)) problems.push(`${where}: ${p}`);
+        }
+      }
+      return agent.placement(fight, plays);
+    },
+  };
+  return { agent: watched, held, problems };
 }
 
 /**
