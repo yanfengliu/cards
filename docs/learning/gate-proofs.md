@@ -88,6 +88,29 @@ Eleven rows as wanted, with the three self-probes as they must be. Every anchor 
 
 **The bound.** The tally is held on four fixture bosses and on one fixture window of five runs. Whether a shipped window's counts are right is read, not gated, which F3vc and F3lc show.
 
+### F2, F4 and F5 — sentences narrowed to their code (`9d84e7f`)
+
+**What the review found.** Three kinds of sentence about the fight check said more than it compares. F2: `AGENTS.md:121` and the docs around the check said a fight is held to "its content plus its ledger", but the code compares the player's side and, of the enemy side, the enemy hero's Power and Armour alone. F4: `AGENTS.md:121`, `verify:run`'s failure text and the ladder test's message said each kind of fight must be fought "holding both kinds of sigil", but the code needs one fight with a card sigil and one, not necessarily the same, with a Power or Armour sigil. F5: `AGENTS.md:121` said the check "walks every field ... of the hero", but in a fight the hero is read through a fixed map of its five `HeroSpec` fields, and its maximum Health is not held.
+
+**What changed.** No check. Each sentence was rewritten from the code it describes, and each now names what the code does not compare: the enemy's cards, opening units and deck, the enemy hero's Health, traits and name, and a fight's seed and round limit. The sentences are `AGENTS.md:121`; the docs in `src/run/sigils.ts`; in `src/sim/runmeasure.ts`, the instrument's docs, its report line, its gate comment and the F4 failure text; the ladder test's comment and message in `test/classes.test.ts`; and the header of `test/sigils.test.ts`. F2c1 to F2c3 above are three of the things the sentences now say are not compared, each passing all seven gates.
+
+The two rows below read the rewritten failure texts back off the gates that print them. They prove no new gate.
+
+```
+ok   SELF      wanted UNCONFIRMED got UNCONFIRMED a mutation that cannot compile
+ok   ATTRIB    wanted UNCONFIRMED got UNCONFIRMED the uncounted Power or Armour sigil under a test it does NOT break
+ok   POSITIVE  wanted RED         got RED         the same mutation under the name of a test it DOES break
+```
+
+| # | mutation | command | the failure |
+|---|---|---|---|
+| W1 | no fight counted as holding a Power or Armour sigil | `npm run verify:run` | the rewritten F4 text: `across 20 runs the fight watch held 57 boss fight(s), 48 with a card sigil in the deck and 0 with a Power or Armour sigil in the ledger. It needs at least one boss fight with each, not necessarily the same one, so for the kind at 0, "every boss fight is handed its ledger" was never asked and cannot be reported as a pass` — exit 1 |
+| W2 | the same | `test/classes.test.ts` | the ladder test's rewritten message: `Knight: the watch held 117 elite fight(s), 56 with a card sigil in the deck and 0 with a Power or Armour sigil in the ledger. This needs at least one elite with each, not necessarily the same one, so for the kind at 0, "every elite fight is handed its ledger" was never asked` |
+
+Both rows as wanted, with `ATTRIB` naming the pick test and `POSITIVE` the detector test. After the restore the copy's `src/run/sigils.ts` (`eb3d785e…`) hashed the same as the worktree at `9d84e7f`.
+
+**What did not move.** `npm run verify:run` at `9d84e7f` printed the same 72 lines as at `2b040d9` apart from `Elapsed:` and the wording of its sigil line. Every number in that line is the same: 98 granted, 263 fights (167 ordinary, 39 elites, 57 bosses), 29 elites and 48 bosses with a card sigil, 22 and 37 with a Power or Armour sigil. `AGENTS.md` changed on line 121 only. Fleet's `sync-canon` check exited 0 with `cards` current, and the worktree's `AGENTS.md` classifies current.
+
 ## 2026-09-23 — closing the final acceptance review of `907c8e9`: a check that held one setup and was named for every fight
 
 On branch `worktree-agent-ae84844a610590c1d`, cut from `907c8e9`, whose suite is **286 tests**. The review found the code acceptable and the record not: its sentences said more than its gates checked. Each finding below is its own commit and its own section, with the revision its rows were taken at.
