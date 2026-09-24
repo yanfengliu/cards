@@ -21,14 +21,21 @@
 //   untouched, and a sigil for a trait the card already has is refused.
 //   Hero sigils: each of the three effects reaches a fight through the seam it
 //   uses - the `HeroSpec`'s Power and Armour, and the run's Health bar - at
-//   fixture numbers, and the enemy hero is untouched by all of them.
+//   fixture numbers, and the Power and Armour sigils leave the enemy hero's
+//   Power and Armour as printed.
 //   The run: over the fixture and the first shipped seeds, both kinds are
 //   granted, every run replays from its log to the same hash, `sigilProblems`
 //   and `fightSigilProblems` are empty, and the population is asserted so a
 //   window that granted none fails rather than passes. `foughtSigilProblems`
 //   is made to fire here, on fixture fights at an elite and at the boss with
-//   one thing moved; holding every fight of every shipped class to its ledger
-//   is `test/classes.test.ts`'s.
+//   one thing moved. `watchFights`' tally of the fights that held a card sigil
+//   and of those that held a Power or Armour sigil is held where the right
+//   answer is 0 as well as 1: on fixture bosses holding one kind or none, and
+//   on a window that granted nothing. The enemy hero's Power and Armour are
+//   held to what the act prints with the check's own pick of encounter, on a
+//   fixture act whose two elites and two ordinary fights differ. Holding
+//   every fight of every shipped class to its ledger is
+//   `test/classes.test.ts`'s.
 //   The log format: a format 1 log recorded before sigils existed upgrades to
 //   the current format and replays to the hash it had then. The two goldens
 //   are the bound - two seeds, two route styles, `RUN_CONTENT` as it stood.
@@ -49,6 +56,7 @@ import { makeRng } from '../src/engine/rng.ts';
 import {
   type CardPool,
   type GameState,
+  type HeroSpec,
   type Trait,
   type UnitCard,
   heroOf,
@@ -70,6 +78,7 @@ import { hashRun, runToCanonical } from '../src/run/hash.ts';
 import {
   attachCardSigil,
   attachOffers,
+  encounterFor,
   fightSeedFor,
   grantHeroSigil,
   heldHeroSigils,
@@ -87,7 +96,13 @@ import {
   runRun,
   startRun,
 } from '../src/run/run.ts';
-import { fightSigilProblems, foughtSigilProblems, sigilProblems, watchFights } from '../src/run/sigils.ts';
+import {
+  type FightTally,
+  fightSigilProblems,
+  foughtSigilProblems,
+  sigilProblems,
+  watchFights,
+} from '../src/run/sigils.ts';
 import {
   RUN_LOG_FORMAT,
   type CardSigilDef,
@@ -96,7 +111,7 @@ import {
   type RunLog,
   type SigilDef,
 } from '../src/run/types.ts';
-import { checkRuns } from '../src/sim/runmeasure.ts';
+import { checkRuns, unheldFightKinds } from '../src/sim/runmeasure.ts';
 import { makeRunAgent } from '../src/sim/runbots.ts';
 import { TRAIT_TERMS } from '../src/render/glossary.ts';
 import { CARD_SIGIL_TERMS, heroEffectWords, heroSigilTerm } from '../src/render/sigil-terms.ts';
@@ -280,8 +295,8 @@ test('each hero sigil reaches a fight through its seam, and none is there withou
   const bent = fightSetupFor(run, node);
   assert.equal(bent.playerHero.power, content.hero.power + 1, 'the Lance did not reach the fight');
   assert.equal(bent.playerHero.armour, content.hero.armour + 1, 'the Bulwark did not reach the fight');
-  assert.equal(bent.enemyHero.power, 2, 'a hero sigil reached the enemy hero');
-  assert.equal(bent.enemyHero.armour, 0);
+  assert.equal(bent.enemyHero.power, 2, 'with the Lance and the Bulwark held, the enemy hero is not at the 2 Power its encounter prints');
+  assert.equal(bent.enemyHero.armour, 0, 'with the Lance and the Bulwark held, the enemy hero is not at the 0 Armour its encounter prints');
 
   run.hero.health = 25;
   grantHeroSigil(run, OAK);
@@ -506,7 +521,10 @@ test('foughtSigilProblems names what moved in a fight the engine holds, and watc
     const armed = { ...setup, enemyHero: { ...setup.enemyHero, power: setup.enemyHero.power + 1 } };
     assert.match(
       read(at, armed),
-      new RegExp(`built the enemy hero at ${setup.enemyHero.power + 1} Power / 0 Armour and its encounter prints ${setup.enemyHero.power} / 0`),
+      new RegExp(
+        `built the enemy hero at ${setup.enemyHero.power + 1} Power / 0 Armour, and fx_${type}, the ` +
+          `encounter act 1's content prints for this ${type}, has ${setup.enemyHero.power} / 0`,
+      ),
       `${type}: the enemy hero`,
     );
   }
@@ -535,6 +553,95 @@ test('foughtSigilProblems names what moved in a fight the engine holds, and watc
   const blind = watchFights(makeRunAgent({ route: 'greedy', placement: 'right', seed: 1 }));
   runFight(fightSetupFor(at, node), blind.agent.placement);
   assert.match(blind.problems.join('\n'), /began a fight before the run chose where to go/);
+
+  // The tally, where the right answer is 0. The boss above holds both kinds,
+  // so it counts 1 and 1 whether the tally reads the ledger or counts every
+  // fight it sees. Each boss here holds one kind or none, and the Oak - a
+  // hero sigil that moves neither Power nor Armour - must not count as the
+  // second kind.
+  const tallied = (grant: (r: typeof run) => void): FightTally => {
+    const r = startRun(content, 6);
+    grant(r);
+    const boss = nodeOfType(r, 'boss');
+    r.row = boss.row;
+    r.nodeId = boss.id;
+    const w = watchFights(makeRunAgent({ route: 'greedy', placement: 'right', seed: 1 }));
+    w.agent.travel(r, [boss]);
+    runFight(fightSetupFor(r, boss), w.agent.placement);
+    assert.deepEqual(w.problems, [], 'the watch found a disagreement in a fight fightSetupFor built');
+    return w.held.boss;
+  };
+  assert.deepEqual(tallied(() => {}), { fights: 1, withCardSigil: 0, withHeroSigil: 0 }, 'a boss fought holding no sigil');
+  assert.deepEqual(
+    tallied((r) => {
+      attachCardSigil(r, 0, RELAY);
+      grantHeroSigil(r, OAK);
+    }),
+    { fights: 1, withCardSigil: 1, withHeroSigil: 0 },
+    'a boss fought holding a card sigil and the Oak, which moves neither Power nor Armour',
+  );
+  assert.deepEqual(
+    tallied((r) => grantHeroSigil(r, BULWARK)),
+    { fights: 1, withCardSigil: 0, withHeroSigil: 1 },
+    'a boss fought holding the Bulwark and no card sigil',
+  );
+});
+
+test('the enemy hero’s Power and Armour are held to what the act prints for the node, with the pick restated rather than asked of encounterFor', () => {
+  // Both readings used to ask `encounterFor` what the enemy hero should be,
+  // and `fightSetupFor` builds the fight out of `encounterFor`, so a boss
+  // that gained the player's Power sigils inside it passed every gate. The
+  // check now restates which encounter a node fields and reads its Power and
+  // Armour off the act's table. That restated pick needs a window that can
+  // see it: every shipped act prints one Power for all of its elites and one
+  // for all of its ordinary fights, and the fixture above prints one of each,
+  // so there a pick that named the wrong entry would change nothing compared.
+  // Here each list holds two entries that differ. Every elite and ordinary
+  // fight on twelve seeds' maps must read clean, and so must the setup built
+  // at each run's first node, and every entry must have been fielded.
+  const plain = fixtureContent();
+  const act = plain.acts[0]!;
+  const second = <T extends { id: string; enemyHero: HeroSpec }>(e: T, power: number): T => ({
+    ...e,
+    id: `${e.id}_b`,
+    enemyHero: { ...e.enemyHero, power },
+  });
+  const content = fixtureContent({
+    acts: [
+      {
+        ...act,
+        fights: [act.fights[0]!, second(act.fights[0]!, 5)],
+        elites: [act.elites[0]!, second(act.elites[0]!, 6)],
+      },
+    ],
+  });
+  const placer = makeRunAgent({ route: 'greedy', placement: 'right', seed: 1 }).placement;
+  const fielded = new Set<string>();
+  let read = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const run = startRun(content, seed);
+    assert.deepEqual(fightSigilProblems(run), [], `seed ${seed}: the setup built at the first node`);
+    for (const node of run.maps[0]!.nodes) {
+      if (node.type !== 'fight' && node.type !== 'elite') continue;
+      const at = cloneRunState(run);
+      at.row = node.row;
+      at.nodeId = node.id;
+      fielded.add(encounterFor(at, node).id);
+      let said: string[] | null = null;
+      runFight(fightSetupFor(at, node), (fight, plays) => {
+        said ??= foughtSigilProblems(at, fight);
+        return placer(fight, plays);
+      });
+      assert.deepEqual(said as string[] | null, [], `seed ${seed}: the ${node.type} at row ${node.row + 1}`);
+      read++;
+    }
+  }
+  assert.ok(read >= 24, `only ${read} fights read across twelve seeds`);
+  assert.deepEqual(
+    [...fielded].sort(),
+    ['fx_elite', 'fx_elite_b', 'fx_enemy', 'fx_enemy_b'],
+    'some entry was never fielded, so the restated pick was never held against it',
+  );
 });
 
 test('the run hash moves with a sigil, and with which card it went on', () => {
@@ -610,6 +717,16 @@ test('the measurement instrument reports the sigil path as run only when it ran'
   const inert = checkRuns(seeds, 1, 'greedy', 'right', fixtureContent({ sigils: [] }));
   assert.equal(inert.sigilsGranted, 0);
   assert.deepEqual(inert.fightSigilProblems, [], 'a run that granted nothing must still agree with its fights');
+  // Nothing was granted, so no fight of any kind held a sigil, and the count
+  // `--verify` reads must say 0 - where a tally that counted every fight it
+  // saw would say as many as were fought.
+  for (const kind of ['fight', 'elite', 'boss'] as const) {
+    const t = inert.fightsHeld[kind];
+    assert.ok(t.fights > 0, `the window fought no ${kind}, so a 0 below would prove nothing`);
+    assert.equal(t.withCardSigil, 0, `${kind}: ${t.withCardSigil} fight(s) counted with a card sigil where none was granted`);
+    assert.equal(t.withHeroSigil, 0, `${kind}: ${t.withHeroSigil} fight(s) counted with a Power or Armour sigil where none was granted`);
+  }
+  assert.deepEqual(unheldFightKinds(inert), ['fight', 'elite', 'boss']);
 });
 
 // ---------------------------------------------------------------------------

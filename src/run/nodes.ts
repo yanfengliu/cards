@@ -55,9 +55,13 @@ import type {
 } from './types.ts';
 import { FORGE_MODES } from './types.ts';
 
-/** Distinguishes the node-keyed derivations. Arbitrary, and fixed forever. */
+/**
+ * Distinguishes the node-keyed derivations. Arbitrary, and fixed forever.
+ * `TAG_ENCOUNTER` is exported for `src/run/sigils.ts`, which restates which
+ * encounter a node fields rather than asking `encounterFor`.
+ */
 const TAG_FIGHT_SEED = 0x1f19;
-const TAG_ENCOUNTER = 0x0e11;
+export const TAG_ENCOUNTER = 0x0e11;
 const TAG_HERO_SIGIL = 0x51a1;
 const TAG_CARD_SIGIL = 0xca5d;
 
