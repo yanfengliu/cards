@@ -398,8 +398,8 @@ export type RunInstrument = {
   /**
    * The fights `watchFights` held across the checked runs, by the kind of
    * node each was fought at. It is what stops "every fight" reporting "did
-   * not run" as "passed": an elite or a boss never fought while a sigil was
-   * held is a claim that was never asked of one.
+   * not run" as "passed": a kind of fight never fought while both kinds of
+   * sigil were held is a claim that was never asked of one.
    */
   readonly fightsHeld: Readonly<Record<'fight' | 'elite' | 'boss', Readonly<FightTally>>>;
   readonly detail: string[];
@@ -1252,8 +1252,9 @@ function main(): void {
     //           each finished run is held the same way, for a grant taken
     //           after the last fight. A run holding no sigil is checked by
     //           the same arithmetic, so a trait that appeared from nowhere is
-    //           a failure and not a silent pass, and a window that fought no
-    //           elite or no boss while holding both kinds of sigil fails too.
+    //           a failure and not a silent pass, and a window in which no
+    //           ordinary fight, no elite or no boss was fought holding both
+    //           kinds of sigil fails too.
     //   Bound   to the fight as it is handed, not as it resolves: it says the
     //           fight was handed the sigil, not that the card carrying it was
     //           drawn. The hero's own maximum Health is not held; see
