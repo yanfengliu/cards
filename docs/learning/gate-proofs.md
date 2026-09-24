@@ -67,6 +67,26 @@ Seventeen rows, all as wanted, and the three self-probes as they must be. The co
 
 **The bound.** It reads a fight as it is handed, at its first placement, not as it resolves. It does not hold the hero's own maximum Health, which the engine sets to the Health the fight is handed; that is known issue 5 in `docs/learning/defect-register.md`, and holding it would pin the defect as correct. The ladder test is seeds 1..6, both route styles, append-right placement, three classes and six rungs. `verify:run` is the Knight's 20 check seeds.
 
+### C — verify:run's unlock check cannot lose its `hashPlayed` fix silently (`fdeeb03`)
+
+**What the review found.** `checkUnlockReplay` counts a seed as separated when two unlock sets played different runs. The fix that made it compare `hashPlayed` instead of `hashRun` was one call in `src/sim/runmeasure.ts`, and nothing but `main` called the function. Putting `hashRun` back and tidying the import left all seven gates green. With `startRun`'s narrowing also switched off, `verify:run` printed `20/20 seed(s) played differently` again and exited 0: the defect the first review found, back without a sound. D7 of the run-layer entry below guards `hashPlayed`'s definition, not its use here.
+
+**What holds it now.** *verify:run's unlock check reads what each run did: where the sets narrow nothing, it sees no seed separated*, in `test/unlocks.test.ts`. It builds a content the sets cannot narrow - every gated id taken out of every pool and out of the sigils, and it asserts a fresh profile narrows nothing there. `checkUnlockReplay` must count no seed separated on it, over seeds 1..4. On the shipped content, over the same seeds, every neighbouring pair must separate, so the zero cannot come from a check that has stopped counting.
+
+| # | mutation | command | the failure |
+|---|---|---|---|
+| C1 | **the review's exact revert**: `played.push(hashRun(run))`, and `hashPlayed` dropped from the import | `test/unlocks.test.ts` | the guard: `4 of 4 seeds were counted as playing differently at a different set, and no set here narrows anything - the count is reading the digest, which names the set, rather than what the run did`, `4 !== 0` |
+| C1g | C1 | `npm run gates` | `"test" failed (exit 1), so the chain stops here and did not run verify, verify:run` — exit 1, where the review saw exit 0 |
+| C1v | **control**: C1 | `npm run verify:run` | GREEN, as wanted: the check cannot see its own count go blind while the narrowing still separates the sets |
+| C2v | **control**: C1 with `startRun` narrowing by `null` | `npm run verify:run` | GREEN, printing `20/20 seed(s) played differently at a different set (a fresh profile / two deeds earned: 20; two deeds earned / every deed earned: 20)` — the review's reproduction, unchanged |
+| C2 | the same pair of edits | `test/unlocks.test.ts` | the guard, as C1 |
+| C3 | `startRun` narrowing by `null` alone | `test/unlocks.test.ts` | the guard's shipped half: `a fresh profile / two deeds earned: no seed separated on the shipped content` |
+| C4 | the check stops counting neighbouring pairs | `test/unlocks.test.ts` | the guard's shipped half, as C3 |
+
+Seven rows as wanted, with the three self-probes: `SELF` (a syntax error in the call) and `ATTRIB` (C1 under *a log naming an unreadable unlock set is refused by name, never quietly widened*) came back `UNCONFIRMED`, and `POSITIVE` (C1 under the guard) came back `RED`. Every anchor matched once. The copy, extracted at `fdeeb03`, hashed the same after the last restore: `src/sim/runmeasure.ts` `6bed0b91…`, `src/run/run.ts` `6cfd82c1…`.
+
+**The bound.** Four seeds and the check's own three sets, router and placement. It says the count reads what a run did. That the sets separate over 20 seeds stays `verify:run`'s own failure condition.
+
 ## 2026-09-23 — closing a final review of the run layer: five defects that passed every gate, the sixth check built from the value it checks, and a chain that starts npm once
 
 Taken at `1a72436` on branch `worktree-agent-ae75d48e5bf3f6327`, cut from `9b36329`. Beneath it is `3d113b0`, a predecessor's uncommitted tree saved verbatim after a session-limit death. Its message certified nothing, and no row below is taken from it: every one was re-run here. The suite is **280 tests** at `1a72436` and **276** at `9b36329`. Thirty-five mutations were applied to the committed tree, each run against a shipped command, restored from memory, and each file's sha256 compared before and after. All thirty-five came back as their row says. Only `AGENTS.md` changed during the run, and no command below reads it. After the review at the end of this entry, the whole list was run again at `fbbef39`: the same verdict on every row, the same failure text, and the same digests. Nine more ran against an archive of `9b36329` under `.probe/base`, to show what each defect did before this round.
