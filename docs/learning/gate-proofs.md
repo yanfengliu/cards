@@ -6,6 +6,54 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-23 — closing the re-review of `2b040d9`: sentences written from the code, and a seventh check built from the value it checks
+
+On branch `worktree-agent-a95454a3d4d218310`, cut from `2b040d9`, whose suite is **288 tests**. The re-review found one check that compared a value with itself, and sentences that said more than their checks compare. It was the third review in a row to find a claim bigger than its gate, so this round narrows each claim to its code instead of growing the check, and fixes only the check that was wrong. Each finding below is its own commit and its own section, with the revision its rows were taken at.
+
+### The runner
+
+`mutate.mjs` in the session scratchpad, an ignored path: the previous round's runner, unchanged, with this round's mutation lists. It carries the three rules in `docs/policies/local-rules.md` and all three self-probes. A red for a test is its exact name on a `not ok N - <name>` line under `--test-reporter=tap`, with an `ERR_ASSERTION` in the block beneath it. Every command runs once unmutated first and must exit 0, and a failure already in that baseline is not credited. The crash guard is differenced against it too. Every anchor must match exactly once, with `\n` read as the file's own line ending, and all anchors are matched in a dry run before anything runs. Each touched file is restored from the bytes read before the edit, in reverse order, and its sha256 compared. The rows ran in a scratch copy: a `git archive` of the named revision, 153 tracked files, with `npm ci`.
+
+### F1 — the enemy hero is held to the act's table, not to `encounterFor` (`00f155c`)
+
+**What the review found.** Both readings of a fight compared the enemy hero's Power and Armour with `encounterFor(run, node).enemyHero`. `fightSetupFor` builds the fight's enemy hero from the same call, so any change inside `encounterFor` moved both sides together. The review's M1 makes the boss gain every Power sigil the player holds, inside `encounterFor`. At `2b040d9` all seven gates passed it, 288 of 288 tests, while 25 boss fights in `verify:run`'s window fought a boss stronger than its act prints. It is the seventh check in this repo built from the value it checks, and it was carried unchanged from `fightSigilProblems` into `foughtSigilProblems`.
+
+**What holds it now.** `printedEncounter` in `src/run/sigils.ts` reads the encounter off `run.content.acts`: the act's boss at a boss, and at an elite or an ordinary fight the entry of the act's list that `mixSeeds(seed, act, node id, TAG_ENCOUNTER)` picks. The pick is restated, not asked of `encounterFor`. `TAG_ENCOUNTER` is exported from `src/run/nodes.ts` for it, with its value unchanged. Both readings compare the enemy hero's Power and Armour with that encounter's, and nothing more of the enemy side. Every shipped act prints one Power for all of its elites and one for all of its ordinary fights, so no shipped window can see a wrong pick. *the enemy hero’s Power and Armour are held to what the act prints for the node, with the pick restated rather than asked of encounterFor*, in `test/sigils.test.ts`, gives a fixture act two elites and two ordinary fights that differ. It holds every such fight on twelve seeds' maps to the table, and the setup built at each run's first node.
+
+```
+ok   SELF      wanted UNCONFIRMED got UNCONFIRMED a mutation that cannot compile
+ok   ATTRIB    wanted UNCONFIRMED got UNCONFIRMED M1 under the name of a test it does NOT break (the pick test reads no boss)
+ok   POSITIVE  wanted RED         got RED         the same mutation, M1, under the name of a test it DOES break
+```
+
+`SELF` is a syntax error in `printedEncounter`. `ATTRIB` names the pick test; `POSITIVE` names the detector test. Blinded with `BLIND=1`, `SELF` came back `CRASHED`, `POSITIVE` came back `UNCONFIRMED`, and the runner exited 2 before any mutation ran.
+
+M1 is the review's mutation of `src/run/nodes.ts`, restated byte for byte from its runner. M2b, M3b and M4b are its three enemy-side leaks at the last act's boss, restated the same way.
+
+| # | mutation | command | the failure |
+|---|---|---|---|
+| F1a | M1: inside `encounterFor`, the boss gains every Power sigil the player holds | `test/classes.test.ts` | the ladder test: `Knight seed 1/greedy, a fresh profile: a fight the run played was not handed its content plus its ledger`, with `act 3 row 8, the boss: the engine built the enemy hero at 5 Power / 0 Armour, and a3b_king, the encounter act 3's content prints for this boss, has 4 / 0` |
+| F1v | M1 | `npm run verify:run` | `25 disagreement(s) between the fight the run hands the engine and its content plus its ledger`, first `seed 2, act 3 row 8, the boss: the engine built the enemy hero at 5 Power / 0 Armour, and a3b_king, …, has 4 / 0` — exit 1 |
+| F1g | M1 | `npm run gates` | `"test" failed (exit 1), so the chain stops here and did not run verify, verify:run` — exit 1, where the review saw exit 0 at `2b040d9` |
+| F1d | M1 | `test/sigils.test.ts` | the detector test, `boss: the fight as the run builds it`: `the engine built the enemy hero at 5 Power / 0 Armour, and fx_boss, the encounter act 1's content prints for this boss, has 4 / 0`. Its fixture run holds the Lance |
+| F1all | M1 | the whole suite | the ladder test, as F1a |
+| F1e | M1 at an elite: the elite `encounterFor` picks gains every Power sigil the player holds | `test/classes.test.ts` | the ladder test: `Knight seed 2/greedy, a fresh profile`, with `act 2 row 6, the elite: the engine built the enemy hero at 4 Power / 0 Armour, and a2e_troll, the encounter act 2's content prints for this elite, has 3 / 0` |
+| F1ev | M1 at an elite | `npm run verify:run` | `13 disagreement(s)`, first `seed 4, act 2 row 3, the elite: the engine built the enemy hero at 4 Power / 0 Armour, and a2e_troll, …, has 3 / 0` — exit 1 |
+| F1i | the check's restated pick names the next entry of the act's list | `test/sigils.test.ts` | the pick test: `seed 1: the setup built at the first node`, with `the setup hands the fight an enemy hero at 2 Power / 0 Armour, and fx_enemy_b, the encounter act 1's content prints for this fight, has 5 / 0` |
+| F1ic | **control**: F1i's mutation | `npm run verify:run` | GREEN, as wanted: every shipped act prints one Power per list, so the shipped window cannot see the pick |
+| F1icl | **control**: F1i's mutation | `test/classes.test.ts` | GREEN, as wanted, for the same reason |
+| F1r | **control**: the check asks `encounterFor` again, with M1 | the whole suite | GREEN, as wanted: the finding, reproduced on this tree |
+| F1rv | **control**: the same pair | `npm run verify:run` | GREEN, as wanted |
+| F2c1 | **control**: M2b, the last boss's cards resolve with every trait the player's card sigils grant | `npm run gates` | GREEN, as wanted: the enemy's cards are not compared |
+| F2c2 | **control**: M3b, the last boss's hero Health gains what the Oak added to the run's bar | `npm run gates` | GREEN, as wanted: the enemy hero's Health is not compared |
+| F2c3 | **control**: M4b, the last boss's opening gains its deck's first card while the player holds a card sigil | `npm run gates` | GREEN, as wanted: the enemy's opening is not compared |
+
+Fifteen rows as wanted, with the three self-probes as they must be. Every anchor matched once. After the last restore the copy's `src/run/nodes.ts` (`82dd0d82…`), `src/run/sigils.ts` (`558333c8…`) and `src/run/run.ts` (`6cfd82c1…`) hashed the same as the worktree at `00f155c`.
+
+**What did not move.** `npm run verify:run` at `00f155c` printed the same 72 lines as at `2b040d9` apart from `Elapsed:`. The failure text is new: it names what was compared and the encounter's id. It no longer says "a hero sigil reached the other side", a cause the check cannot know.
+
+**The bound.** The comparison is the enemy hero's Power and Armour and nothing else of the enemy side, beside the hand size and Energy both sides share. F2c1 to F2c3 are what that leaves out, and each passes all seven gates by design; every sentence about the check now says so, in F2 below. The restated pick is held only on the fixture act. And nothing gates the check against being rewritten to ask `encounterFor` again: F1r is that rewrite, and with M1 it passes the whole suite and `verify:run`.
+
 ## 2026-09-23 — closing the final acceptance review of `907c8e9`: a check that held one setup and was named for every fight
 
 On branch `worktree-agent-ae84844a610590c1d`, cut from `907c8e9`, whose suite is **286 tests**. The review found the code acceptable and the record not: its sentences said more than its gates checked. Each finding below is its own commit and its own section, with the revision its rows were taken at.
