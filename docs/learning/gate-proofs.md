@@ -111,6 +111,20 @@ Both rows as wanted, with `ATTRIB` naming the pick test and `POSITIVE` the detec
 
 **What did not move.** `npm run verify:run` at `9d84e7f` printed the same 72 lines as at `2b040d9` apart from `Elapsed:` and the wording of its sigil line. Every number in that line is the same: 98 granted, 263 fights (167 ordinary, 39 elites, 57 bosses), 29 elites and 48 bosses with a card sigil, 22 and 37 with a Power or Armour sigil. `AGENTS.md` changed on line 121 only. Fleet's `sync-canon` check exited 0 with `cards` current, and the worktree's `AGENTS.md` classifies current.
 
+### At `4fe5b9b`, the last commit that touches code
+
+`4fe5b9b` narrows four more sentences found on a second read, in comments and in one test's messages. The review's mutations were run once more against a copy of it, with the three self-probes as they must be:
+
+| # | mutation | command | the result |
+|---|---|---|---|
+| Z1 | M1 | `npm run gates` | `"test" failed (exit 1)` — exit 1 |
+| Z3 | T1 | `npm run gates` | `"test" failed (exit 1)` — exit 1 |
+| Z2b | **control**: M2b | `npm run gates` | exit 0, as wanted: not compared |
+| Z3b | **control**: M3b | `npm run gates` | exit 0, as wanted: not compared |
+| Z4b | **control**: M4b | `npm run gates` | exit 0, as wanted: not compared |
+
+`npm run verify` at `4fe5b9b` is byte-identical to `2b040d9`'s, `Elapsed:` line included (sha256 `06bcebfa…`).
+
 ## 2026-09-23 — closing the final acceptance review of `907c8e9`: a check that held one setup and was named for every fight
 
 On branch `worktree-agent-ae84844a610590c1d`, cut from `907c8e9`, whose suite is **286 tests**. The review found the code acceptable and the record not: its sentences said more than its gates checked. Each finding below is its own commit and its own section, with the revision its rows were taken at.
