@@ -33,15 +33,17 @@
 //
 //   "Reach" is any reference in code, resolved by the TypeScript checker to
 //   the declaration it names, and followed from there: a call, a helper in the
-//   same file or in another, a renamed import, a namespace member, a string
-//   index into a namespace, a destructured export, a function passed as a
-//   value, a module-level alias or table of functions, a shorthand property, a
-//   parameter's default, and a function that refers to one of the check's.
-//   Each of those is one function of the probe below, and the probe has to
-//   come back exactly right before the real check is read. A name inside a type
-//   is not a reach: a type runs no code. A local that shadows a builder's name
-//   is not one either, because a reference is resolved to its declaration, not
-//   matched by its spelling.
+//   same file or in another, a renamed import, a namespace member, an index
+//   into a namespace whose key's type is a string literal - written in place or
+//   held in a constant - a destructured export, at the top level or inside a
+//   function, renamed or not, a function passed as a value, a module-level
+//   alias or table of functions, a shorthand property, a parameter's default,
+//   and a function that refers to one of the check's. Each of those is one
+//   function of the probe below, and the probe has to come back exactly right
+//   before the real check is read. A name inside a type is not a reach: a type
+//   runs no code. A local that shadows a builder's name is not one either,
+//   because a reference is resolved to its declaration, not matched by its
+//   spelling.
 //
 // The main test fails when:
 //
@@ -52,8 +54,9 @@
 //      one path. One is the setup that `fightSigilProblems` reads. A second can
 //      only be an expected value read off a second copy of the thing checked;
 //   3. a doc comment in `sigils.ts` says what a function's expected side is
-//      "never off", "nothing off" or "never through", and a name it gives is
-//      not a builder, or the function it is written on is not in the check.
+//      never read off - "never" or "nothing", then "off" or "through", with
+//      "read" allowed between, then names in backticks - and a name it gives
+//      is not a builder, or the function it is written on is not in the check.
 //      That holds each such sentence to the code: it cannot name a function
 //      the fight is not built from, and it cannot sit on a function this test
 //      does not read;
@@ -71,9 +74,10 @@
 //
 //   A call through a member of an interface or a type - `pool.card(id)`,
 //   `agent.placement(...)` - names a declaration with no body, so it is not
-//   followed. Neither is a key built at run time, or anything reached by
-//   reflection. A builder written as a class method, or declared anywhere but
-//   the top level of a file under `src/run/`, is not found.
+//   followed. Neither is an index whose key's type is not a string literal -
+//   a key built at run time, or one typed plain `string` - nor anything
+//   reached by reflection. A builder written as a class method, or declared
+//   anywhere but the top level of a file under `src/run/`, is not found.
 //
 //   It cannot tell an expected value from any other use. A builder called only
 //   to name something in a message counts as reached.
@@ -172,6 +176,7 @@ const PROBE_SOURCES: Readonly<Record<string, string>> = {
     'const aliased = encounterOf;',
     'const table = { pick: heroOf };',
     'const { heroOf: destructured } = build;',
+    "const KEY = 'heroOf' as const;",
     '/** Reads one setup, and its expected side is never read off `encounterOf` or `heroOf`. */',
     'export function subject(seed: number): boolean {',
     '  const s: Setup = setupFor(seed);',
@@ -199,8 +204,19 @@ const PROBE_SOURCES: Readonly<Record<string, string>> = {
     'export function viaElement(m: Match): number {',
     "  return build['encounterOf'](m.round);",
     '}',
+    'export function viaConstKey(m: Match): number {',
+    '  return build[KEY](m.round);',
+    '}',
     'export function viaDestructure(m: Match): number {',
     '  return destructured(m.round);',
+    '}',
+    'export function viaLocalShorthand(m: Match): number {',
+    '  const { encounterOf } = build;',
+    '  return encounterOf(m.round);',
+    '}',
+    'export function viaLocalRename(m: Match): number {',
+    '  const { heroOf: h } = build;',
+    '  return h(m.round);',
     '}',
     'export function viaCallback(m: Match): number[] {',
     '  return [m.round].map(encounterOf);',
@@ -274,7 +290,7 @@ const probeConfig = (check: string): Config => ({
 /**
  * What the probe must find: for each function of `spellings.ts` the check
  * holds, the builders it reaches. The keys are all of the check - `local`,
- * `ledgerLike` and the three module-level values are not in it - and each
+ * `ledgerLike` and the four module-level values are not in it - and each
  * expectation is bound to its own function, so a spelling the walk stopped
  * following fails by name rather than being covered for by another.
  */
@@ -286,7 +302,10 @@ const SPELLINGS: Readonly<Record<string, readonly string[]>> = {
   viaRename: ['encounterOf'],
   viaNamespace: ['heroOf'],
   viaElement: ['encounterOf'],
+  viaConstKey: ['heroOf'],
   viaDestructure: ['heroOf'],
+  viaLocalShorthand: ['encounterOf'],
+  viaLocalRename: ['heroOf'],
   viaCallback: ['encounterOf'],
   viaAlias: ['encounterOf'],
   viaTable: ['heroOf'],
@@ -449,45 +468,61 @@ function graphOf(program: ts.Program) {
     return checker.getSymbolAtLocation(node);
   }
 
+  /** The string keys an index's type names: one for `'k'` or a constant holding it, none for a plain `string`. */
+  function literalKeys(index: ts.Expression): string[] {
+    const t = checker.getTypeAtLocation(index);
+    const out: string[] = [];
+    for (const part of t.isUnion() ? t.types : [t]) {
+      if (!part.isStringLiteral()) return [];
+      out.push(part.value);
+    }
+    return out;
+  }
+
   /** Every reference `u`'s code makes to a unit, one edge per place it is made. */
   function edges(u: Unit): readonly Edge[] {
     const cached = edgeCache.get(u);
     if (cached !== undefined) return cached;
     const out: Edge[] = [];
-    const add = (node: ts.Node): void => {
-      const symbol = symbolAt(node);
-      if (symbol === undefined) return;
-      for (const to of unitsOf(symbol)) if (to !== u) out.push({ to, line: lineOf(node) });
+    const addSymbol = (symbol: ts.Symbol, at: ts.Node): void => {
+      for (const to of unitsOf(symbol)) if (to !== u) out.push({ to, line: lineOf(at) });
     };
     const walk = (node: ts.Node): void => {
       if (ts.isTypeNode(node)) return; // A type runs no code.
       if (ts.isIdentifier(node)) {
-        add(node);
+        const symbol = symbolAt(node);
+        if (symbol !== undefined) addSymbol(symbol, node);
+      } else if (ts.isElementAccessExpression(node)) {
+        // `x['k']`, or `x[k]` where `k` holds the string 'k': the property the key's type names.
+        const on = checker.getTypeAtLocation(node.expression);
+        for (const key of literalKeys(node.argumentExpression)) {
+          const property = on.getProperty(key);
+          if (property !== undefined) addSymbol(property, node.argumentExpression);
+        }
       } else if (
-        ts.isStringLiteralLike(node) &&
-        node.parent !== undefined &&
-        ts.isElementAccessExpression(node.parent) &&
-        node.parent.argumentExpression === node
+        ts.isBindingElement(node) &&
+        node.propertyName === undefined &&
+        ts.isIdentifier(node.name) &&
+        ts.isObjectBindingPattern(node.parent)
       ) {
-        add(node);
+        // `const { k } = x`: the property of `x` it takes. Written `{ k: b }`, the checker resolves
+        // `k` itself, so only the shorthand needs this - and doing it for both would count one
+        // reference twice.
+        const property = checker.getTypeAtLocation(node.parent).getProperty(node.name.text);
+        if (property !== undefined) addSymbol(property, node.name);
       }
       ts.forEachChild(node, walk);
     };
     const decl = u.decl;
     if (ts.isBindingElement(decl)) {
-      // `const { a: b } = x`: the property of `x` it takes, and whatever `x` itself reaches.
-      const pattern = decl.parent;
-      const holder = pattern.parent;
-      if (ts.isVariableDeclaration(holder) && holder.initializer !== undefined) {
-        const key = decl.propertyName ?? decl.name;
-        if (ts.isObjectBindingPattern(pattern) && ts.isIdentifier(key)) {
-          const property = checker.getTypeAtLocation(holder.initializer).getProperty(key.text);
-          if (property !== undefined) {
-            for (const to of unitsOf(property)) if (to !== u) out.push({ to, line: u.line });
-          }
-        }
-        walk(holder.initializer);
+      // A binding destructured at the top level: the binding itself, and whatever the value it is
+      // destructured from reaches.
+      walk(decl);
+      let root: ts.Node = decl;
+      while (ts.isBindingElement(root) || ts.isObjectBindingPattern(root) || ts.isArrayBindingPattern(root)) {
+        root = root.parent;
       }
+      if (ts.isVariableDeclaration(root) && root.initializer !== undefined) walk(root.initializer);
     } else {
       walk(u.code);
     }
