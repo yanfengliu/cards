@@ -81,7 +81,9 @@
 //
 //   It counts places in the code, not calls at run time. A setup built twice
 //   through one place - in a loop, or a callback mapped over two runs - is one
-//   path.
+//   path. The other way, a setup builder kept in a table or a class can count
+//   more than once, when the check refers both to the container and to the
+//   member that holds it.
 //
 //   A call through a member of an interface or a type - `pool.card(id)`,
 //   `agent.placement(...)` - names a declaration with no body, so it is not
