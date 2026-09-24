@@ -744,8 +744,8 @@ function problemsOf(a: Analysis, cfg: Config): string[] {
       out.push(
         `${reacher.name} (${where(reacher)}) reaches ${target.name} (${where(target)}), by ` +
           `${chain(via)}, and the fight is built from ${target.name}: ${chain(a.built.get(target) ?? [])}. ` +
-          `An expected side read off a function the fight is built from moves with it: a change ` +
-          `inside ${target.name} moves both sides together, and the check cannot see it - finding F1 ` +
+          `A check that reaches a function the fight is built from can move with it: a change inside ` +
+          `${target.name} would move both sides together, and the check could not see it - finding F1 ` +
           `in docs/learning/gate-proofs.md. Restate what ${target.name} works out from the content, ` +
           `the way the enemy hero's expected Power is read off the act's table rather than asked of ` +
           `encounterFor.`,
@@ -773,9 +773,10 @@ function problemsOf(a: Analysis, cfg: Config): string[] {
   for (const holder of a.outside) {
     out.push(
       `the doc comment on ${holder.name} (${where(holder)}) says what its expected side is never ` +
-        `read off, and ${holder.name} is not in the check this test reads: no ${cfg.held.join(' or ')} ` +
-        `is held in it or in anything that calls it, and nothing in the check reaches it. Its claim is ` +
-        `held by nothing. Connect it to the check, or move the sentence to a function that is.`,
+        `read off, and ${holder.name} is not in the check this test reads: no name in it has the type ` +
+        `${cfg.held.join(' or ')}, it refers to nothing that is in the check, and nothing in the check ` +
+        `reaches it. Its claim is held by nothing. Connect it to the check, or move the sentence to a ` +
+        `function that is.`,
     );
   }
   return out;
