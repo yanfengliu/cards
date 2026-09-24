@@ -1,6 +1,6 @@
 # 2026-09-23 — closing the final acceptance review of `907c8e9`
 
-Branch `worktree-agent-ae84844a610590c1d`, cut from `907c8e9`. The review found the code acceptable and the record not: two blockers (D and B), two low findings (C and A), four nits and one known issue to record. Nine commits, one or two per finding, `09b82db` to `f4b8a0c`. The suite is 288 tests, from 286. Every mutation, its failure text and the runner are in `docs/learning/gate-proofs.md` under "closing the final acceptance review of `907c8e9`".
+Branch `worktree-agent-ae84844a610590c1d`, cut from `907c8e9`. The review found the code acceptable and the record not: two blockers (D and B), two low findings (C and A), four nits and one known issue to record. The commits start at `09b82db`, one or more per finding, and each section below names its own. The suite is 288 tests, from 286. Every mutation, its failure text and the runner are in `docs/learning/gate-proofs.md` under "closing the final acceptance review of `907c8e9`".
 
 ## "Every fight is handed its ledger" was one setup at an ordinary fight
 
