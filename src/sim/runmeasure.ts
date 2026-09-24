@@ -385,8 +385,11 @@ export type RunInstrument = {
    * Disagreements between what the engine is handed and the run's content
    * plus its ledger: a granted sigil the pool does not carry, a trait in the
    * pool nothing granted, a hero number that is not the content's plus the
-   * ledger's, or any other field of a card or of the hero - a race, a name,
-   * the hero's traits - that moved on the way in. Read in two places: in
+   * ledger's, any other field of a deck card or of the player's hero - a
+   * race, a name, the hero's traits - that moved on the way in, a fight that
+   * did not shuffle the run's whole deck, a hand size or Energy that moved,
+   * or an enemy hero whose Power or Armour is not what its act prints.
+   * Nothing else of the enemy side is compared. Read in two places: in
    * every fight each checked run played, as the engine held it when the fight
    * began (`watchFights`), and in one setup built from each finished run
    * (`fightSigilProblems`).
@@ -398,8 +401,10 @@ export type RunInstrument = {
   /**
    * The fights `watchFights` held across the checked runs, by the kind of
    * node each was fought at. It is what stops "every fight" reporting "did
-   * not run" as "passed": a kind of fight never fought while both kinds of
-   * sigil were held is a claim that was never asked of one.
+   * not run" as "passed": a kind of fight never fought with a card sigil in
+   * the deck, or never with a Power or Armour sigil in the ledger, is one the
+   * claim was never asked of for that kind of sigil. One fight with each is
+   * enough, and they need not be the same fight.
    */
   readonly fightsHeld: Readonly<Record<'fight' | 'elite' | 'boss', Readonly<FightTally>>>;
   readonly detail: string[];
@@ -509,11 +514,12 @@ export function checkRuns(
 }
 
 /**
- * The kinds of fight the watch never held with both kinds of grant to hand
- * over - no fight of that kind with a card sigil in the deck, or none with a
- * Power or Armour sigil in the ledger - across every checked run. Each one
- * named is a part of "every fight is handed its ledger" that the window never
- * asked, which `--verify` fails on rather than reporting as a pass.
+ * The kinds of fight for which the watch held no fight with a card sigil in
+ * the deck, or none with a Power or Armour sigil in the ledger, across every
+ * checked run. One fight with each is enough, and they need not be the same
+ * fight. Each kind named is a part of "every fight is handed its ledger" that
+ * the window never asked, which `--verify` fails on rather than reporting as
+ * a pass.
  */
 export function unheldFightKinds(inst: RunInstrument): ('fight' | 'elite' | 'boss')[] {
   return (['fight', 'elite', 'boss'] as const).filter(
@@ -1174,15 +1180,17 @@ function main(): void {
       `${inst.sigilsGranted} granted across ${checkSeeds.length} runs, ` +
       `${inst.sigilProblems.length} ledger/deck disagreement(s), and ` +
       `${inst.fightSigilProblems.length} disagreement(s) between what the engine is handed and ` +
-      `the run's content plus its ledger, every field of every card and of the hero compared - ` +
+      `the run's content plus its ledger - each deck card field by field, the player's hero's ` +
+      `name, traits, Power, Armour and Health, the deck it shuffled, the hand size and Energy ` +
+      `both sides share, and of the enemy side only its hero's Power and Armour - ` +
       `in each of the ${held.fight.fights + held.elite.fights + held.boss.fights} fights those ` +
       `runs played, read as it began: ${held.fight.fights} ordinary fights, ` +
       `${held.elite.fights} elites and ${held.boss.fights} bosses, of which ` +
       `${held.elite.withCardSigil} elites and ${held.boss.withCardSigil} bosses had a card sigil ` +
       `in the deck and ${held.elite.withHeroSigil} and ${held.boss.withHeroSigil} a Power or ` +
-      `Armour sigil in the ledger - and in a setup built from each finished run. A run that ` +
-      `granted none did not exercise the path, and a path that did not run cannot be reported ` +
-      `as passing.`,
+      `Armour sigil in the ledger; and in a setup built from each finished run, which has no ` +
+      `shuffled deck. A run that granted none did not exercise the path, and a path that did ` +
+      `not run cannot be reported as passing.`,
   );
   const unlockOk =
     unlockReplay.problems.length === 0 && unlockReplay.rungsSeparated.every((p) => p.seeds > 0);
@@ -1242,23 +1250,37 @@ function main(): void {
     //           red on a content change that made a sigil worth taking.
     //   Proves  that each grant reaches every fight the check runs play,
     //           elites and bosses included: read through `watchFights` as
-    //           each fight begins, the pool the engine resolves cards through
-    //           gives each deck instance its printed traits plus its granted
-    //           ones and nothing else, and the hero it built has the
-    //           content's numbers plus the ledger's exactly. Every other
-    //           field of each card and of the hero - a race, a name, a hero's
-    //           traits - is walked off the objects and must be the content's,
-    //           the forge's cost, Power and Health aside. A setup built from
-    //           each finished run is held the same way, for a grant taken
-    //           after the last fight. A run holding no sigil is checked by
-    //           the same arithmetic, so a trait that appeared from nowhere is
-    //           a failure and not a silent pass, and a window in which no
-    //           ordinary fight, no elite or no boss was fought holding both
-    //           kinds of sigil fails too.
+    //           each fight begins, the pool the engine resolves the run's
+    //           deck cards through gives each deck instance its printed
+    //           traits plus its granted ones and nothing else, and the hero
+    //           it built has the content's Power and Armour plus the
+    //           ledger's exactly, and the Health the run stood at.
+    //           Every other field of each deck card - a race, a name - is
+    //           walked off the printed and the resolved card and must be the
+    //           printed one, the forge's cost, Power and Health aside. The
+    //           hero is read through a fixed map of its five `HeroSpec`
+    //           fields - name, traits, Power, Armour, Health - and its name
+    //           and traits must be the content's. The deck each fight
+    //           shuffled must be the run's, and the hand size and Energy
+    //           both sides share must be the content's. A setup built from
+    //           each finished run, for a grant taken after the last fight, is
+    //           held to the same cards, hero, hand size and Energy, with its
+    //           `HeroSpec` walked field by field; it has no shuffled deck. A
+    //           run holding no sigil is checked by the same arithmetic, so a
+    //           trait that appeared from nowhere is a failure and not a
+    //           silent pass. A window also fails if some kind of fight -
+    //           ordinary, elite or boss - was never fought with a card sigil
+    //           in the deck, or never with a Power or Armour sigil in the
+    //           ledger; one fight with each is enough, not one with both.
+    //   Proves  of the enemy side, only that the enemy hero's Power and
+    //           Armour are what the act prints for that node, read off the
+    //           content's act table rather than through `encounterFor`.
     //   Bound   to the fight as it is handed, not as it resolves: it says the
     //           fight was handed the sigil, not that the card carrying it was
     //           drawn. The hero's own maximum Health is not held; see
-    //           `foughtSigilProblems`.
+    //           `foughtSigilProblems`. Not compared at all: the enemy's
+    //           cards, opening units and deck, the enemy hero's Health,
+    //           traits and name, and each fight's seed and round limit.
     //   Bound   to the Knight, whose hero has no traits, so a class's attack
     //           dropped on its way into a fight cannot show here. That is
     //           `test/classes.test.ts`'s, which reads the hero the engine
@@ -1335,9 +1357,10 @@ function main(): void {
       failures.push(
         `across ${checkSeeds.length} runs the fight watch held ${inst.fightsHeld[kind].fights} ` +
           `${kind} fight(s), ${inst.fightsHeld[kind].withCardSigil} with a card sigil in the deck ` +
-          `and ${inst.fightsHeld[kind].withHeroSigil} with a Power or Armour sigil in the ledger, ` +
-          `so "every ${kind} fight is handed its ledger" was never asked of one with both kinds of ` +
-          `grant to hand over and cannot be reported as a pass`,
+          `and ${inst.fightsHeld[kind].withHeroSigil} with a Power or Armour sigil in the ledger. ` +
+          `It needs at least one ${kind} fight with each, not necessarily the same one, so for ` +
+          `the kind at 0, "every ${kind} fight is handed its ledger" was never asked and cannot ` +
+          `be reported as a pass`,
       );
     }
     if (unlockReplay.problems.length > 0) {

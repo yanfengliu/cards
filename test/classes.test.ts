@@ -411,9 +411,11 @@ test('every class replays from its saved log at every rung of the unlock ladder,
   //
   // "Every fight it plays" is read through `watchFights`: the agent's placement
   // policy, which the engine calls with the live fight, hands each fight to
-  // `foughtSigilProblems` before its first round resolves. It reads the pool
-  // the engine resolves cards through, the hero entity it built and the deck
-  // it shuffled, and holds them to the run's ledger as it stands at that node.
+  // `foughtSigilProblems` before its first round resolves. It reads each card
+  // of the run's deck as the pool resolves it, the player's hero entity it
+  // built, the deck it shuffled and the hand size and Energy, and holds them
+  // to the run's content plus its ledger as it stands at that node. Of the
+  // enemy side it reads only the enemy hero's Power and Armour.
   // Until the final acceptance review of `907c8e9` this test called only
   // `fightSigilProblems`, which builds one setup from the finished run at act
   // 0's first node - always an ordinary fight - so card sigils stripped from
@@ -431,14 +433,14 @@ test('every class replays from its saved log at every rung of the unlock ladder,
   // Bound: seeds 1..6 x both route styles x append-right placement, the rungs
   // `unlockLadder` reads off `ACHIEVEMENTS`, three classes. The population is
   // asserted per class - both kinds of sigil granted, sigilled cards in more
-  // than one printed race, elites and bosses fought both with a card sigil in
-  // the deck and with a Power or Armour sigil in the ledger, every fight a run
-  // fought seen by the watch, and some partly unlocked rung that plays a
-  // different run from a fresh profile. "Plays a different run" is
-  // `hashPlayed`, because `hashRun` names the set and so differs between any
-  // two sets whatever the set did. A fight is read as it is handed, not as it
-  // resolves, and the hero's own maximum Health is not held: see
-  // `foughtSigilProblems`.
+  // than one printed race, some elite and some boss fought with a card sigil
+  // in the deck and some with a Power or Armour sigil in the ledger, not
+  // necessarily the same fight, every fight a run fought seen by the watch,
+  // and some partly unlocked rung that plays a different run from a fresh
+  // profile. "Plays a different run" is `hashPlayed`, because `hashRun` names
+  // the set and so differs between any two sets whatever the set did. A fight
+  // is read as it is handed, not as it resolves, and the hero's own maximum
+  // Health is not held: see `foughtSigilProblems`.
   const rungs = unlockLadder();
   assert.deepEqual(rungs[0]!.set, FRESH_UNLOCKS, 'the ladder does not start at a fresh profile');
   assert.ok(rungs.length >= 3, `a ladder of ${rungs.length} has no partly unlocked rung`);
@@ -523,8 +525,9 @@ test('every class replays from its saved log at every rung of the unlock ladder,
       assert.ok(
         t.withCardSigil > 0 && t.withHeroSigil > 0,
         `${cls.name}: the watch held ${t.fights} ${kind} fight(s), ${t.withCardSigil} with a card ` +
-          `sigil in the deck and ${t.withHeroSigil} with a Power or Armour sigil in the ledger, so ` +
-          `"every ${kind} fight is handed its ledger" was not asked of a ${kind} with both kinds of grant to hand over`,
+          `sigil in the deck and ${t.withHeroSigil} with a Power or Armour sigil in the ledger. ` +
+          `This needs at least one ${kind} with each, not necessarily the same one, so for the ` +
+          `kind at 0, "every ${kind} fight is handed its ledger" was never asked`,
       );
     }
     assert.ok(

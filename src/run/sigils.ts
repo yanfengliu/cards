@@ -12,14 +12,18 @@
 //
 // What it cannot see, and what covers that instead: `sigilProblems` compares
 // two run-layer records of the same grant, so a grant both records agree on
-// and the *fight* never receives passes it. The other half reads what the
-// engine is handed and asks whether each granted sigil is in there, each
-// ungranted one is not, and every other field of each card and of the hero is
-// the content's. It comes in two readings:
+// and the *fight* never receives passes it. The other half reads the
+// player's side of what the engine is handed - each card of the run's deck
+// as the fight's pool resolves it, the player's hero, and the hand size and
+// Energy both sides share - and asks whether each granted sigil is in there,
+// each ungranted one is not, and the rest is what the content, the forge and
+// the run's Health make it. Of the enemy side it reads only the enemy hero's
+// Power and Armour, against what the act prints. It comes in two readings:
 //
 //   - `foughtSigilProblems` reads **every fight a run plays**, elites and
 //     bosses included, as the engine holds it when the fight begins: the pool
-//     it resolves cards through, the hero it built and the deck it shuffled.
+//     it resolves the run's deck cards through, the player's hero it built,
+//     the deck it shuffled and the enemy hero's Power and Armour.
 //     `watchFights` hands it each one through the agent's placement policy,
 //     which the engine calls with the live fight.
 //   - `fightSigilProblems` reads **one setup** built from the finished run, so
@@ -164,18 +168,19 @@ function seamSetup(run: RunState): { setup: FightSetup; at: RunState; node: MapN
 /**
  * Every granted sigil is in the setup the run would hand the engine from
  * where it finished, and nothing that was never granted is - read as: each
- * card the fight resolves and the hero it is handed are the content, plus
- * what the ledger granted, plus what the forge did, **field by field**, and
- * nothing else. It is one setup, built by `seamSetup`. The pool object itself
- * is not walked: its `handSize` and `energyPerTurn` are held below, and
- * `runPool` hands over no `castable`, which is harmless while no spell or
- * piece of equipment can enter a run deck: `runPool` would throw building the
- * pool first, because the content's `card` refuses a spell or equipment id.
+ * card of the run's deck as the setup's pool resolves it, and the player's
+ * hero spec, are the content, plus what the ledger granted, plus what the
+ * forge did, **field by field**, with the hero's Health the run's own. It is
+ * one setup, built by `seamSetup`. The pool object itself is not walked: its
+ * `handSize` and `energyPerTurn` are held below, and `runPool` hands over no
+ * `castable`, which is harmless while no spell or piece of equipment can
+ * enter a run deck: `runPool` would throw building the pool first, because
+ * the content's `card` refuses a spell or equipment id.
  *
  * `sigilProblems` holds two *run-layer* records of a grant to each other. This
  * holds the run layer to the engine's own inputs, which is what a player
- * actually plays: the `CardPool` the fight resolves cards through, and the
- * `HeroSpec` the player's hero is built from.
+ * actually plays: the `CardPool` the fight resolves the run's deck cards
+ * through, and the `HeroSpec` the player's hero is built from.
  *
  *   - Each deck instance resolves to exactly its printed traits followed by
  *     the traits the *ledger* says a sigil granted it, in ledger order. Both
@@ -227,7 +232,9 @@ function seamSetup(run: RunState): { setup: FightSetup; at: RunState; node: MapN
  *
  * The bound: this reads **one** setup, built at a node it picks, not the
  * fights the run played - `foughtSigilProblems` below is those - and it reads
- * the setup, not a resolved fight. It proves the fight is *handed* the sigil,
+ * the setup, not a resolved fight. Of the setup's other fields it compares
+ * none: not the deck list it hands over, nor the seed or the round limit,
+ * nor the enemy's deck or opening. It proves the fight is *handed* the sigil,
  * not that a card carrying one was ever drawn - which is a matter of the
  * shuffle, and is what `test/sigils.test.ts`'s comparison of a sigilled Relay
  * against a printed one covers instead. And it holds the fight to
@@ -490,9 +497,13 @@ const ON_THE_BUILT_HERO: Readonly<Record<keyof HeroSpec, (e: Entity) => unknown>
 
 /**
  * One fight a run is playing, held to the run's content plus its ledger as
- * the engine actually holds it: the `CardPool` it resolves every card
- * through, the hero entity it built from the spec it was handed, the enemy
- * hero, and the deck it shuffled.
+ * the engine actually holds it: each card of the run's deck as the
+ * `CardPool` resolves it, field by field; the player's hero entity it built
+ * from the spec it was handed, read through the five fields of
+ * `ON_THE_BUILT_HERO`; the deck it shuffled; the hand size and Energy both
+ * sides share; and the enemy hero's Power and Armour. Nothing else of the
+ * enemy side is read: not how the pool resolves the enemy's cards, not its
+ * opening units or deck, and not its hero's Health, traits or name.
  *
  * `fightSigilProblems` above reads one setup, built from the finished run at
  * a node it picks, and cannot see an elite or a boss. This is the reading
@@ -598,7 +609,7 @@ export type FightNodeType = Extract<NodeType, 'fight' | 'elite' | 'boss'>;
 /** How many fights of one kind a watch held, and how many of them had something to hold. */
 export type FightTally = {
   fights: number;
-  /** Fights where a card in the deck carried a card sigil the ledger granted. */
+  /** Fights where the ledger held a card sigil granted to a card in the deck, as `readLedger` reads it. */
   withCardSigil: number;
   /** Fights where the ledger held a hero sigil that moves the hero's Power or Armour. */
   withHeroSigil: number;
@@ -624,8 +635,9 @@ export type FightWatch = {
  * a fight's run is the node's. A fight seen before any travel choice, or at a
  * node that is not a fight, elite or boss, is a problem rather than a guess.
  * `held` is what makes "every fight" checkable by the caller: its fights must
- * add up to the run's own `fightsFought`, and a window with no elite or no
- * boss fought while a sigil was held did not test the claim for them.
+ * add up to the run's own `fightsFought`. A window where no fight of one kind
+ * was fought with a card sigil held, or none with a Power or Armour sigil
+ * held, did not test the claim for that kind of fight and that kind of sigil.
  */
 export function watchFights(agent: RunAgent): FightWatch {
   const tally = (): FightTally => ({ fights: 0, withCardSigil: 0, withHeroSigil: 0 });

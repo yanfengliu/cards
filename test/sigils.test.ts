@@ -21,7 +21,8 @@
 //   untouched, and a sigil for a trait the card already has is refused.
 //   Hero sigils: each of the three effects reaches a fight through the seam it
 //   uses - the `HeroSpec`'s Power and Armour, and the run's Health bar - at
-//   fixture numbers, and the enemy hero is untouched by all of them.
+//   fixture numbers, and the Power and Armour sigils leave the enemy hero's
+//   Power and Armour as printed.
 //   The run: over the fixture and the first shipped seeds, both kinds are
 //   granted, every run replays from its log to the same hash, `sigilProblems`
 //   and `fightSigilProblems` are empty, and the population is asserted so a
@@ -30,8 +31,11 @@
 //   one thing moved. `watchFights`' tally of the fights that held a card sigil
 //   and of those that held a Power or Armour sigil is held where the right
 //   answer is 0 as well as 1: on fixture bosses holding one kind or none, and
-//   on a window that granted nothing. Holding every fight of every shipped
-//   class to its ledger is `test/classes.test.ts`'s.
+//   on a window that granted nothing. The enemy hero's Power and Armour are
+//   held to what the act prints with the check's own pick of encounter, on a
+//   fixture act whose two elites and two ordinary fights differ. Holding
+//   every fight of every shipped class to its ledger is
+//   `test/classes.test.ts`'s.
 //   The log format: a format 1 log recorded before sigils existed upgrades to
 //   the current format and replays to the hash it had then. The two goldens
 //   are the bound - two seeds, two route styles, `RUN_CONTENT` as it stood.
