@@ -1,4 +1,4 @@
-// The fight check reaches nothing the fight is built from.
+// The fight check reaches nothing the fight is built from, outside the engine.
 //
 // `src/run/sigils.ts` holds a fight to the run's content plus its ledger. Its
 // subject is what `fightSetupFor` builds, and its expected side has to be read
@@ -16,50 +16,57 @@
 //
 //   The builders. Every function declared at the top level of a file under
 //   `src/run/` whose return type is `FightSetup` or assignable to it - today
-//   that is `fightSetupFor` alone - and every function they reach, in any file
-//   except those under `src/engine/`. The engine is left out because its
-//   primitives are shared on purpose: `printedEncounter` restates the pick
-//   with the engine's own `mixSeeds`. A value such as `TAG_ENCOUNTER` is walked
+//   that is `fightSetupFor` alone - and everything handed to one of those as an
+//   argument, at any call in the files this test reads; then every function
+//   those reach, in any file except those under `src/engine/`. The arguments
+//   count because a builder that is handed the encounter is still built from
+//   whatever worked the encounter out. The engine is left out because its
+//   primitives are shared on purpose: `printedEncounter` restates the pick with
+//   the engine's own `mixSeeds`. A value such as `TAG_ENCOUNTER` is walked
 //   through but is not a builder; only a function, a method or a class is.
 //
-//   The check. Every declaration at the top level of `src/run/sigils.ts` in
-//   which some name - a parameter, a local, a return type - has the type
-//   `Fight` or `FightSetup`, or one assignable to either; every declaration
-//   there that refers to one of those, repeated until nothing is added; and
-//   everything they reach, in any file, stopping at each builder.
-//   `sigilProblems` compares two run-layer records and holds no fight, so it is
-//   outside the check, and its call to `sigilById` - which the fight is built
-//   from, through `heldHeroSigils` - is not this file's business.
+//   The check. Every function declaration and every variable at the top level
+//   of `src/run/sigils.ts` in which some name - a parameter, a local, a return
+//   type - has the type `Fight` or `FightSetup`, or one assignable to either;
+//   then everything those reach, in any file, stopping at each builder. What
+//   the check hands to a function that returns a `FightSetup` builds its
+//   subject, so the walk does not follow it. `sigilProblems` compares two
+//   run-layer records and holds no fight, so it is outside the check while
+//   nothing in the check reaches it. Its call to `sigilById`, which the fight is
+//   built from through `heldHeroSigils`, is then not this file's business. A
+//   function that only calls into the check, holding no fight itself, is not
+//   read.
 //
 //   "Reach" is any reference in code, resolved by the TypeScript checker to
 //   the declaration it names, and followed from there: a call, a helper in the
-//   same file or in another, a renamed import, a namespace member, an index
-//   into a namespace whose key's type is a string literal - written in place or
-//   held in a constant - a destructured export, at the top level or inside a
-//   function, renamed or not, a function passed as a value, a module-level
-//   alias or table of functions, a shorthand property, a parameter's default,
-//   and a function that refers to one of the check's. Each of those is one
-//   function of the probe below, and the probe has to come back exactly right
-//   before the real check is read. A name inside a type is not a reach: a type
-//   runs no code. A local that shadows a builder's name is not one either,
-//   because a reference is resolved to its declaration, not matched by its
-//   spelling.
+//   same file or in another, a named function local to the one calling it, a
+//   renamed import, a namespace member, an index into a namespace whose key's
+//   type is a string literal - written in place or held in a constant - a
+//   destructured export, renamed at the top level and renamed or not inside a
+//   function, a function passed as a value, a module-level alias or table of
+//   functions, a shorthand property, a parameter's default, and a class a
+//   class extends. Each of those is one function of the probe below, and the
+//   probe has to come back exactly right before the real check is read. A name
+//   inside a type is not a reach: a type runs no code. A local that shadows a
+//   builder's name is not one either, because a reference is resolved to its
+//   declaration, not matched by its spelling.
 //
 // The main test fails when:
 //
-//   1. the check reaches a builder without a function that returns a
-//      `FightSetup` between them. It stops at that function, because a
-//      reading has to build what it checks;
-//   2. the check reaches a function that returns a `FightSetup` along more than
-//      one path. One is the setup that `fightSigilProblems` reads. A second can
-//      only be an expected value read off a second copy of the thing checked;
-//   3. a doc comment in `sigils.ts` says what a function's expected side is
-//      never read off - "never" or "nothing", then "off" or "through", with
-//      "read" allowed between, then names in backticks - and a name it gives
-//      is not a builder, or the function it is written on is not in the check.
-//      That holds each such sentence to the code: it cannot name a function
-//      the fight is not built from, and it cannot sit on a function this test
-//      does not read;
+//   1. the check reaches a builder, and the first builder on the way is not a
+//      function that returns a `FightSetup`. The walk stops at that function,
+//      because a reading has to build what it checks;
+//   2. the check refers to a function that returns a `FightSetup` along more
+//      than one path. A path is a chain of places in the code that refer to the
+//      next function, so a function called twice is two paths. One is the setup
+//      that `fightSigilProblems` reads. This test cannot tell a second setup read
+//      as a second subject from one read for an expected value, so either fails
+//      it;
+//   3. a doc comment on a top-level function or variable of `sigils.ts` says
+//      what an expected side is never read off - "never" or "nothing", then
+//      "off" or "through", with "read" allowed between, then names in
+//      backticks - and a name it gives is not among the builders, or the
+//      function it is written on is not in the check;
 //   4. it found no builder, no function of the check or no such sentence, or
 //      a file it read does not parse. A walk that finds nothing reports "did
 //      not run" as "passed".
@@ -68,28 +75,31 @@
 //
 //   It follows references, not values. An expected side read off data that a
 //   builder produced - a field of the run, the setup itself, an argument that
-//   a caller outside the check passes in, a module-level variable a builder
-//   fills at run time - names no builder, and is not seen. The setup reading
-//   holding `setup.enemyHero` to itself would be that case.
+//   a caller passes in, a module-level variable a builder fills at run time -
+//   names no builder, and is not seen. The setup reading holding
+//   `setup.enemyHero` to itself would be that case.
+//
+//   It counts places in the code, not calls at run time. A setup built twice
+//   through one place - in a loop, or a callback mapped over two runs - is one
+//   path.
 //
 //   A call through a member of an interface or a type - `pool.card(id)`,
 //   `agent.placement(...)` - names a declaration with no body, so it is not
 //   followed. Neither is an index whose key's type is not a string literal -
 //   a key built at run time, or one typed plain `string` - nor anything
 //   reached by reflection. A builder written as a class method, or declared
-//   anywhere but the top level of a file under `src/run/`, is not found.
+//   anywhere but the top level of a file under `src/run/`, is not found, and
+//   neither is an argument handed to a builder through an alias of it. A class
+//   in `sigils.ts` is not a function of the check, and a claim written on one
+//   is not read.
 //
 //   It cannot tell an expected value from any other use. A builder called only
 //   to name something in a message counts as reached.
 //
-//   Rule 2 tells the one setup a reading builds from a second one only by
-//   counting. A check that stopped building its own setup, and built one for
-//   an expected value instead, would pass it.
-//
 //   It reads `src/run/sigils.ts` and what that reaches. A comparison written
 //   anywhere else - `src/sim/runmeasure.ts`, a test - is not read. Nor is one
-//   moved into a declaration of `sigils.ts` that holds neither type, refers to
-//   nothing that does, and is reached by nothing that does.
+//   moved into a declaration of `sigils.ts` that holds neither type and is
+//   reached by nothing that does.
 //
 //   A function the fight is built from that lives under `src/engine/` is not a
 //   builder here. If one the doc comments name moved there, rule 3 would say
@@ -161,6 +171,15 @@ const PROBE_SOURCES: Readonly<Record<string, string>> = {
     'export function setupFor(seed: number): Setup {',
     '  return { enemy: encounterOf(seed), hero: heroOf(seed) };',
     '}',
+    'export function pickEnemy(seed: number): number {',
+    '  return seed % 3;',
+    '}',
+    'export function setupWith(seed: number, enemy: number): Setup {',
+    '  return { enemy, hero: seed };',
+    '}',
+    'export function buildsWith(seed: number): number {',
+    '  return setupWith(seed, pickEnemy(seed)).enemy;',
+    '}',
     'export function wrapsEncounter(seed: number): number {',
     '  return encounterOf(seed);',
     '}',
@@ -177,6 +196,13 @@ const PROBE_SOURCES: Readonly<Record<string, string>> = {
     'const table = { pick: heroOf };',
     'const { heroOf: destructured } = build;',
     "const KEY = 'heroOf' as const;",
+    'class Fielded {',
+    '  readonly v: number;',
+    '  constructor(n: number) {',
+    '    this.v = encounterOf(n);',
+    '  }',
+    '}',
+    'class Derived extends Fielded {}',
     '/** Reads one setup, and its expected side is never read off `encounterOf` or `heroOf`. */',
     'export function subject(seed: number): boolean {',
     '  const s: Setup = setupFor(seed);',
@@ -194,6 +220,10 @@ const PROBE_SOURCES: Readonly<Record<string, string>> = {
     '}',
     'export function viaModuleHelper(m: Match): number {',
     '  return wrapsEncounter(m.round);',
+    '}',
+    'export function viaNestedHelper(m: Match): number {',
+    '  const inner = (n: number): number => encounterOf(n);',
+    '  return inner(m.round);',
     '}',
     'export function viaRename(m: Match): number {',
     '  return renamed(m.round);',
@@ -234,8 +264,8 @@ const PROBE_SOURCES: Readonly<Record<string, string>> = {
     '  const o = { encounterOf };',
     '  return o.encounterOf(m.round);',
     '}',
-    'export function viaCaller(seed: number): number {',
-    '  return Number(subject(seed)) + heroOf(seed);',
+    'export function viaExtends(m: Match): number {',
+    '  return new Derived(m.round).v;',
     '}',
     'export function shadowed(m: Match): number {',
     '  const encounterOf = (n: number): number => n;',
@@ -244,8 +274,22 @@ const PROBE_SOURCES: Readonly<Record<string, string>> = {
     'export function mentioned(m: Match): string {',
     '  return `encounterOf(${m.round}) and heroOf are only named in this string`;',
     '}',
+    'export function viaCaller(seed: number): number {',
+    '  return Number(subject(seed)) + heroOf(seed);',
+    '}',
     'export function ledgerLike(seed: number): number {',
     '  return heroOf(seed);',
+    '}',
+  ].join('\n'),
+  'run/args.ts': [
+    "import type { Match } from '../engine/fight.ts';",
+    "import { pickEnemy, setupWith } from './build.ts';",
+    'export function subjectWith(m: Match): boolean {',
+    '  const s = setupWith(m.round, pickEnemy(m.round));',
+    '  return s.enemy === m.round % 3;',
+    '}',
+    'export function expectsWith(m: Match): boolean {',
+    '  return m.setup.enemy === pickEnemy(m.round);',
     '}',
   ].join('\n'),
   'run/twice.ts': [
@@ -263,6 +307,14 @@ const PROBE_SOURCES: Readonly<Record<string, string>> = {
     '}',
     'export function reading(m: Match): boolean {',
     '  return enemyAt(m.round) === enemyAt(m.round + 1);',
+    '}',
+  ].join('\n'),
+  'run/local-twice.ts': [
+    "import type { Match } from '../engine/fight.ts';",
+    "import { setupFor } from './build.ts';",
+    'export function reading(m: Match): boolean {',
+    '  const build = (n: number): number => setupFor(n).enemy;',
+    '  return build(m.round) === build(m.round + 1);',
     '}',
   ].join('\n'),
   'run/claims.ts': [
@@ -289,8 +341,7 @@ const probeConfig = (check: string): Config => ({
 
 /**
  * What the probe must find: for each function of `spellings.ts` the check
- * holds, the builders it reaches. The keys are all of the check - `local`,
- * `ledgerLike` and the four module-level values are not in it - and each
+ * holds, the builders it reaches. The keys are all of the check, and each
  * expectation is bound to its own function, so a spelling the walk stopped
  * following fails by name rather than being covered for by another.
  */
@@ -299,6 +350,7 @@ const SPELLINGS: Readonly<Record<string, readonly string[]>> = {
   direct: ['encounterOf'],
   viaLocalHelper: ['heroOf'],
   viaModuleHelper: ['encounterOf'],
+  viaNestedHelper: ['encounterOf'],
   viaRename: ['encounterOf'],
   viaNamespace: ['heroOf'],
   viaElement: ['encounterOf'],
@@ -311,10 +363,20 @@ const SPELLINGS: Readonly<Record<string, readonly string[]>> = {
   viaTable: ['heroOf'],
   viaDefault: ['heroOf'],
   viaShorthand: ['encounterOf'],
-  viaCaller: ['heroOf'],
+  viaExtends: ['encounterOf'],
   shadowed: [],
   mentioned: [],
 };
+
+/**
+ * Functions of `spellings.ts` that call a builder and must not be in the
+ * check: `ledgerLike` holds no `Match` and is reached by nothing that does, so
+ * it stands for `sigilProblems`; `viaCaller` only calls into the check.
+ */
+const OUTSIDE = ['ledgerLike', 'viaCaller'];
+
+/** The builders the probe's `build.ts` makes, found by the walk and not listed to it. */
+const PROBE_BUILDERS = 'encounterOf,heroOf,pickEnemy,setupFor,setupWith';
 
 // ---------------------------------------------------------------------------
 // The program, and the graph of what refers to what
@@ -332,7 +394,12 @@ type Unit = {
   readonly isFunction: boolean;
 };
 
-type Edge = { readonly to: Unit; readonly line: number };
+type Edge = {
+  readonly to: Unit;
+  readonly line: number;
+  /** What every call whose arguments hold this reference calls: what the reference is handed to. */
+  readonly handedTo: readonly Unit[];
+};
 
 function makeProgram(): ts.Program {
   const options = tsconfigOptions();
@@ -378,6 +445,11 @@ function isFunctionLike(n: ts.Node): boolean {
   );
 }
 
+function insideFunction(n: ts.Node): boolean {
+  for (let p = n.parent; p !== undefined; p = p.parent) if (isFunctionLike(p)) return true;
+  return false;
+}
+
 function unwrap(e: ts.Expression): ts.Expression {
   let x = e;
   while (
@@ -390,6 +462,46 @@ function unwrap(e: ts.Expression): ts.Expression {
     x = x.expression;
   }
   return x;
+}
+
+/** A function given a name inside another function: a unit of its own, reached where it is named. */
+function namedLocal(n: ts.Node): boolean {
+  if (ts.isFunctionDeclaration(n)) return n.body !== undefined && n.name !== undefined && insideFunction(n);
+  if (ts.isVariableDeclaration(n)) {
+    if (n.initializer === undefined || !ts.isIdentifier(n.name) || !insideFunction(n)) return false;
+    const init = unwrap(n.initializer);
+    return ts.isArrowFunction(init) || ts.isFunctionExpression(init);
+  }
+  return false;
+}
+
+/** `extends X` on a class: a type node that runs code, since the base class's constructor runs. */
+function classExtends(n: ts.Node): boolean {
+  const clause = n.parent;
+  return (
+    ts.isExpressionWithTypeArguments(n) &&
+    clause !== undefined &&
+    ts.isHeritageClause(clause) &&
+    clause.token === ts.SyntaxKind.ExtendsKeyword &&
+    (ts.isClassDeclaration(clause.parent) || ts.isClassExpression(clause.parent))
+  );
+}
+
+/** The name a declaration introduces, as opposed to a reference to something else. */
+function declaredName(n: ts.Identifier): boolean {
+  const p = n.parent;
+  if (p === undefined) return false;
+  if (ts.isBindingElement(p)) return p.name === n;
+  return (
+    (ts.isVariableDeclaration(p) ||
+      ts.isFunctionDeclaration(p) ||
+      ts.isClassDeclaration(p) ||
+      ts.isParameter(p) ||
+      ts.isMethodDeclaration(p) ||
+      ts.isPropertyDeclaration(p) ||
+      ts.isPropertyAssignment(p)) &&
+    p.name === n
+  );
 }
 
 function lineOf(node: ts.Node): number {
@@ -409,8 +521,8 @@ function graphOf(program: ts.Program) {
     if (sf.isDeclarationFile) return undefined;
     const file = rel(sf.fileName);
     if (file.startsWith('..') || file.split('/').includes('node_modules')) return undefined;
-    // A local is walked with the function it is declared in.
-    for (let p = decl.parent; p !== undefined; p = p.parent) if (isFunctionLike(p)) return undefined;
+    // Any other local is walked with the function it is declared in.
+    if (insideFunction(decl) && !namedLocal(decl)) return undefined;
     let code: ts.Node;
     let isFunction: boolean;
     if (
@@ -479,25 +591,57 @@ function graphOf(program: ts.Program) {
     return out;
   }
 
-  /** Every reference `u`'s code makes to a unit, one edge per place it is made. */
-  function edges(u: Unit): readonly Edge[] {
-    const cached = edgeCache.get(u);
-    if (cached !== undefined) return cached;
+  /** What an expression names when it is called: `f`, `ns.f`, `ns['f']`. */
+  function calleeUnits(callee: ts.Expression): Unit[] {
+    const e = unwrap(callee);
+    let symbols: ts.Symbol[] = [];
+    if (ts.isIdentifier(e)) {
+      const s = symbolAt(e);
+      symbols = s === undefined ? [] : [s];
+    } else if (ts.isPropertyAccessExpression(e)) {
+      const s = symbolAt(e.name);
+      symbols = s === undefined ? [] : [s];
+    } else if (ts.isElementAccessExpression(e)) {
+      const on = checker.getTypeAtLocation(e.expression);
+      symbols = literalKeys(e.argumentExpression).flatMap((k) => {
+        const p = on.getProperty(k);
+        return p === undefined ? [] : [p];
+      });
+    }
+    return symbols.flatMap(unitsOf);
+  }
+
+  /**
+   * Every reference the code under `root` makes to a unit, one edge per place
+   * it is made. A named local function under `root` is not walked here: it is
+   * a unit of its own, and walked where it is named.
+   */
+  function refsIn(root: ts.Node, self: Unit | undefined): Edge[] {
     const out: Edge[] = [];
-    const addSymbol = (symbol: ts.Symbol, at: ts.Node): void => {
-      for (const to of unitsOf(symbol)) if (to !== u) out.push({ to, line: lineOf(at) });
+    const addSymbol = (symbol: ts.Symbol, at: ts.Node, handedTo: readonly Unit[]): void => {
+      for (const to of unitsOf(symbol)) if (to !== self) out.push({ to, line: lineOf(at), handedTo });
     };
-    const walk = (node: ts.Node): void => {
-      if (ts.isTypeNode(node)) return; // A type runs no code.
+    const visit = (node: ts.Node, handedTo: readonly Unit[]): void => {
+      if (node !== root && namedLocal(node)) return; // Its own unit.
+      if (ts.isTypeNode(node) && !classExtends(node)) return; // A type runs no code.
+      if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+        visit(node.expression, handedTo);
+        const callee = calleeUnits(node.expression);
+        const inner = callee.length === 0 ? handedTo : [...handedTo, ...callee];
+        for (const arg of node.arguments ?? []) visit(arg, inner);
+        return;
+      }
       if (ts.isIdentifier(node)) {
-        const symbol = symbolAt(node);
-        if (symbol !== undefined) addSymbol(symbol, node);
+        if (!declaredName(node)) {
+          const symbol = symbolAt(node);
+          if (symbol !== undefined) addSymbol(symbol, node, handedTo);
+        }
       } else if (ts.isElementAccessExpression(node)) {
         // `x['k']`, or `x[k]` where `k` holds the string 'k': the property the key's type names.
         const on = checker.getTypeAtLocation(node.expression);
         for (const key of literalKeys(node.argumentExpression)) {
           const property = on.getProperty(key);
-          if (property !== undefined) addSymbol(property, node.argumentExpression);
+          if (property !== undefined) addSymbol(property, node.argumentExpression, handedTo);
         }
       } else if (
         ts.isBindingElement(node) &&
@@ -509,24 +653,55 @@ function graphOf(program: ts.Program) {
         // `k` itself, so only the shorthand needs this - and doing it for both would count one
         // reference twice.
         const property = checker.getTypeAtLocation(node.parent).getProperty(node.name.text);
-        if (property !== undefined) addSymbol(property, node.name);
+        if (property !== undefined) addSymbol(property, node.name, handedTo);
       }
-      ts.forEachChild(node, walk);
+      ts.forEachChild(node, (child) => visit(child, handedTo));
     };
+    visit(root, []);
+    return out;
+  }
+
+  function edges(u: Unit): readonly Edge[] {
+    const cached = edgeCache.get(u);
+    if (cached !== undefined) return cached;
     const decl = u.decl;
+    let out: Edge[];
     if (ts.isBindingElement(decl)) {
       // A binding destructured at the top level: the binding itself, and whatever the value it is
       // destructured from reaches.
-      walk(decl);
+      out = refsIn(decl, u);
       let root: ts.Node = decl;
       while (ts.isBindingElement(root) || ts.isObjectBindingPattern(root) || ts.isArrayBindingPattern(root)) {
         root = root.parent;
       }
-      if (ts.isVariableDeclaration(root) && root.initializer !== undefined) walk(root.initializer);
+      if (ts.isVariableDeclaration(root) && root.initializer !== undefined) out.push(...refsIn(root.initializer, u));
     } else {
-      walk(u.code);
+      out = refsIn(u.code, u);
     }
     edgeCache.set(u, out);
+    return out;
+  }
+
+  /**
+   * Everything handed as an argument to one of `callees`, at any call in the
+   * repo's own files this program holds, with where it was handed over.
+   */
+  function handedAnywhere(callees: ReadonlySet<Unit>): { readonly to: Unit; readonly at: string }[] {
+    const out: { readonly to: Unit; readonly at: string }[] = [];
+    for (const sf of program.getSourceFiles()) {
+      if (sf.isDeclarationFile) continue;
+      const file = rel(sf.fileName);
+      if (file.startsWith('..') || file.split('/').includes('node_modules')) continue;
+      const visit = (node: ts.Node): void => {
+        if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && calleeUnits(node.expression).some((c) => callees.has(c))) {
+          for (const arg of node.arguments ?? []) {
+            for (const e of refsIn(arg, undefined)) out.push({ to: e.to, at: `${file}:${lineOf(arg)}` });
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+    }
     return out;
   }
 
@@ -572,7 +747,7 @@ function graphOf(program: ts.Program) {
     return sig !== undefined && isA(checker.getReturnTypeOfSignature(sig), target);
   }
 
-  /** The units declared at the top level of `sf`, with the signature of each that is a function. */
+  /** The function declarations and variables at the top level of `sf`, with the signature of each that is a function. */
   function topLevel(sf: ts.SourceFile): { readonly unit: Unit; readonly fn: ts.SignatureDeclaration | undefined }[] {
     const out: { readonly unit: Unit; readonly fn: ts.SignatureDeclaration | undefined }[] = [];
     for (const st of sf.statements) {
@@ -592,7 +767,7 @@ function graphOf(program: ts.Program) {
     return out;
   }
 
-  return { program, edges, declared, holds, returnsA, topLevel };
+  return { program, edges, handedAnywhere, declared, holds, returnsA, topLevel };
 }
 
 // ---------------------------------------------------------------------------
@@ -605,8 +780,8 @@ type Claim = { readonly holder: Unit; readonly names: readonly string[] };
 type Analysis = {
   /** The functions that return the built type. */
   readonly roots: readonly Unit[];
-  /** Every builder, with the way a root reaches it. */
-  readonly built: ReadonlyMap<Unit, readonly Unit[]>;
+  /** Every builder, with how it came to be one. */
+  readonly built: ReadonlyMap<Unit, string>;
   /** The functions of the check the walk starts from. */
   readonly seeds: readonly Unit[];
   /** Everything the check reaches, stopping at each builder. */
@@ -649,11 +824,13 @@ function docOf(decl: ts.Node): string {
     .replace(/\s+/g, ' ');
 }
 
+const chain = (us: readonly Unit[]): string => us.map((u) => u.name).join(' -> ');
+
 function analyse(g: Graph, cfg: Config): Analysis {
   const builtType = g.declared(cfg.types, cfg.built);
   const heldTypes = cfg.held.map((n) => g.declared(cfg.types, n));
 
-  // The builders: the functions that return the built type, and all they reach.
+  // The builders: the functions that return the built type, what is handed to them, and all that reaches.
   const roots: Unit[] = [];
   for (const sf of g.program.getSourceFiles()) {
     if (!rel(sf.fileName).startsWith(cfg.builders)) continue;
@@ -661,35 +838,30 @@ function analyse(g: Graph, cfg: Config): Analysis {
       if (fn !== undefined && g.returnsA(fn, builtType)) roots.push(unit);
     }
   }
-  const built = new Map<Unit, readonly Unit[]>();
+  const isRoot = new Set(roots);
+  const built = new Map<Unit, string>();
   {
     const seen = new Set<Unit>();
-    const queue: [Unit, readonly Unit[]][] = roots.map((r) => [r, [r]]);
+    const queue: [Unit, string][] = roots.map((r) => [r, r.name]);
+    for (const h of g.handedAnywhere(isRoot)) queue.push([h.to, `handed to a setup builder at ${h.at}: ${h.to.name}`]);
     for (let i = 0; i < queue.length; i++) {
-      const [u, via] = queue[i]!;
+      const [u, how] = queue[i]!;
       if (seen.has(u)) continue;
       seen.add(u);
-      if (u.isFunction && !u.file.startsWith(cfg.shared)) built.set(u, via);
-      for (const e of g.edges(u)) if (!seen.has(e.to)) queue.push([e.to, [...via, e.to]]);
+      if (u.isFunction && !u.file.startsWith(cfg.shared)) built.set(u, how);
+      for (const e of g.edges(u)) if (!seen.has(e.to)) queue.push([e.to, `${how} -> ${e.to.name}`]);
     }
   }
-  const isRoot = new Set(roots);
 
-  // The check: what holds a fight, and what refers to what does.
+  // What the check hands to a setup builder builds its subject, so the walk does not follow it.
+  // A setup builder named there is still a path.
+  const follows = (e: Edge): boolean => isRoot.has(e.to) || !e.handedTo.some((c) => isRoot.has(c));
+
+  // The check: the functions and variables of the file that hold a fight.
   const checkFile = g.program.getSourceFile(path.join(ROOT, cfg.check));
   assert.ok(checkFile !== undefined, `${cfg.check} is not in the program this test builds`);
   const top = g.topLevel(checkFile).map((t) => t.unit);
-  const seedSet = new Set(top.filter((u) => g.holds(u, heldTypes)));
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const u of top) {
-      if (!seedSet.has(u) && g.edges(u).some((e) => seedSet.has(e.to))) {
-        seedSet.add(u);
-        grew = true;
-      }
-    }
-  }
-  const seeds = [...seedSet];
+  const seeds = top.filter((u) => g.holds(u, heldTypes));
 
   // Reach, one seed at a time, stopping at every builder.
   const reached = new Set<Unit>();
@@ -702,7 +874,7 @@ function analyse(g: Graph, cfg: Config): Analysis {
       const [u, via] = queue[i]!;
       reached.add(u);
       for (const e of g.edges(u)) {
-        if (seen.has(e.to)) continue;
+        if (!follows(e) || seen.has(e.to)) continue;
         seen.add(e.to);
         if (built.has(e.to)) {
           if (!isRoot.has(e.to)) found.push({ target: e.to, via: [...via, e.to] });
@@ -716,7 +888,7 @@ function analyse(g: Graph, cfg: Config): Analysis {
 
   // Paths from the check's entries - what nothing else in the check refers to - to a root.
   const referred = new Set<Unit>();
-  for (const u of reached) for (const e of g.edges(u)) referred.add(e.to);
+  for (const u of reached) for (const e of g.edges(u)) if (follows(e)) referred.add(e.to);
   const entries = [...reached].filter((u) => !referred.has(u));
   const memo = new Map<Unit, number>();
   const onStack = new Set<Unit>();
@@ -727,6 +899,7 @@ function analyse(g: Graph, cfg: Config): Analysis {
     onStack.add(u);
     let n = 0;
     for (const e of g.edges(u)) {
+      if (!follows(e)) continue;
       if (isRoot.has(e.to)) n++;
       else if (!built.has(e.to) && reached.has(e.to)) n += count(e.to);
     }
@@ -738,7 +911,7 @@ function analyse(g: Graph, cfg: Config): Analysis {
   const paths: string[] = [];
   const list = (u: Unit, shown: string, on: ReadonlySet<Unit>): void => {
     for (const e of g.edges(u)) {
-      if (paths.length >= 10 || on.has(e.to)) continue;
+      if (paths.length >= 10 || on.has(e.to) || !follows(e)) continue;
       const step = `${shown} -> ${e.to.name} (${u.file}:${e.line})`;
       if (isRoot.has(e.to)) paths.push(step);
       else if (!built.has(e.to) && reached.has(e.to)) list(e.to, step, new Set([...on, e.to]));
@@ -764,7 +937,6 @@ function analyse(g: Graph, cfg: Config): Analysis {
 }
 
 const where = (u: Unit): string => `${u.file}:${u.line}`;
-const chain = (us: readonly Unit[]): string => us.map((u) => u.name).join(' -> ');
 
 /** Every rule the analysis breaks, as a sentence naming what, where, and what would satisfy it. */
 function problemsOf(a: Analysis, cfg: Config): string[] {
@@ -778,40 +950,40 @@ function problemsOf(a: Analysis, cfg: Config): string[] {
       said.add(key);
       out.push(
         `${reacher.name} (${where(reacher)}) reaches ${target.name} (${where(target)}), by ` +
-          `${chain(via)}, and the fight is built from ${target.name}: ${chain(a.built.get(target) ?? [])}. ` +
-          `A check that reaches a function the fight is built from can move with it: a change inside ` +
-          `${target.name} would move both sides together, and the check could not see it - finding F1 ` +
-          `in docs/learning/gate-proofs.md. Restate what ${target.name} works out from the content, ` +
-          `the way the enemy hero's expected Power is read off the act's table rather than asked of ` +
-          `encounterFor.`,
+          `${chain(via)}, and ${target.name} is one of the builders: ${a.built.get(target) ?? target.name}. ` +
+          `A check that reads its expected side off a function the fight is built from moves with it, ` +
+          `which is finding F1 in docs/learning/gate-proofs.md. This test cannot tell an expected value ` +
+          `from any other use, so any reach fails it. Work out what is needed from the content instead, ` +
+          `the way the enemy hero's expected Power is read off the act's table.`,
       );
     }
   }
   if (a.pathCount > 1) {
     out.push(
-      `${cfg.check} reaches a function that returns a ${cfg.built} along ${a.pathCount} paths:\n    ` +
-        `${a.paths.join('\n    ')}\n  One is the setup the check reads and holds to the ledger. ` +
-        `Any other builds a second copy of the thing checked, so an expected value read off it ` +
-        `agrees with the subject whatever the builder does. Read the expected value off the ` +
-        `content instead.`,
+      `${cfg.check} refers to a function that returns a ${cfg.built} along ${a.pathCount} paths:\n    ` +
+        `${a.paths.join('\n    ')}\n  One is the setup the check reads. This test cannot tell a ` +
+        `second setup read as a second subject from one read for an expected value, which would agree ` +
+        `with the subject whatever the builder does, so any second path fails it. If the check now reads ` +
+        `a second subject on purpose, widen this rule in test/fight-check-reach.test.ts; if it reads an ` +
+        `expected value, work that value out from the content instead.`,
     );
   }
   for (const { holder, name } of a.badNames) {
     out.push(
       `the doc comment on ${holder.name} (${where(holder)}) says its expected side is never read ` +
-        `off \`${name}\`, and the fight is built from no function by that name - it is built from ` +
-        `${[...a.built.keys()].map((u) => u.name).join(', ')}. A sentence about what a check does not ` +
-        `read is written from the code (docs/policies/local-rules.md): name the builders, or ` +
-        `drop the name.`,
+        `off \`${name}\`, and no function by that name is among the builders this test finds: ` +
+        `${[...a.built.keys()].map((u) => u.name).join(', ')}. Either the sentence names the wrong ` +
+        `function, or the fight is built from ${name} in a way this test does not follow. Do not drop ` +
+        `the name to quiet this: find how the fight gets ${name} and make this test follow it, unless ` +
+        `the fight really is no longer built from it.`,
     );
   }
   for (const holder of a.outside) {
     out.push(
       `the doc comment on ${holder.name} (${where(holder)}) says what its expected side is never ` +
         `read off, and ${holder.name} is not in the check this test reads: no name in it has the type ` +
-        `${cfg.held.join(' or ')}, it refers to nothing that is in the check, and nothing in the check ` +
-        `reaches it. Its claim is held by nothing. Connect it to the check, or move the sentence to a ` +
-        `function that is.`,
+        `${cfg.held.join(' or ')}, and nothing in the check reaches it. Its claim is held by nothing. ` +
+        `Move the sentence to a function the check reaches, or connect ${holder.name} to the check.`,
     );
   }
   return out;
@@ -821,9 +993,9 @@ function problemsOf(a: Analysis, cfg: Config): string[] {
 // Running it
 // ---------------------------------------------------------------------------
 
-let built: { readonly graph: Graph } | undefined;
+let loaded: { readonly graph: Graph } | undefined;
 function graph(): Graph {
-  if (built === undefined) {
+  if (loaded === undefined) {
     const program = makeProgram();
     // A walk over a file that does not parse reads whatever the parser salvaged.
     const broken = program
@@ -831,44 +1003,54 @@ function graph(): Graph {
       .filter((d) => d.file !== undefined && !d.file.isDeclarationFile && !rel(d.file.fileName).startsWith('..'))
       .map((d) => `${rel(d.file!.fileName)}: ${ts.flattenDiagnosticMessageText(d.messageText, ' ')}`);
     assert.deepEqual(broken, [], 'a file this test reads does not parse, so what it would report is not about that file');
-    built = { graph: graphOf(program) };
+    loaded = { graph: graphOf(program) };
   }
-  return built.graph;
+  return loaded.graph;
 }
 
-/** Each way the probe came back other than exactly as `SPELLINGS` and the three other probe files say. */
+/** Each way the probe came back other than exactly as `SPELLINGS`, `OUTSIDE` and the other probe files say. */
 function probeMisses(): string[] {
   const g = graph();
   const misses: string[] = [];
+  const names = (us: Iterable<Unit>): string => [...new Set([...us].map((u) => u.name))].sort().join(',');
 
   const s = analyse(g, probeConfig('spellings.ts'));
-  const seedNames = s.seeds.map((u) => u.name).sort();
-  const wanted = Object.keys(SPELLINGS).sort();
-  if (seedNames.join(',') !== wanted.join(',')) {
-    misses.push(`spellings.ts: the check held [${seedNames.join(', ')}], where it is [${wanted.join(', ')}]`);
+  const wanted = Object.keys(SPELLINGS).sort().join(',');
+  if (names(s.seeds) !== wanted) {
+    misses.push(`spellings.ts: the check held [${names(s.seeds)}], where it is [${wanted}]`);
   }
   for (const seed of s.seeds) {
-    const got = [...new Set((s.leaks.get(seed) ?? []).map((l) => l.target.name))].sort();
-    const want = [...(SPELLINGS[seed.name] ?? [])].sort();
-    if (got.join(',') !== want.join(',')) {
-      misses.push(`spellings.ts: ${seed.name} reaches the builders [${got.join(', ')}], where it reaches [${want.join(', ')}]`);
-    }
+    const got = names((s.leaks.get(seed) ?? []).map((l) => l.target));
+    const want = [...(SPELLINGS[seed.name] ?? [])].sort().join(',');
+    if (got !== want) misses.push(`spellings.ts: ${seed.name} reaches the builders [${got}], where it reaches [${want}]`);
   }
-  const builders = [...s.built.keys()].map((u) => u.name).sort().join(',');
-  if (builders !== 'encounterOf,heroOf,setupFor') {
-    misses.push(`build.ts: the builders came out as [${builders}], where they are encounterOf, heroOf and setupFor`);
+  for (const u of s.reached) {
+    if (OUTSIDE.includes(u.name)) misses.push(`spellings.ts: the check reached ${u.name}, which is outside it`);
+  }
+  if (names(s.built.keys()) !== PROBE_BUILDERS) {
+    misses.push(`build.ts: the builders came out as [${names(s.built.keys())}], where they are [${PROBE_BUILDERS}]`);
   }
   if (s.pathCount !== 1) misses.push(`spellings.ts: ${s.pathCount} path(s) to setupFor, where there is exactly 1`);
-  if (s.claims.length !== 1 || s.badNames.length > 0 || s.outside.length > 0) {
+  const claimsOn = s.claims.map((c) => c.holder.name).join(',');
+  if (claimsOn !== 'subject' || s.badNames.length > 0 || s.outside.length > 0) {
     misses.push(
-      `spellings.ts: read ${s.claims.length} claim(s), ${s.badNames.length} naming a non-builder and ` +
-        `${s.outside.length} outside the check, where it is one good claim on subject`,
+      `spellings.ts: read claims on [${claimsOn}], ${s.badNames.length} naming a non-builder and ` +
+        `${s.outside.length} outside the check, where it is one good claim, on subject`,
     );
   }
+
+  const args = analyse(g, probeConfig('args.ts'));
+  for (const [fn, want] of [['subjectWith', ''], ['expectsWith', 'pickEnemy']] as const) {
+    const seed = args.seeds.find((u) => u.name === fn);
+    const got = seed === undefined ? 'not in the check' : names((args.leaks.get(seed) ?? []).map((l) => l.target));
+    if (got !== want) misses.push(`args.ts: ${fn} reaches the builders [${got}], where it reaches [${want}]`);
+  }
+  if (args.pathCount !== 1) misses.push(`args.ts: ${args.pathCount} path(s) to setupWith, where there is exactly 1`);
 
   for (const [file, what] of [
     ['twice.ts', 'a second setup built in the function itself'],
     ['helper-twice.ts', 'a second setup built through a helper called twice'],
+    ['local-twice.ts', 'a second setup built through a local function called twice'],
   ] as const) {
     const a = analyse(g, probeConfig(file));
     if (a.pathCount !== 2) misses.push(`${file}: ${a.pathCount} path(s) to setupFor for ${what}, where there are 2`);
@@ -887,15 +1069,17 @@ function probeMisses(): string[] {
   return misses;
 }
 
-test('the reach walk finds every spelling of a reach in its own probe function, and nothing in the clean ones', () => {
+test('the reach walk finds every spelling in its probe, each in its own function, and nothing in the clean ones', () => {
   // The instrument check. Each spelling the header says is followed is one
   // function of `PROBE_SOURCES['run/spellings.ts']`, bound to its own entry in
   // `SPELLINGS`, so a spelling the walk stopped following fails by name. The
   // clean ones - a restated pick through the shared engine function, a local
   // that shadows a builder's name, a builder named in a string and in a
-  // comment - must reach nothing. `ledgerLike` calls a builder, holds no
-  // `Match`, refers to nothing that does and is reached by nothing that does,
-  // so it must not be in the check at all: it stands for `sigilProblems`.
+  // comment - must reach nothing, and the two in `OUTSIDE` must not be in the
+  // check at all. `args.ts` holds the argument rule both ways: what a reading
+  // hands to its own setup builder is its subject, and the same function read
+  // for an expected value is a builder. The three `*twice.ts` files hold the
+  // path count, and `claims.ts` the sentences.
   assert.deepEqual(
     probeMisses(),
     [],
@@ -904,13 +1088,9 @@ test('the reach walk finds every spelling of a reach in its own probe function, 
   );
 });
 
-test('the fight check reaches nothing the fight is built from, except along one path to the function that builds the setup it reads', (t) => {
-  // Mutations watched going red: `printedEncounter` rewritten to call
-  // `encounterFor`; the same through a helper in `sigils.ts` and through one
-  // in `nodes.ts`; `readLedger` summing `heldHeroSigils`; `cardProblems`
-  // expecting `grantedTraits`; the fight reading's hero expected off
-  // `heroSpecFor`; the enemy hero expected off a second `fightSetupFor`. See
-  // docs/learning/gate-proofs.md, 2026-09-23.
+test('outside src/engine/, the fight check reaches no function the fight is built from, refers to a setup builder along one path at most, and its "never off" sentences name only builders', (t) => {
+  // Mutations watched going red, and the controls that stayed green, are in
+  // docs/learning/gate-proofs.md under 2026-09-23.
   assert.deepEqual(probeMisses(), [], 'the probe did not come back exactly right; see the test above');
 
   const a = analyse(graph(), REAL);
@@ -938,5 +1118,5 @@ test('the fight check reaches nothing the fight is built from, except along one 
   t.diagnostic(`paths to a builder that returns a ${REAL.built}: ${a.pathCount} - ${a.paths.join('; ')}`);
   t.diagnostic(`claims held: ${a.claims.map((c) => `${c.holder.name} [${c.names.join(', ')}]`).join('; ')}`);
 
-  assert.deepEqual(problemsOf(a, REAL), [], 'the fight check reaches what the fight is built from');
+  assert.deepEqual(problemsOf(a, REAL), [], 'the fight check, or a sentence about it, breaks a rule in the header of this file');
 });
