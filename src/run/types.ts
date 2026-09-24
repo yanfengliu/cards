@@ -172,8 +172,9 @@ export type SigilDef = CardSigilDef | HeroSigilDef;
  * order; the *effect* of each grant lives where it applies - on the deck card
  * for a card sigil, on the Health bar or in `heroSpecFor` for a hero sigil -
  * and `sigilProblems` in `sigils.ts` holds ledger and state to each other
- * while `fightSigilProblems`, beside it, holds the ledger to what a fight is
- * actually handed. `hashRun` covers the list.
+ * while `foughtSigilProblems` and `fightSigilProblems`, beside it, hold the
+ * ledger to what a fight is actually handed - every fight a run plays, and
+ * one setup built from the finished run. `hashRun` covers the list.
  */
 export type SigilGrant = {
   /** The hero, for a run-long sigil, or a deck card by its instance id. */

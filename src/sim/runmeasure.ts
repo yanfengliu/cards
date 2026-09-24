@@ -30,8 +30,8 @@
 // nothing here can see a class's attack go missing on its way into a fight.
 // The other two classes are gated by `test/classes.test.ts` instead: a smaller
 // seed window, but every rung of the unlock ladder, each run replayed from its
-// log through JSON and `migrateRunLog`, and each run's fights held to its
-// ledger and its class's hero by `fightSigilProblems`.
+// log through JSON and `migrateRunLog`, and every fight each run plays held to
+// its ledger and its class's hero by `watchFights`.
 // Pointing `--verify` at a class is expected to be useful and is not always
 // meaningful: one invariant asks whether the seed window can see a difference
 // at all, and a class that wins no run in 200 seeds has no such power, so
@@ -57,7 +57,7 @@ import { drawDistinctCards, fightSeedFor } from '../run/nodes.ts';
 import { contentForClass, replayRun, runRun, startRun } from '../run/run.ts';
 import { ALL_UNLOCKS, FRESH_UNLOCKS, unlocksFor } from '../content/unlocks.ts';
 import { stillLocked, unlockProblems, unlockedContent } from '../run/unlocks.ts';
-import { fightSigilProblems, sigilProblems } from '../run/sigils.ts';
+import { type FightTally, fightSigilProblems, sigilProblems, watchFights } from '../run/sigils.ts';
 import type {
   NodeType,
   RunContent,
@@ -382,16 +382,26 @@ export type RunInstrument = {
   /** Ledger-versus-deck disagreements, unknown ids, duplicate holds. Empty is the claim. */
   readonly sigilProblems: string[];
   /**
-   * Disagreements between the fight setup the run hands the engine and the
-   * run's content plus its ledger: a granted sigil the pool does not carry, a
-   * trait in the pool nothing granted, a hero number that is not the content's
-   * plus the ledger's, or any other field of a card or of the hero - a race, a
-   * name, the hero's traits - that moved on the way in.
+   * Disagreements between what the engine is handed and the run's content
+   * plus its ledger: a granted sigil the pool does not carry, a trait in the
+   * pool nothing granted, a hero number that is not the content's plus the
+   * ledger's, or any other field of a card or of the hero - a race, a name,
+   * the hero's traits - that moved on the way in. Read in two places: in
+   * every fight each checked run played, as the engine held it when the fight
+   * began (`watchFights`), and in one setup built from each finished run
+   * (`fightSigilProblems`).
    * Empty is the claim, and it is a different claim from `sigilProblems` -
    * that one compares two run-layer records, this one compares the run layer
    * with the engine's own inputs.
    */
   readonly fightSigilProblems: string[];
+  /**
+   * The fights `watchFights` held across the checked runs, by the kind of
+   * node each was fought at. It is what stops "every fight" reporting "did
+   * not run" as "passed": a kind of fight never fought while both kinds of
+   * sigil were held is a claim that was never asked of one.
+   */
+  readonly fightsHeld: Readonly<Record<'fight' | 'elite' | 'boss', Readonly<FightTally>>>;
   readonly detail: string[];
 };
 
@@ -420,14 +430,36 @@ export function checkRuns(
   let sigilsGranted = 0;
   const sigilTrouble: string[] = [];
   const fightTrouble: string[] = [];
+  const tally = (): FightTally => ({ fights: 0, withCardSigil: 0, withHeroSigil: 0 });
+  const fightsHeld = { fight: tally(), elite: tally(), boss: tally() };
 
   for (const seed of seeds) {
-    const first = runRun(content, seed, makeRunAgent({ route, placement, seed }));
+    // The first run of each seed is watched: every fight it plays is held to
+    // the run's ledger as the engine holds it when the fight begins. The watch
+    // decides nothing, so this is the unwatched run - the reruns below, which
+    // are not watched, must hash the same.
+    const watch = watchFights(makeRunAgent({ route, placement, seed }));
+    const first = runRun(content, seed, watch.agent);
     const firstHash = hashRun(first.run);
     hashes.add(firstHash);
     sigilsGranted += first.run.sigils.length;
     for (const p of sigilProblems(first.run)) sigilTrouble.push(`seed ${seed}: ${p}`);
-    for (const p of fightSigilProblems(first.run)) fightTrouble.push(`seed ${seed}: ${p}`);
+    for (const p of watch.problems) fightTrouble.push(`seed ${seed}, ${p}`);
+    let watched = 0;
+    for (const kind of ['fight', 'elite', 'boss'] as const) {
+      const t = watch.held[kind];
+      watched += t.fights;
+      fightsHeld[kind].fights += t.fights;
+      fightsHeld[kind].withCardSigil += t.withCardSigil;
+      fightsHeld[kind].withHeroSigil += t.withHeroSigil;
+    }
+    if (watched !== first.run.fightsFought) {
+      fightTrouble.push(
+        `seed ${seed}: the run fought ${first.run.fightsFought} fight(s) and the watch held ` +
+          `${watched}, so some fight was never read`,
+      );
+    }
+    for (const p of fightSigilProblems(first.run)) fightTrouble.push(`seed ${seed}, the finished run's setup: ${p}`);
 
     for (let t = 1; t < trials; t++) {
       const again = runRun(content, seed, makeRunAgent({ route, placement, seed }));
@@ -471,8 +503,22 @@ export function checkRuns(
     sigilsGranted,
     sigilProblems: sigilTrouble,
     fightSigilProblems: fightTrouble,
+    fightsHeld,
     detail,
   };
+}
+
+/**
+ * The kinds of fight the watch never held with both kinds of grant to hand
+ * over - no fight of that kind with a card sigil in the deck, or none with a
+ * Power or Armour sigil in the ledger - across every checked run. Each one
+ * named is a part of "every fight is handed its ledger" that the window never
+ * asked, which `--verify` fails on rather than reporting as a pass.
+ */
+export function unheldFightKinds(inst: RunInstrument): ('fight' | 'elite' | 'boss')[] {
+  return (['fight', 'elite', 'boss'] as const).filter(
+    (k) => inst.fightsHeld[k].withCardSigil === 0 || inst.fightsHeld[k].withHeroSigil === 0,
+  );
 }
 
 /** What `checkUnlockReplay` found. Empty `problems` is the claim. */
@@ -518,6 +564,11 @@ export type UnlockReplayCheck = {
  * 20/20 seeds separated whatever the sets did. With the narrowing switched off
  * entirely, so that every set drafted from the whole pool, it still reported
  * 20/20 and `verify:run` exited 0.
+ *
+ * Nothing but `main` called this, so the fix could be taken back out of this
+ * file - the call below and its import - with every gate green. `test/unlocks.test.ts`
+ * now asks it of a content its sets cannot narrow, where the count must be
+ * zero, and of the shipped content, where every pair must separate.
  */
 export function checkUnlockReplay(
   seeds: readonly number[],
@@ -1111,16 +1162,27 @@ function main(): void {
       `. Two differently-routed runs agreed on ` +
       `${agree.shared - agree.disagreed}/${agree.shared} shared fight seeds.`,
   );
+  const held = inst.fightsHeld;
+  const unheld = unheldFightKinds(inst);
   const sigilsOk =
-    inst.sigilsGranted > 0 && inst.sigilProblems.length === 0 && inst.fightSigilProblems.length === 0;
+    inst.sigilsGranted > 0 &&
+    inst.sigilProblems.length === 0 &&
+    inst.fightSigilProblems.length === 0 &&
+    unheld.length === 0;
   console.log(
     `- Sigils are live, consistent and in the fight: ${sigilsOk ? 'PASS' : 'FAIL'}; ` +
       `${inst.sigilsGranted} granted across ${checkSeeds.length} runs, ` +
       `${inst.sigilProblems.length} ledger/deck disagreement(s), and ` +
-      `${inst.fightSigilProblems.length} disagreement(s) between the fight setup the run hands ` +
-      `the engine and its content plus its ledger, every field of every card and of the hero ` +
-      `compared. A run that granted none did not exercise the path, and a path that did not run ` +
-      `cannot be reported as passing.`,
+      `${inst.fightSigilProblems.length} disagreement(s) between what the engine is handed and ` +
+      `the run's content plus its ledger, every field of every card and of the hero compared - ` +
+      `in each of the ${held.fight.fights + held.elite.fights + held.boss.fights} fights those ` +
+      `runs played, read as it began: ${held.fight.fights} ordinary fights, ` +
+      `${held.elite.fights} elites and ${held.boss.fights} bosses, of which ` +
+      `${held.elite.withCardSigil} elites and ${held.boss.withCardSigil} bosses had a card sigil ` +
+      `in the deck and ${held.elite.withHeroSigil} and ${held.boss.withHeroSigil} a Power or ` +
+      `Armour sigil in the ledger - and in a setup built from each finished run. A run that ` +
+      `granted none did not exercise the path, and a path that did not run cannot be reported ` +
+      `as passing.`,
   );
   const unlockOk =
     unlockReplay.problems.length === 0 && unlockReplay.rungsSeparated.every((p) => p.seeds > 0);
@@ -1178,17 +1240,25 @@ function main(): void {
     //           gate how many sigils a run takes or which: those are the bot's
     //           preferences, printed above, and a band around them would go
     //           red on a content change that made a sigil worth taking.
-    //   Proves  that each grant reaches the fight: the pool the run hands
-    //           `setupFight` resolves each deck instance to its printed traits
-    //           plus its granted ones and nothing else, and the hero spec is
-    //           the content's numbers plus the ledger's exactly. Every other
+    //   Proves  that each grant reaches every fight the check runs play,
+    //           elites and bosses included: read through `watchFights` as
+    //           each fight begins, the pool the engine resolves cards through
+    //           gives each deck instance its printed traits plus its granted
+    //           ones and nothing else, and the hero it built has the
+    //           content's numbers plus the ledger's exactly. Every other
     //           field of each card and of the hero - a race, a name, a hero's
     //           traits - is walked off the objects and must be the content's,
-    //           the forge's cost, Power and Health aside. A run holding no
-    //           sigil is checked by the same arithmetic, so a trait that
-    //           appeared from nowhere is a failure and not a silent pass.
-    //   Bound   to the setup, not to a resolved fight: it says the fight was
-    //           handed the sigil, not that the card carrying it was drawn.
+    //           the forge's cost, Power and Health aside. A setup built from
+    //           each finished run is held the same way, for a grant taken
+    //           after the last fight. A run holding no sigil is checked by
+    //           the same arithmetic, so a trait that appeared from nowhere is
+    //           a failure and not a silent pass, and a window in which no
+    //           ordinary fight, no elite or no boss was fought holding both
+    //           kinds of sigil fails too.
+    //   Bound   to the fight as it is handed, not as it resolves: it says the
+    //           fight was handed the sigil, not that the card carrying it was
+    //           drawn. The hero's own maximum Health is not held; see
+    //           `foughtSigilProblems`.
     //   Bound   to the Knight, whose hero has no traits, so a class's attack
     //           dropped on its way into a fight cannot show here. That is
     //           `test/classes.test.ts`'s, which reads the hero the engine
@@ -1259,6 +1329,15 @@ function main(): void {
         `${inst.fightSigilProblems.length} disagreement(s) between the fight the run hands the ` +
           `engine and its content plus its ledger - a grant that did not reach it, or a field ` +
           `nothing granted that moved anyway: ${inst.fightSigilProblems[0]}`,
+      );
+    }
+    for (const kind of unheld) {
+      failures.push(
+        `across ${checkSeeds.length} runs the fight watch held ${inst.fightsHeld[kind].fights} ` +
+          `${kind} fight(s), ${inst.fightsHeld[kind].withCardSigil} with a card sigil in the deck ` +
+          `and ${inst.fightsHeld[kind].withHeroSigil} with a Power or Armour sigil in the ledger, ` +
+          `so "every ${kind} fight is handed its ledger" was never asked of one with both kinds of ` +
+          `grant to hand over and cannot be reported as a pass`,
       );
     }
     if (unlockReplay.problems.length > 0) {

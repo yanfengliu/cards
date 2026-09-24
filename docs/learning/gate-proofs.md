@@ -6,6 +6,108 @@ Auditing a gate means reaching what was measured at the time, never the sentence
 
 Every entry names the revision its numbers were taken at, and a suite total inside a quoted transcript is that revision's, not today's. This is not pedantry: entries written on parallel branches were merged, and the branch that gated the resolver's ordering recorded "of 44" while the branch that added `src/sim/bots.test.ts` recorded "37/37". Their merge `49f017b` is 47, and this round makes it 55. A numerator reproduces; a denominator is a fact about a tree.
 
+## 2026-09-23 — closing the final acceptance review of `907c8e9`: a check that held one setup and was named for every fight
+
+On branch `worktree-agent-ae84844a610590c1d`, cut from `907c8e9`, whose suite is **286 tests**. The review found the code acceptable and the record not: its sentences said more than its gates checked. Each finding below is its own commit and its own section, with the revision its rows were taken at.
+
+### The runner
+
+`mutate.mjs` in the session scratchpad, an ignored path, written fresh for this round. It carries the three rules in `docs/policies/local-rules.md` and all three self-probes. A red for a test is its exact name on a `not ok N - <name>` line under `--test-reporter=tap`, with an `ERR_ASSERTION` in the block beneath it. Every command runs once unmutated first and must exit 0, and a failure already in that baseline is not credited. The crash guard is differenced against it too. Every anchor must match exactly once, with `\n` read as the file's own line ending, and every anchor is matched in a dry run before anything runs. Each touched file is restored from the bytes read before the edit, in reverse order, and its sha256 compared. The rows ran in a scratch copy: a tar of the worktree's 152 tracked files at the named revision, with `npm ci`.
+
+```
+ok   SELF      wanted UNCONFIRMED got UNCONFIRMED a mutation that cannot compile
+ok   ATTRIB    wanted UNCONFIRMED got UNCONFIRMED N1 under the name of a test it does NOT break
+ok   POSITIVE  wanted RED         got RED         the same mutation, N1, under the name of a test it DOES break
+```
+
+`ATTRIB` names *an unknown class is refused by name, and the refusal names the classes offered*; `POSITIVE` names the ladder test. Blinded with `BLIND=1`, `SELF` came back `CRASHED`, `POSITIVE` came back `UNCONFIRMED`, and the runner exited 2 before any mutation ran.
+
+### D — every fight a run plays is held to its ledger (`0a1c8fd`)
+
+**What was claimed and what was checked.** `AGENTS.md`, the ladder test's name and the run-layer devlog said every fight a run hands the engine is held to its ledger. `fightSigilProblems` built one setup from the finished run at act 0's first node, always an ordinary fight. The one test that read real fights read only the hero entity's traits and name. The review changed what `fightSetupFor` hands elite and boss fights three ways, and all seven gates stayed green on each: card sigils stripped (129 of 360 runs played differently), a sigilled card's race moved in boss fights (4 of 360), and hero-sigil Power and Armour dropped in boss fights (163 of 360). The run counts are the review's, from its own digests.
+
+**What holds it now.** `foughtSigilProblems(run, fight)` in `src/run/sigils.ts` reads one live fight at its first placement, before round 1 resolves: the `CardPool` the engine resolves every card through, the hero entity it built, the enemy hero, and the deck it shuffled. It holds them to the run's content plus its ledger as they stand at that node. The expected side is read off the ledger, the printed cards, the forge records and `run.content.hero`, never off `resolveDeckCard`, `heroSpecFor` or `fightSetupFor`. How each `HeroSpec` field is read back off the entity is a `Record` over `keyof HeroSpec`, so a field the spec gains does not compile until someone says how it is read. `watchFights(agent)` hands it every fight through the agent's placement policy and tallies fights by node kind, with how many held a card sigil or a Power or Armour sigil. The ladder test in `test/classes.test.ts` watches all 216 of its runs. Per run, the watch must have seen every fight the run fought. Per class, elites and bosses must have been fought holding both kinds of grant. `verify:run` watches the first run of each check seed, and fails unless ordinary fights, elites and bosses were each fought holding both kinds of grant. `fightSigilProblems` still reads the finished run's setup, for a grant taken after the last fight. `test/sigils.test.ts` makes the detector fire on fixture fights at an elite and at the boss, with one thing moved at a time, and makes the watch report one.
+
+**Populations, measured at `0a1c8fd`** with a scratch probe that calls the shipped `watchFights` over the two windows:
+
+| window | ordinary fights | elites (with a card sigil / with a Power or Armour sigil) | bosses (the same) |
+|---|---|---|---|
+| ladder test, Knight, 72 runs | 521 | 117 (56 / 69) | 174 (97 / 102) |
+| ladder test, Ranger, 72 runs | 412 | 75 (39 / 33) | 114 (59 / 57) |
+| ladder test, Mage, 72 runs | 254 | 39 (18 / 3) | 67 (38 / 12) |
+| `verify:run`, Knight, 20 check seeds | 167 | 39 (29 / 22) | 57 (48 / 37) |
+
+The Mage's elites are the thinnest: 3 of 39 fought with a Power or Armour sigil held.
+
+N1, N2 and N4 are the review's mutations of `fightSetupFor` in `src/run/run.ts`, restated byte for byte from its mutation files. N3 and N5 are the two it ran beside them, which were already red at `907c8e9`.
+
+| # | mutation | command | the failure |
+|---|---|---|---|
+| D1 | N1: card sigils stripped from the deck handed to every elite and boss fight | `test/classes.test.ts` | the ladder test: `Knight seed 1/greedy, a fresh profile: a fight the run played was not handed its content plus its ledger`, first `act 1 row 8, the boss: the fight resolves u_ironguard#12 with traits [guard] and the ledger says it should be [guard, relay]` |
+| D1v | N1 | `npm run verify:run` | `137 disagreement(s) between the fight the run hands the engine and its content plus its ledger`, first `seed 1, act 1 row 8, the boss: the fight resolves u_paladin#16 with traits [guard] and the ledger says it should be [guard, relay]` — exit 1 |
+| D1g | N1 | `npm run gates` | `"test" failed (exit 1), so the chain stops here and did not run verify, verify:run` — exit 1, where the review saw exit 0 |
+| D1a | N1 | the whole suite | the ladder test, as D1 |
+| D2 | N2: a sigilled card's race moved to human in boss fights only | `test/classes.test.ts` | the ladder test: `act 1 row 8, the boss: the fight resolves u_ironguard#12 with tribe "human", and u_ironguard prints "dwarf"` |
+| D2v | N2 | `npm run verify:run` | `seed 4, act 1 row 8, the boss: the fight resolves u_ironguard#12 with tribe "human", and u_ironguard prints "dwarf"` — exit 1 |
+| D2g | N2 | `npm run gates` | `"test" failed (exit 1)` — exit 1 |
+| D3 | N4: hero-sigil Power and Armour dropped in boss fights only | `test/classes.test.ts` | the ladder test: `act 2 row 8, the boss: the engine built the player's hero with armour 0, and it should be 1: the content's 0 plus every Armour sigil in the ledger`, then `act 3 row 8, the boss: … with power 2, and it should be 3` |
+| D3v | N4 | `npm run verify:run` | `seed 2, act 2 row 8, the boss: the engine built the player's hero with armour 0, and it should be 1` — exit 1 |
+| D3g | N4 | `npm run gates` | `"test" failed (exit 1)` — exit 1 |
+| D1c | **control**: N1 | `test/sigils.test.ts` | *the shipped run grants sigils and replays them*, which reads only the finished run's setup on shipped runs, stays on an `ok` line. The file is red on the detector test, whose elite and boss setups N1 strips |
+| D3c | **control**: N4 | `test/classes.test.ts` | *every fight a run plays is fought by its class's own hero, traits and all* stays on an `ok` line: it reads traits and name only |
+| D4 | N3: the hero's class traits dropped in boss fights only | `test/classes.test.ts` | the ladder test: `Ranger seed 1/greedy, a fresh profile`, `act 1 row 8, the boss: the engine built the player's hero with traits [], and it should be ["volley"]` |
+| D5 | N5: boss fights start at the run maximum | `test/classes.test.ts` | the ladder test: `Knight seed 2/greedy`, `act 1 row 8, the boss: the engine built the player's hero with health 230, and it should be 166` |
+| D6 | `foughtSigilProblems` returns nothing | `test/sigils.test.ts` | *foughtSigilProblems names what moved in a fight the engine holds, and watchFights hands it every fight*: `elite: card sigils stripped from the pool` |
+| D6c | **control**: D6 | `test/classes.test.ts` | GREEN, as wanted. A blinded detector finds nothing in any run, so the ladder test cannot see it; the detector test is what does |
+| D7 | `watchFights` tallies each fight and never checks it | `test/sigils.test.ts` | the detector test: `The input did not match the regular expression /^act 1 row 5, the boss: the fight resolves t_grunt#0 with traits \[\]/m` |
+
+Seventeen rows, all as wanted, and the three self-probes as they must be. The copy's `src/run/run.ts` (`6cfd82c1…`) and `src/run/sigils.ts` (`57d93191…`) hashed the same before the first edit and after the last restore.
+
+**What did not move.** `npm run verify` printed the same 60 lines at `907c8e9` and `0a1c8fd` apart from `Elapsed:`. `npm run verify:run` printed the same 68 lines apart from `Elapsed:` and its sigil line, which now names the fights it held: `98 granted across 20 runs`, as before, and `263 fights`.
+
+**The bound.** It reads a fight as it is handed, at its first placement, not as it resolves. It does not hold the hero's own maximum Health, which the engine sets to the Health the fight is handed; that is known issue 5 in `docs/learning/defect-register.md`, and holding it would pin the defect as correct. The ladder test is seeds 1..6, both route styles, append-right placement, three classes and six rungs. `verify:run` is the Knight's 20 check seeds.
+
+### C — verify:run's unlock check cannot lose its `hashPlayed` fix silently (`fdeeb03`)
+
+**What the review found.** `checkUnlockReplay` counts a seed as separated when two unlock sets played different runs. The fix that made it compare `hashPlayed` instead of `hashRun` was one call in `src/sim/runmeasure.ts`, and nothing but `main` called the function. Putting `hashRun` back and tidying the import left all seven gates green. With `startRun`'s narrowing also switched off, `verify:run` printed `20/20 seed(s) played differently` again and exited 0: the defect the first review found, back without a sound. D7 of the run-layer entry below guards `hashPlayed`'s definition, not its use here.
+
+**What holds it now.** *verify:run's unlock check reads what each run did: where the sets narrow nothing, it sees no seed separated*, in `test/unlocks.test.ts`. It builds a content the sets cannot narrow - every gated id taken out of every pool and out of the sigils, and it asserts a fresh profile narrows nothing there. `checkUnlockReplay` must count no seed separated on it, over seeds 1..4. On the shipped content, over the same seeds, every neighbouring pair must separate, so the zero cannot come from a check that has stopped counting.
+
+| # | mutation | command | the failure |
+|---|---|---|---|
+| C1 | **the review's exact revert**: `played.push(hashRun(run))`, and `hashPlayed` dropped from the import | `test/unlocks.test.ts` | the guard: `4 of 4 seeds were counted as playing differently at a different set, and no set here narrows anything - the count is reading the digest, which names the set, rather than what the run did`, `4 !== 0` |
+| C1g | C1 | `npm run gates` | `"test" failed (exit 1), so the chain stops here and did not run verify, verify:run` — exit 1, where the review saw exit 0 |
+| C1v | **control**: C1 | `npm run verify:run` | GREEN, as wanted: the check cannot see its own count go blind while the narrowing still separates the sets |
+| C2v | **control**: C1 with `startRun` narrowing by `null` | `npm run verify:run` | GREEN, printing `20/20 seed(s) played differently at a different set (a fresh profile / two deeds earned: 20; two deeds earned / every deed earned: 20)` — the review's reproduction, unchanged |
+| C2 | the same pair of edits | `test/unlocks.test.ts` | the guard, as C1 |
+| C3 | `startRun` narrowing by `null` alone | `test/unlocks.test.ts` | the guard's shipped half: `a fresh profile / two deeds earned: no seed separated on the shipped content` |
+| C4 | the check stops counting neighbouring pairs | `test/unlocks.test.ts` | the guard's shipped half, as C3 |
+
+Seven rows as wanted, with the three self-probes: `SELF` (a syntax error in the call) and `ATTRIB` (C1 under *a log naming an unreadable unlock set is refused by name, never quietly widened*) came back `UNCONFIRMED`, and `POSITIVE` (C1 under the guard) came back `RED`. Every anchor matched once. The copy, extracted at `fdeeb03`, hashed the same after the last restore: `src/sim/runmeasure.ts` `6bed0b91…`, `src/run/run.ts` `6cfd82c1…`.
+
+**The bound.** Four seeds and the check's own three sets, router and placement. It says the count reads what a run did. That the sets separate over 20 seeds stays `verify:run`'s own failure condition.
+
+### A — the race tooltips are true for whichever class reads them (`11fe5db`)
+
+**What the review found.** Every card the race tooltips named was one some class could draft at all 32 unlock sets. But the tooltip is one sentence for every class, and it named every class's starting deck plainly, as "your line's" cards. The Knight can never hold the Herald, the Archer or the Treewarden, the Ranger the Ironguard or the Treewarden, and the Mage the Hornblower or the Archer. The glossary's claim that starting-deck cards "can never be locked" is true only for the class whose deck it is. The gate merged the three classes, so some class holding each card was enough.
+
+**What holds it now.** A starter every class can hold is named plainly; one some class can never hold is named as the class that starts with it: "the Squire and Berserker, the Ranger's Hornblower, and the Mage's Herald". Every example the tooltip showed at `907c8e9` is still in it. The tribal example is the cheapest one every class can draft at a fresh profile. *a race tooltip names plainly only cards every class can hold at a fresh profile, and gives any other only to a class that starts with it* asks each class on its own. "Can hold" is the class's starting deck plus its pool less `GATED_IDS`, read off the content. Which class a card is given to is read off the words - the possessives between the nearest "the" and the name - not asked of the glossary. It asserts that some class starts with a card another can never hold, so the per-class question is not the merged one. It also asserts that some tooltip gives a card to a class, so the possessive half ran. The new sentences were read on the fight screen through real hovers, on the race badge's title, at `11fe5db`.
+
+| # | mutation | command | the failure |
+|---|---|---|---|
+| A1 | **the defect as it shipped**: every starting deck's cards named plainly | `test/explain.test.ts` | the gate, the review's seven pairs exactly: `the Human tooltip names the Human Hornblower (u_hornblower) plainly, and the Mage cannot hold it at a fresh profile`, then the Herald and the Knight, the Ironguard and the Ranger, the Archer and the Knight, the Archer and the Mage, the Treewarden and the Knight, the Treewarden and the Ranger |
+| A1g | A1 | `npm run gates` | `"test" failed (exit 1)` — exit 1 |
+| A1m | A1, with the gate's per-class question merged back | `test/explain.test.ts` | still red, on the gate's other half: `no race tooltip gives any card to a class, so the check that each such card is that class’s starter never ran` |
+| A4 | one class-limited starter, the Hornblower, named plainly, the others keeping their class | `test/explain.test.ts` | `the Human tooltip names the Human Hornblower (u_hornblower) plainly, and the Mage cannot hold it at a fresh profile` |
+| A4m | **control**: A4, with the per-class question merged back as it was at `907c8e9` | `test/explain.test.ts` | GREEN, as wanted: the merged question is blind to it, which is the review's finding |
+| A2 | each class-limited starter given to the classes that do not start with it | `test/explain.test.ts` | `the Human tooltip gives the Human Hornblower (u_hornblower) to the Knight, which does not start with it`, and nine more |
+| A3 | the tribal example drawn from any class's pool, as at `907c8e9`, with the Kindler dropped from the Ranger's | `src/render/glossary.ts`, `src/content/classes.ts` | `the Dwarf tooltip names the Dwarf Kindler (u_kindler) plainly, and the Ranger cannot hold it at a fresh profile` |
+| A3c | **control**: the Kindler dropped from the Ranger's pool, the glossary as it stands | `test/explain.test.ts` | GREEN, as wanted: the Dwarf line names no tribal card rather than a wrong one, which is what the glossary says it does |
+
+Eight rows as wanted, with the three self-probes: `SELF` and `ATTRIB` (A1 under *an unknown race gets a truthful placeholder rather than a blank*) came back `UNCONFIRMED`, and `POSITIVE` (A1 under the gate) came back `RED`. A first run had A1m wanting GREEN and got RED, for the reason in its row; A4 and A4m were added to show the per-class question on its own. Every anchor matched once, and the copy extracted at `11fe5db` hashed the same after the last restore: `src/render/glossary.ts` `cac3bedb…`, `test/explain.test.ts` `67448eba…`, `src/content/classes.ts` `5f5a2d9e…`.
+
+**The bound.** A fresh profile is the floor: narrowing only widens with deeds, so a card a class can hold there it can hold at every set. It reads the three player races and the three classes in `CLASSES`. A possessive is read as "the class starts with it", and nothing checks that the plain list is complete.
+
 ## 2026-09-23 — closing a final review of the run layer: five defects that passed every gate, the sixth check built from the value it checks, and a chain that starts npm once
 
 Taken at `1a72436` on branch `worktree-agent-ae75d48e5bf3f6327`, cut from `9b36329`. Beneath it is `3d113b0`, a predecessor's uncommitted tree saved verbatim after a session-limit death. Its message certified nothing, and no row below is taken from it: every one was re-run here. The suite is **280 tests** at `1a72436` and **276** at `9b36329`. Thirty-five mutations were applied to the committed tree, each run against a shipped command, restored from memory, and each file's sha256 compared before and after. All thirty-five came back as their row says. Only `AGENTS.md` changed during the run, and no command below reads it. After the review at the end of this entry, the whole list was run again at `fbbef39`: the same verdict on every row, the same failure text, and the same digests. Nine more ran against an archive of `9b36329` under `.probe/base`, to show what each defect did before this round.

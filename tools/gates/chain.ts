@@ -1,6 +1,11 @@
 /**
- * `npm run gates`: every gate in order, cheapest first, each run as the command
- * its own `npm run <name>` script runs - but without starting npm to run it.
+ * `npm run gates`: every gate in the order `package.json` names them, each run
+ * as the command its own `npm run <name>` script runs - but without starting
+ * npm to run it. The order is by kind, not by cost: the four static checks,
+ * then the tests, then the two measurements. `typecheck` leads although each
+ * of the three gate scripts after it takes less time - 4.6s against 0.3s to
+ * 1.0s in the final acceptance review's run of `907c8e9` - so "cheapest
+ * first", which this header said until that review, was not true.
  *
  *   node tools/gates/chain.ts typecheck gate:boundaries ... verify:run
  *

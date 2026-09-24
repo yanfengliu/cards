@@ -3,7 +3,7 @@
 Status: complete
 Owner: coordinator
 Created: 2026-09-11
-Updated: 2026-09-11
+Updated: 2026-09-23
 
 ## Problem and outcome
 
@@ -63,7 +63,7 @@ The set carries **both** halves — what was gated and what was owned — rather
 
 ## Outcome
 
-Complete on branch `worktree-agent-a1d38fd64b9b07e60`, cut from `dcf2cdf`. Not merged; the coordinator owns integration.
+Complete on branch `worktree-agent-a1d38fd64b9b07e60`, cut from `dcf2cdf`, and handed over unmerged. Two independent review rounds followed, below. **Merged to main at `efcd8f6`** on 2026-09-11, which merged round 2's close, `8010eda`.
 
 **Checks.** `npm run gates` exit 0, **237 tests** (218 at the base). `npm run audit` 0 vulnerabilities, on an unchanged lockfile. `node .probe/mutate-unlocks.mjs`: 16 of 16 red for their own reason, with the runner's own probe unconfirmed as it must be. `node tools/ui-probe/pick.ts 7 light` and `node tools/ui-probe/run.ts 7 light knight` and `… knight fresh` all pass against Chrome; screenshots under the ignored `.probe-ui/`.
 

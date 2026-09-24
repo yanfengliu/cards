@@ -225,9 +225,20 @@ test('an unknown race gets a truthful placeholder rather than a blank', () => {
 // names: nothing a player reads in the view may name a card a fresh profile
 // cannot draft.
 //
+// The first gate is asked **class by class**. It used to ask of the three
+// classes merged, and the tooltip then named every class's starting deck
+// plainly: the Knight read about the Herald, the Archer and the Treewarden,
+// which it can never hold at any unlock set, and the merged gate could not see
+// it, because some class could hold each one. The tooltip is one sentence for
+// every class, so a card it names plainly must be one each class can hold on
+// its own, and a card it gives to a class - "the Mage’s Herald" - must be one
+// that class starts with.
+//
 // Bound: "cannot draft" is read straight off the content - a card in
-// `GATED_IDS`, or one no class starts with and no class pool lists - so the
-// list follows every gating change, including ones not made yet. It is read
+// `GATED_IDS`, or one no class starts with and no class pool lists - and "can
+// hold", for one class, is its starting deck plus its pool less `GATED_IDS`, so
+// both follow every gating change, including ones not made yet. A fresh profile
+// is the floor: an unlock only ever widens a pool. They are read
 // there and not through `unlockedRewards`, because that is the call the
 // glossary picks its examples with, and a gate built on the same call agrees
 // with the glossary whenever the call is wrong. A card is "named" when its full
@@ -250,6 +261,12 @@ function lockedAtAFreshProfile(): (typeof PLAYER_CARDS)[number][] {
   return PLAYER_CARDS.filter((c) => gated.has(c.id) || (!starters.has(c.id) && !inAPool.has(c.id)));
 }
 
+/** Every card one class can hold at a fresh profile: its starting deck, and its pool less `GATED_IDS`. */
+function holdableAtAFreshProfile(cls: (typeof CLASSES)[number]): Set<string> {
+  const gated = new Set(GATED_IDS);
+  return new Set([...cls.startingDeck, ...cls.rewards.map((r) => r.cardId).filter((id) => !gated.has(id))]);
+}
+
 /** The words a card can be named by: its full name, and the name without its first word. */
 function namesOf(card: (typeof ALL_CARDS)[number]): string[] {
   const words = card.name.split(' ');
@@ -261,7 +278,27 @@ function mentions(text: string, name: string): boolean {
   return new RegExp(`(^|[^A-Za-z])${name.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}`).test(text);
 }
 
-test('a race tooltip points only at cards a fresh profile can draft', () => {
+/**
+ * For each place `text` names `name`, the classes it gives the card to: the
+ * possessives between the nearest "the" before it and the name, so "the Mage’s
+ * Herald" gives the Herald to the Mage and "the Squire and Berserker" gives the
+ * Berserker to nobody. Worked out here, from the words, rather than asked of the
+ * glossary that wrote them.
+ */
+function ownersAtEachMention(text: string, name: string): string[][] {
+  const out: string[][] = [];
+  const re = new RegExp(`(^|[^A-Za-z])${name.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}`, 'g');
+  for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+    const before = text.slice(0, m.index + m[1]!.length);
+    const thes = [...before.matchAll(/(^|[^A-Za-z])[Tt]he /g)];
+    const last = thes[thes.length - 1];
+    const span = last === undefined ? before : before.slice(last.index + last[0].length);
+    out.push(CLASSES.filter((cls) => span.includes(`${cls.name}’s`)).map((cls) => cls.id));
+  }
+  return out;
+}
+
+test('a race tooltip names plainly only cards every class can hold at a fresh profile, and gives any other only to a class that starts with it', () => {
   const locked = lockedAtAFreshProfile();
   // The subject has to exist, or "names no locked card" is true of anything.
   assert.ok(
@@ -269,7 +306,19 @@ test('a race tooltip points only at cards a fresh profile can draft', () => {
     `no player card is out of a fresh profile's reach - GATED_IDS names none - so "the tooltip ` +
       `names no locked card" would pass for any tooltip at all`,
   );
+  const holdable = new Map(CLASSES.map((cls) => [cls.id, holdableAtAFreshProfile(cls)]));
+  // And the per-class half has to have teeth: some class must start with a
+  // card another class can never hold, or asking each class on its own would
+  // find nothing the merged question did not.
+  const startsWithWhatAnotherCannotHold = CLASSES.flatMap((a) =>
+    CLASSES.flatMap((b) => a.startingDeck.filter((id) => !holdable.get(b.id)!.has(id)).map((id) => `${b.id}:${id}`)),
+  );
+  assert.ok(
+    startsWithWhatAnotherCannotHold.length > 0,
+    'every class can hold every card every other class starts with, so the per-class question below is the merged one',
+  );
   const lockedIds = new Set(locked.map((c) => c.id));
+  const wrong: string[] = [];
   for (const [tribe, term] of Object.entries(TRIBE_TERMS)) {
     for (const card of locked) {
       for (const name of namesOf(card)) {
@@ -282,25 +331,66 @@ test('a race tooltip points only at cards a fresh profile can draft', () => {
       }
     }
     // What it does name: at least one card, every one of its own race, and -
-    // for a race a fresh profile can draft a tribal card of - one of those.
+    // for a race whose tribal card every class can draft - one of those. Of
+    // the player cards, one named plainly must be one each class can hold, and
+    // one given to a class ("the Mage’s Herald") must be one that class starts
+    // with. An enemy race's line names enemy cards, which no player is offered.
     const named = ALL_CARDS.filter((c) => namesOf(c).some((n) => mentions(term.line, n)));
     if (tribe === 'hero') continue;
     assert.ok(named.length > 0, `The ${term.name} tooltip names no card at all:\n\n${term.line}`);
     for (const card of named) {
       assert.equal(card.tribe, tribe, `The ${term.name} tooltip names ${card.name}, a ${card.tribe}:\n\n${term.line}`);
       assert.ok(!lockedIds.has(card.id), `unreachable: ${card.id} was checked above`);
+      if (!PLAYER_CARDS.some((p) => p.id === card.id)) continue;
+      for (const owners of namesOf(card).flatMap((n) => ownersAtEachMention(term.line, n))) {
+        if (owners.length === 0) {
+          for (const cls of CLASSES) {
+            if (!holdable.get(cls.id)!.has(card.id)) {
+              wrong.push(
+                `the ${term.name} tooltip names the ${card.name} (${card.id}) plainly, and the ${cls.name} ` +
+                  `cannot hold it at a fresh profile`,
+              );
+            }
+          }
+          continue;
+        }
+        for (const id of owners) {
+          const cls = CLASSES.find((c) => c.id === id)!;
+          if (!cls.startingDeck.includes(card.id)) {
+            wrong.push(
+              `the ${term.name} tooltip gives the ${card.name} (${card.id}) to the ${cls.name}, which does ` +
+                `not start with it`,
+            );
+          }
+        }
+      }
     }
-    const tribalOnOffer = PLAYER_CARDS.some(
-      (c) => c.tribe === tribe && !lockedIds.has(c.id) && c.traits.some(isTribalTrait),
+    const tribalForEveryClass = PLAYER_CARDS.some(
+      (c) => c.tribe === tribe && c.traits.some(isTribalTrait) && CLASSES.every((cls) => holdable.get(cls.id)!.has(c.id)),
     );
-    if (tribalOnOffer) {
+    if (tribalForEveryClass) {
       assert.ok(
         named.some((c) => c.traits.some(isTribalTrait)),
-        `A fresh profile can draft a ${term.name} card carrying a tribal trait, and the ${term.name} ` +
-          `tooltip names none - the one card that makes the race a rule:\n\n${term.line}`,
+        `Every class can draft a ${term.name} card carrying a tribal trait at a fresh profile, and the ` +
+          `${term.name} tooltip names none - the one card that makes the race a rule:\n\n${term.line}`,
       );
     }
   }
+  assert.deepEqual(
+    wrong,
+    [],
+    `The race tooltips are one sentence for every class, and one of them is not true for some class. ` +
+      `Name a card plainly only when every class can hold it at a fresh profile, and otherwise as the ` +
+      `class that starts with it, as src/render/glossary.ts derives them.`,
+  );
+  // The words were read, not skipped: the sentences as shipped give at least
+  // one card to a class, so the possessive half above was asked something.
+  assert.ok(
+    Object.values(TRIBE_TERMS).some((t) =>
+      PLAYER_CARDS.some((c) => namesOf(c).some((n) => ownersAtEachMention(t.line, n).some((o) => o.length > 0))),
+    ),
+    'no race tooltip gives any card to a class, so the check that each such card is that class’s starter never ran',
+  );
 });
 
 /** Every `.ts` file under `dir`, and every `.html`, repo-relative with forward slashes. */

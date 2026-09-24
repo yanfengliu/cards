@@ -2,7 +2,7 @@
 
 A single-player roguelike deckbuilder where your line of adventurers fights **without taking orders**.
 
-You spend three energy a turn adding units to a line, casting spells, and equipping your hero. Then you commit, and the line resolves left to right on its own — each unit acting, and often changing what the unit beside it does. Your hero swings last, so whatever the line hands forward lands on the hero's attack.
+You spend three energy a turn adding units to a line. Then you commit, and the line resolves left to right on its own — each unit acting, and often changing what the unit beside it does. Your hero swings last, so whatever the line hands forward lands on the hero's attack.
 
 Attacks pick their targets at random, so you never choose who gets hit. What you do choose is how your damage is *packaged* — and because armour is subtracted from every attack while overkill is wasted, concentrating and spreading are both right, against different enemies. That choice is the game.
 
@@ -20,7 +20,7 @@ Races are rules, not just colours: some cards read the race of the cards standin
 
 Something survives a run, too: finishing one adds cards and sigils to the pool every later run drafts from. Unlocks widen what a run can be, never how strong it is - there is no permanent bonus anywhere, and every run is winnable from the first one. The Collection button says what you have and what opens the rest.
 
-What is still missing is most of the content: the card pool is a few dozen cards against a design that implies hundreds.
+What is still missing is most of the content: the card pool is a few dozen cards against a design that implies hundreds, and the rules' spells and hero equipment are in no deck you can play yet.
 
 Every number in the design is a reasoned starting guess, not a balanced value.
 
@@ -29,6 +29,7 @@ Every number in the design is a reasoned starting guess, not a balanced value.
 - [Work unit 3](docs/work/3_playable-fight/plan.md) — the fight screen, and what a fight is actually like to play.
 - [Work unit 5](docs/work/5_run-structure/plan.md) — the run: the map, the acts, and where runs end.
 - [Work unit 8](docs/work/8_playable-run/plan.md) — the run on screen, and what a whole run is like to play.
+- [Work unit 9](docs/work/9_sigils/plan.md) — sigils, which give a card a trait or the hero a lasting edge for the rest of the run.
 - [Work unit 10](docs/work/10_classes/plan.md) — the three classes, and how differently each one plays.
 - [Work unit 11](docs/work/11_tribes/plan.md) — races become rules, and the traits that read them.
 - [Work unit 12](docs/work/12_unlocks/plan.md) — what survives a run, and why it is never power.
@@ -54,7 +55,7 @@ A single fight, on its own, is still addressable: `?encounter=hard&seed=42&theme
 npm test            # rules, the design's worked example, determinism
 npm run measure     # the A/B: does optimal placement beat random placement?
 npm run measure:run # whole runs: win rate per act, where runs end, run length
-npm run gates       # the gates every commit passes, cheapest first; AGENTS.md says what each one proves
+npm run gates       # the gates every commit passes, static checks first; AGENTS.md says what each one proves
 ```
 
 `npm run gates` is what passes before any commit that touches code.
