@@ -54,6 +54,40 @@ Fifteen rows as wanted, with the three self-probes as they must be. Every anchor
 
 **The bound.** The comparison is the enemy hero's Power and Armour and nothing else of the enemy side, beside the hand size and Energy both sides share. F2c1 to F2c3 are what that leaves out, and each passes all seven gates by design; every sentence about the check now says so, in F2 below. The restated pick is held only on the fixture act. And nothing gates the check against being rewritten to ask `encounterFor` again: F1r is that rewrite, and with M1 it passes the whole suite and `verify:run`.
 
+### F3 — the fight watch's tally is held where the right answer is 0 (`8678883`)
+
+**What the review found.** `watchFights` counts, for each kind of fight, how many held a card sigil and how many held a Power or Armour sigil. `verify:run` and the ladder test fail a kind with none of either, which is what stops "every elite and boss fight" reporting "did not run" as "passed". The one test of the count read a fixture boss holding both kinds, where the answer is 1 whether the tally reads the ledger or counts every fight. The review's T1 changes both tests to `>= 0`. At `2b040d9` all seven gates passed it, 288 of 288 tests, and `verify:run` printed 39 and 57 for all four counts, where the true counts are 29 and 48 with a card sigil and 22 and 37 with a Power or Armour sigil. With the review's M2 as well, which gives every enemy card the traits the player's card sigils grant, they still passed.
+
+**What holds it now.** Tests only. The detector test fights three more fixture bosses: one holding no sigil, one holding a card sigil and the Oak - a hero sigil that moves neither Power nor Armour - and one holding the Bulwark alone. Each must tally one fight, counted for exactly the kinds it holds. The instrument test runs `checkRuns` on a window that granted nothing: each kind of fight must have been fought, every count must be 0, and `unheldFightKinds` must name all three kinds. That also holds the sum `checkRuns` makes of each run's tally, which is what `verify:run` prints and fails on.
+
+```
+ok   SELF      wanted UNCONFIRMED got UNCONFIRMED a mutation that cannot compile
+ok   ATTRIB    wanted UNCONFIRMED got UNCONFIRMED T1 under the name of a test it does NOT break (the pick test reads no tally)
+ok   POSITIVE  wanted RED         got RED         the same mutation, T1, under the name of a test it DOES break
+```
+
+`SELF` is a syntax error in `watchFights`. `ATTRIB` names the pick test; `POSITIVE` names the detector test. Blinded, `SELF` came back `CRASHED`, `POSITIVE` came back `UNCONFIRMED`, and the runner exited 2 before any mutation ran. T1 and M2 are the review's, restated byte for byte from its runner.
+
+| # | mutation | command | the failure |
+|---|---|---|---|
+| F3a | T1: both tests `>= 0`, so every fight counts as holding both kinds | `test/sigils.test.ts` | the detector test: `a boss fought holding no sigil` |
+| F3b | T1 | `test/sigils.test.ts` | the instrument test: `fight: 7 fight(s) counted with a card sigil where none was granted`, `7 !== 0` |
+| F3g | T1 | `npm run gates` | `"test" failed (exit 1), so the chain stops here and did not run verify, verify:run` — exit 1, where the review saw exit 0 at `2b040d9` |
+| F3m | T1 with M2 | `npm run gates` | `"test" failed (exit 1)` — exit 1, where the review saw exit 0 at `2b040d9` |
+| F3c | T1's card half alone | `test/sigils.test.ts` | the detector test: `a boss fought holding no sigil` |
+| F3h | T1's Power or Armour half alone | `test/sigils.test.ts` | the detector test: `a boss fought holding no sigil` |
+| F3o | every hero sigil counted, the Oak included | `test/sigils.test.ts` | the detector test: `a boss fought holding a card sigil and the Oak, which moves neither Power nor Armour` |
+| F3r | the Armour half dropped from the count | `test/sigils.test.ts` | the detector test: `a boss fought holding the Bulwark and no card sigil` |
+| F3s | `checkRuns` adds each run's fights, not its card-sigil fights, to the card-sigil count | `test/sigils.test.ts` | the instrument test: `fight: 7 fight(s) counted with a card sigil where none was granted` |
+| F3vc | **control**: T1 | `npm run verify:run` | GREEN, as wanted, printing `39 elites and 57 bosses had a card sigil in the deck and 39 and 57 a Power or Armour sigil in the ledger`: it prints its counts and cannot see them wrong |
+| F3lc | **control**: T1 | `test/classes.test.ts` | GREEN, as wanted, for the same reason |
+
+Eleven rows as wanted, with the three self-probes as they must be. Every anchor matched once. After the last restore the copy's `src/run/sigils.ts` (`558333c8…`), `src/sim/runmeasure.ts` (`be8ce92a…`) and `src/run/deck.ts` (`f7f0af8f…`) hashed the same as the worktree at `8678883`.
+
+**What did not move.** `verify:run` at `8678883` prints 29 elites and 48 bosses with a card sigil and 22 and 37 with a Power or Armour sigil, as at `2b040d9`. None of its counts was over-reported before this round, so none was corrected.
+
+**The bound.** The tally is held on four fixture bosses and on one fixture window of five runs. Whether a shipped window's counts are right is read, not gated, which F3vc and F3lc show.
+
 ## 2026-09-23 — closing the final acceptance review of `907c8e9`: a check that held one setup and was named for every fight
 
 On branch `worktree-agent-ae84844a610590c1d`, cut from `907c8e9`, whose suite is **286 tests**. The review found the code acceptable and the record not: its sentences said more than its gates checked. Each finding below is its own commit and its own section, with the revision its rows were taken at.
