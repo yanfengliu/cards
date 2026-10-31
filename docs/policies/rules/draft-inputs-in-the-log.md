@@ -1,0 +1,9 @@
+# Every input to the draft is in the log, or the log is a different run wearing its seed
+
+One of [cards' local rules](../local-rules.md).
+
+A `RunLog` is a seed and a list of indices. Everything those indices point at is recomputed at replay, so **anything that decides what is on a shelf is an input to the run and belongs in the log beside the seed** - not read from a module, a profile or the day's content. Unit 10 learned the first half of this with the class and put `classId` in the log. Unit 12 learned the second with unlocks and put `unlocked` there, as the *pair* of lists that fully describes the filter - what was gated and what was owned - so the narrowing never has to consult today's `src/content/unlocks.ts` and a content change cannot silently redraw an old log's shelves.
+
+**Why.** `replayRun` narrowing the pool by whatever the player has unlocked *now* would make a reward pick of index 1 name a different card, and the replay would reach a different run and report success. The failure is not hypothetical: with `replayRun` reading `null` instead of the log's set, `test/unlocks.test.ts` fails on seed 1 with `run pool: no deck instance "u_berserker#14" in this run's deck` - the wider shelf handed the run a card the deck never minted. That is mutation M1 in `docs/learning/gate-proofs.md`.
+
+**Bound.** This covers inputs the *replay* consumes. A run's hero, deck and pool come from the class; its shelves come from the run stream and the content narrowed by the unlock set; both are now in the log. It does not cover content drift, which is the entry above and is still a standing cost: a log pins the ids it drafted from, not the weights they were drawn at. The gate is `a run replays from the unlock set in its log, not from what is unlocked now` in `test/unlocks.test.ts`, over 12 seeds x 2 route styles, plus `a golden log from before unlocks replays untouched, and names no unlock set` for the logs that predate the field.
