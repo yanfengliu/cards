@@ -8,7 +8,7 @@ Non-goals: multiplayer, live-service economy, real-money purchases, and a collec
 
 Stack: TypeScript on Node 24 (`.nvmrc`), browser front end. Node runs the `.ts` sources directly by stripping their types, so there is no build step and no compiled artifact to fall out of sync. What exists today is a whole run playable in the browser: a headless deterministic rules engine (`src/engine/`) under a run layer (`src/run/`), both fed by data in `src/content/` and measured headlessly by `src/sim/`, drawn by an SVG heraldry renderer (`src/render/`) and played through the browser UI in `src/ui/`. A run starts at a class pick, crosses three acts of branching map with fights, rewards, sigils, shops, events and rests, and can earn unlocks that widen the pool every later run drafts from. Gates below say what exists today; each grows its real command in the same commit that introduces the tool, and a Gate is never written ahead of the command that satisfies it.
 
-This repo's own rules live in [docs/policies/local-rules.md](docs/policies/local-rules.md). They add repository constraints consistent with the Fleet Orchestration Policy below.
+This repo's own rules live in [docs/policies/local-rules.md](docs/policies/local-rules.md). They add repository constraints consistent with the fleet constitution below.
 
 <!-- FLEET-CANON:BEGIN sha=b0a069afa8a5 generated from ../fleet/FLEET.md by `npm run sync-canon` — do not edit inside this block; this repo's own rules go in docs/policies/local-rules.md -->
 ## Fleet constitution
@@ -63,7 +63,7 @@ Each line is a gate and what it checks. [docs/policies/gates.md](docs/policies/g
 - **`npm run gate:work-plans`** fails when a `plan.md` under `docs/work/` is one `work-docs.mjs create` would refuse.
 - **`npm run verify`** re-runs the placement measurement over 400 seeds at the `even` encounter and exits non-zero on any of four things.
 - **`npm run verify:run`** re-runs the whole-run measurement over 200 seeds and exits non-zero on any of eleven things.
-- **`npm run audit`** (`npm audit --audit-level=high`) is the dependency-audit gate canon requires; re-run it on any dependency change.
+- **`npm run audit`** (`npm audit --audit-level=high`) is the dependency-audit gate; re-run it on any dependency change.
 - **There is no lint gate and no format gate, because this repo has no linter and no formatter.** Do not write either line here until the tool is installed and has been run once. A Gate written ahead of its command is the specific failure this section exists to prevent.
 - A change to `docs/design/` restates the affected rule as a concrete play example — the exact sequence, the numbers, the resulting board — because a mechanic that cannot be walked through by hand is not yet specified. `npm run sync-canon` from `../fleet` must stay green when this file changes.
 - Simulation is this repo's instrument, and it has three runners: `npm run measure` (is placement a decision, at four preset encounters), `npm run measure:run` (how far a whole run gets), and `npm run measure:ablate` (what each cascade trait is worth, at a baseline matched by reading the enemy hero's Health as a continuous dial). One of them is the first probe for any balance or rules question, and a scratch script that re-implements combat instead of calling it is not evidence.
